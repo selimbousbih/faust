@@ -34,6 +34,7 @@
 #include "compatibility.hh"
 #include "errormsg.hh"
 #include "eval.hh"
+#include "environment.hh"
 #include "exception.hh"
 #include "global.hh"
 #include "names.hh"
@@ -41,7 +42,6 @@
 #include "ppbox.hh"
 #include "propagate.hh"
 #include "property.hh"
-#include "signals.hh"
 #include "simplify.hh"
 #include "xtended.hh"
 
@@ -80,6 +80,9 @@ static Tree listn(int n, Tree e);
 
 static Tree boxSimplification(Tree box);
 
+static void setNumericProperty(Tree t, Tree num);
+static bool getNumericProperty(Tree t, Tree& num);
+
 // Public Interface
 //----------------------
 
@@ -87,7 +90,7 @@ static Tree boxSimplification(Tree box);
  * Eval "process" from a list of definitions.
  *
  * Strict evaluation of a block diagram expression by applying beta reduction.
- * @param eqlist a list of faust defintions forming the the global environment
+ * @param eqlist a list of Faust definitions forming the global environment
  * @return the process block diagram in normal form
  */
 Tree evalprocess(Tree eqlist)
@@ -107,6 +110,26 @@ Tree evalprocess(Tree eqlist)
 Tree evaldocexpr(Tree docexpr, Tree eqlist)
 {
     return a2sb(eval(docexpr, gGlobal->nil, pushMultiClosureDefs(eqlist, gGlobal->nil, gGlobal->nil)));
+}
+
+/**
+ * Simplify a block-diagram pattern by computing its numerical sub-expressions
+ * \param pattern an evaluated block-diagram
+ * \return a simplified pattern
+ *
+ */
+/* uncomment for debugging output */
+//#define DEBUG
+Tree simplifyPattern(Tree value)
+{
+    Tree num;
+    if (!getNumericProperty(value, num)) {
+        if (!isBoxNumeric(value, num)) {
+            num = value;
+        }
+        setNumericProperty(value, num);
+    }
+    return num;
 }
 
 // Private Implementation
@@ -172,7 +195,7 @@ static Tree real_a2sb(Tree exp)
 
         } else {
             evalerror(yyfilename, -1, "a2sb : internal error : not an abstraction inside closure (1)", exp);
-            // Never reached...
+            // Never reached since evalerror throws an exception
             return 0;
         }
 
@@ -221,31 +244,31 @@ static bool autoName(Tree exp, Tree& id)
     return true;
 }
 
-bool getArgName(Tree t, Tree& id)
+static bool getArgName(Tree t, Tree& id)
 {
     // return getDefNameProperty(t, id) || autoName(t, id) ;
     return autoName(t, id);
 }
 
 /**
- * set the value of box in the environment env
+ * Set the value of box in the environment env
  * @param box the block diagram we have evaluated
  * @param env the evaluation environment
  * @param value the evaluated block diagram
  */
-void setEvalProperty(Tree box, Tree env, Tree value)
+static void setEvalProperty(Tree box, Tree env, Tree value)
 {
     setProperty(box, tree(gGlobal->EVALPROPERTY, env), value);
 }
 
 /**
- * retrieve the value of box in the environment env
+ * Retrieve the value of box in the environment env
  * @param box the expression we want to retrieve the value
  * @param env the lexical environment
  * @param value the returned value if any
  * @return true if a value already exist
  */
-bool getEvalProperty(Tree box, Tree env, Tree& value)
+static bool getEvalProperty(Tree box, Tree env, Tree& value)
 {
     return getProperty(box, tree(gGlobal->EVALPROPERTY, env), value);
 }
@@ -255,7 +278,7 @@ bool getEvalProperty(Tree box, Tree env, Tree& value)
  *
  * Wrap the realeval function in order to propagate the name property
  * @param exp the expression to evaluate
- * @param visited list of visited definition to detect recursive definitions
+ * @param visited list of visited definitions to detect recursive definitions
  * @param localValEnv the local environment
  * @return a block diagram in normal form
  */
@@ -312,7 +335,6 @@ static bool isNumericalTuple(Tree box, siglist& L)
 
 static Tree realeval(Tree exp, Tree visited, Tree localValEnv)
 {
-    // Tree 	def;
     Tree fun;
     Tree arg;
     Tree var, num, chan, body, ldef, ins, outs, routes;
@@ -347,7 +369,7 @@ static Tree realeval(Tree exp, Tree visited, Tree localValEnv)
         siglist  lsig;
         // try a numerical simplification of expressions of type 2,3:+
         if (isNumericalTuple(a1, lsig) && (xxt || isBoxWire(a2) || isBoxPrim1(a2) || isBoxPrim2(a2))) {
-            // check that re is well typed before try to simplify it
+            // check that re is well typed before trying to simplify it
             int n, m;
             getBoxType(re, &n, &m);
 
@@ -547,10 +569,10 @@ static Tree realeval(Tree exp, Tree visited, Tree localValEnv)
 
         // static
     } else if (isBoxInputs(exp, body)) {
-        int  ins, outs;
+        int  ins1, outs1;
         Tree b = a2sb(eval(body, visited, localValEnv));
-        if (getBoxType(b, &ins, &outs)) {
-            return boxInt(ins);
+        if (getBoxType(b, &ins1, &outs1)) {
+            return boxInt(ins1);
         } else {
             stringstream error;
             error << "ERROR : can't evaluate ' : " << *exp << endl;
@@ -558,10 +580,10 @@ static Tree realeval(Tree exp, Tree visited, Tree localValEnv)
         }
 
     } else if (isBoxOutputs(exp, body)) {
-        int  ins, outs;
+        int  ins1, outs1;
         Tree b = a2sb(eval(body, visited, localValEnv));
-        if (getBoxType(b, &ins, &outs)) {
-            return boxInt(outs);
+        if (getBoxType(b, &ins1, &outs1)) {
+            return boxInt(outs1);
         } else {
             stringstream error;
             error << "ERROR : can't evaluate ' : " << *exp << endl;
@@ -632,7 +654,7 @@ static Tree realeval(Tree exp, Tree visited, Tree localValEnv)
         throw faustexception(error.str());
     }
 
-    return NULL;
+    return nullptr;
 }
 
 /* Deconstruct a (BDA) op pattern (YO). */
@@ -648,34 +670,14 @@ static inline bool isBoxPatternOp(Tree box, Node& n, Tree& t1, Tree& t2)
     }
 }
 
-void setNumericProperty(Tree t, Tree num)
+static void setNumericProperty(Tree t, Tree num)
 {
     setProperty(t, gGlobal->NUMERICPROPERTY, num);
 }
 
-bool getNumericProperty(Tree t, Tree& num)
+static bool getNumericProperty(Tree t, Tree& num)
 {
     return getProperty(t, gGlobal->NUMERICPROPERTY, num);
-}
-
-/**
- * Simplify a block-diagram pattern by computing its numerical sub-expressions
- * \param pattern an evaluated block-diagram
- * \return a simplified pattern
- *
- */
-/* uncomment for debugging output */
-//#define DEBUG
-Tree simplifyPattern(Tree value)
-{
-    Tree num;
-    if (!getNumericProperty(value, num)) {
-        if (!isBoxNumeric(value, num)) {
-            num = value;
-        }
-        setNumericProperty(value, num);
-    }
-    return num;
 }
 
 static bool isBoxNumeric(Tree in, Tree& out)
@@ -739,11 +741,12 @@ static Tree patternSimplification(Tree pattern)
  */
 static double eval2double(Tree exp, Tree visited, Tree localValEnv)
 {
-    Tree diagram = a2sb(eval(exp, visited, localValEnv));  // pour getBoxType
+    Tree diagram = a2sb(eval(exp, visited, localValEnv));  // For getBoxType
     int  numInputs, numOutputs;
     getBoxType(diagram, &numInputs, &numOutputs);
     if ((numInputs > 0) || (numOutputs != 1)) {
         evalerror(yyfilename, yylineno, "not a constant expression of type : (0->1)", exp);
+        // Never reached since evalerror throws an exception
         return 1;
     } else {
         Tree lsignals = boxPropagateSig(gGlobal->nil, diagram, makeSigInputList(numInputs));
@@ -773,6 +776,7 @@ static int eval2int(Tree exp, Tree visited, Tree localValEnv)
     getBoxType(diagram, &numInputs, &numOutputs);
     if ((numInputs > 0) || (numOutputs != 1)) {
         evalerror(yyfilename, yylineno, "not a constant expression of type : (0->1)", exp);
+        // Never reached since evalerror throws an exception
         return 1;
     } else {
         Tree lsignals = boxPropagateSig(gGlobal->nil, diagram, makeSigInputList(numInputs));
@@ -782,38 +786,6 @@ static int eval2int(Tree exp, Tree visited, Tree localValEnv)
     }
 }
 
-/**
- * Eval a block diagram to a list of int.
- *
- * Eval a block diagram that represent a list/tree of integer constants. This function first eval
- * a block diagram to its normal form, then check it represent a numerical value (a
- * block diagram of type : 0->n) then do a symbolic propagation and try to convert the
- * resulting signal to a list of int.
- * @param exp the expression to evaluate
- * @param globalDefEnv the global environment
- * @param visited list of visited definition to detect recursive definitions
- * @param localValEnv the local environment
- * @return a block diagram in normal form
- */
-/*
-static Tree eval2listint(Tree exp, Tree visited, Tree localValEnv, vector<int>& v)
-{
-    Tree diagram = a2sb(eval(exp, visited, localValEnv));  // pour getBoxType()
-    int  numInputs, numOutputs;
-    getBoxType(diagram, &numInputs, &numOutputs);
-
-    if (numInputs == 0) {
-        Tree lsignals = boxPropagateSig(gGlobal->nil, diagram, makeSigInputList(numInputs));
-        // cerr << "simplify 739" << endl;
-        Tree val = simplify(hd(lsignals));
-        return tree2int(val);
-
-    } else {
-        evalerror(yyfilename, yylineno, "not a constant expression of type : (0->n)", exp);
-        return 1;
-    }
-}
-*/
 static bool isDigitChar(char c)
 {
     return (c >= '0') & (c <= '9');
@@ -849,47 +821,44 @@ static string evalLabel(const char* src, Tree visited, Tree localValEnv)
     string format;     // current format
 
     while (state != -1) {
-        char c = *src++;
-
         if (state == 0) {
-            if (c == 0) {
+            if (*src == 0) {
                 state = -1;
-            } else if (c == '%') {
+            } else if (*src == '%') {
                 ident  = "";
                 format = "";
                 state  = 1;
+                src++;
             } else {
-                dst += c;
+                dst += *src++;
                 state = 0;
             }
 
         } else if (state == 1) {
-            if (c == 0) {
-                // fin et pas d'indentifiant, abandon
+            if (*src == 0) {
+                // end and no identifier, stops
                 dst += '%';
                 dst += format;
                 state = -1;
-            } else if (isDigitChar(c)) {
-                format += c;
+            } else if (isDigitChar(*src)) {
+                format += *src++;
                 state = 1;
-            } else if (isIdentChar(c)) {
-                ident += c;
+            } else if (isIdentChar(*src)) {
+                ident += *src++;
                 state = 2;
             } else {
-                // caractere de ponctuation et pas d'indentifiant, abandon
+                // punctuation character and no identifier, stops
                 dst += '%';
                 dst += format;
-                src--;
                 state = 0;
             }
 
         } else if (state == 2) {
-            if (isIdentChar(c)) {
-                ident += c;
+            if (isIdentChar(*src)) {
+                ident += *src++;
                 state = 2;
             } else {
                 writeIdentValue(dst, format, ident, visited, localValEnv);
-                src--;
                 state = 0;
             }
 
@@ -976,7 +945,6 @@ static Tree iterateSum(Tree id, int num, Tree body, Tree visited, Tree localValE
     }
 
     Tree res = eval(body, visited, pushValueDef(id, tree(0), localValEnv));
-
     for (int i = 1; i < num; i++) {
         res = boxSeq(boxPar(res, eval(body, visited, pushValueDef(id, tree(i), localValEnv))), boxPrim2(sigAdd));
     }
@@ -1004,7 +972,6 @@ static Tree iterateProd(Tree id, int num, Tree body, Tree visited, Tree localVal
     }
 
     Tree res = eval(body, visited, pushValueDef(id, tree(0), localValEnv));
-
     for (int i = 1; i < num; i++) {
         res = boxSeq(boxPar(res, eval(body, visited, pushValueDef(id, tree(i), localValEnv))), boxPrim2(sigMul));
     }
@@ -1054,7 +1021,7 @@ static bool boxlistOutputs(Tree boxlist, int* outputs)
 #endif
 
 /**
- * repeat n times a wire
+ * Repeat a wire n times
  */
 static Tree nwires(int n)
 {
@@ -1195,7 +1162,7 @@ static Tree applyList(Tree fun, Tree larg)
 
     // Here abstr is an abstraction, we can test the content of abstr
 
-    // try to synthetise a  name from the function name and the argument name
+    // try to synthetise a name from the function name and the argument name
     {
         Tree arg = eval(hd(larg), visited, localValEnv);
         Tree narg;
@@ -1216,8 +1183,6 @@ static Tree applyList(Tree fun, Tree larg)
 }
 
 /**
- * Eval a list of expression in reverse order
- *
  * Eval a list of expressions returning the list of results in reverse order.
  *
  * @param lexp list of expressions to evaluate
@@ -1269,11 +1234,12 @@ static Tree larg2par(Tree larg)
  */
 static Tree evalIdDef(Tree id, Tree visited, Tree lenv)
 {
-    Tree def  = NULL;
-    Tree name = NULL;
+    Tree def  = nullptr;
+    Tree name = nullptr;
 
     // search the environment env for a definition of symbol id
     while (!isNil(lenv) && !getProperty(lenv, id, def)) {
+        faustassert(lenv->arity() > 0);
         lenv = lenv->branch(0);
     }
 
@@ -1415,7 +1381,7 @@ static Tree vec2list(const vector<Tree>& v)
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////
-// further simplification : replace bloc-diagrams that denote constant number by this number
+// Further simplification : replace bloc-diagrams that denote constant number by this number
 /////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 static Tree numericBoxSimplification(Tree box);
@@ -1425,7 +1391,7 @@ static Tree insideBoxSimplification(Tree box);
  * boxSimplification(box) : simplify a block-diagram by replacing expressions
  * denoting a constant number by this number.
  */
-Tree boxSimplification(Tree box)
+static Tree boxSimplification(Tree box)
 {
     Tree simplified;
 
@@ -1435,7 +1401,7 @@ Tree boxSimplification(Tree box)
     } else {
         simplified = numericBoxSimplification(box);
 
-        // transferts name property if any
+        // transfers name property if any
         Tree name;
         if (getDefNameProperty(box, name)) setDefNameProperty(simplified, name);
 
@@ -1449,7 +1415,7 @@ Tree boxSimplification(Tree box)
 /**
  * Try to do a numeric simplification of a block-diagram
  */
-Tree numericBoxSimplification(Tree box)
+static Tree numericBoxSimplification(Tree box)
 {
     int    ins, outs;
     Tree   result;
@@ -1469,16 +1435,16 @@ Tree numericBoxSimplification(Tree box)
             result = box;
         } else {
             // propagate signals to discover if it simplifies to a number
-            int    i;
-            double x;
+            int    i1;
+            double x1;
             Tree   lsignals = boxPropagateSig(gGlobal->nil, box, makeSigInputList(0));
             // cerr << "simplify 1389" << endl;
             Tree s = simplify(hd(lsignals));
 
-            if (isSigReal(s, &x)) {
-                result = boxReal(x);
-            } else if (isSigInt(s, &i)) {
-                result = boxInt(i);
+            if (isSigReal(s, &x1)) {
+                result = boxReal(x1);
+            } else if (isSigInt(s, &i1)) {
+                result = boxInt(i1);
             } else {
                 result = insideBoxSimplification(box);
             }
@@ -1493,7 +1459,7 @@ Tree numericBoxSimplification(Tree box)
 /**
  *  Simplify inside a block-diagram : S[A*B] => S[A]*S[B]
  */
-Tree insideBoxSimplification(Tree box)
+static Tree insideBoxSimplification(Tree box)
 {
     int    i;
     double r;
@@ -1618,7 +1584,6 @@ Tree insideBoxSimplification(Tree box)
 
     else if (isBoxSlot(box)) {
         return box;
-        ;
     }
 
     else if (isBoxSymbolic(box, slot, body)) {
@@ -1663,5 +1628,5 @@ Tree insideBoxSimplification(Tree box)
     stringstream error;
     error << "ERROR in file " << __FILE__ << ':' << __LINE__ << ", unrecognised box expression : " << *box << endl;
     throw faustexception(error.str());
-    return 0;
+    return nullptr;
 }

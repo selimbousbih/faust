@@ -27,6 +27,7 @@
 #include "binop.hh"
 #include "exception.hh"
 #include "tlib.hh"
+#include "export.hh"
 
 using namespace std;
 
@@ -42,31 +43,33 @@ using namespace std;
  */
 ///////////////////////////////////////////////////////////////////////
 
+typedef std::vector<Tree> siglist;
+
 // Constant signals : for all t, x(t)=n
-Tree sigInt(int n);
-Tree sigReal(double n);
+EXPORT Tree sigInt(int n);
+EXPORT Tree sigReal(double n);
 
 bool isSigInt(Tree t, int* i);
 bool isSigReal(Tree t, double* r);
 
-// waveforms
-Tree sigWaveform(const tvec& wf);
+// Waveforms
+EXPORT  Tree sigWaveform(const tvec& wf);
 bool isSigWaveform(Tree s);
 
 // Inputs and outputs
-Tree sigInput(int i);
+EXPORT Tree sigInput(int i);
 Tree sigOutput(int i, Tree t);
 
 bool isSigInput(Tree t, int* i);
 bool isSigOutput(Tree t, int* i, Tree& t0);
 
-// delay
+// Delay
 Tree sigDelay0(Tree t);
 Tree sigDelay1(Tree t);
 bool isSigDelay1(Tree t, Tree& t0);
 
-Tree sigFixDelay(Tree t0, Tree t1);
-bool isSigFixDelay(Tree t, Tree& t0, Tree& t1);
+EXPORT Tree sigDelay(Tree t0, Tree t1);
+bool isSigDelay(Tree t, Tree& t0, Tree& t1);
 
 Tree sigPrefix(Tree t0, Tree t1);
 bool isSigPrefix(Tree t, Tree& t0, Tree& t1);
@@ -75,8 +78,8 @@ Tree sigIota(Tree t0);
 bool isSigIota(Tree t, Tree& t0);
 
 // Int and Double casting
-Tree sigIntCast(Tree t);
-Tree sigFloatCast(Tree t);
+EXPORT Tree sigIntCast(Tree t);
+EXPORT Tree sigFloatCast(Tree t);
 
 bool isSigIntCast(Tree t);
 bool isSigFloatCast(Tree t);
@@ -84,7 +87,7 @@ bool isSigFloatCast(Tree t);
 bool isSigIntCast(Tree t, Tree& x);
 bool isSigFloatCast(Tree t, Tree& x);
 
-// tables
+// Tables
 Tree sigRDTbl(Tree t, Tree i);
 Tree sigWRTbl(Tree id, Tree t, Tree i, Tree s);
 Tree sigTable(Tree id, Tree n, Tree sig);
@@ -96,12 +99,11 @@ bool isSigTable(Tree t, Tree& id, Tree& n, Tree& sig);
 bool isSigGen(Tree t, Tree& content);
 bool isSigGen(Tree t);
 
-Tree sigWriteReadTable(Tree n, Tree init, Tree widx, Tree wsig, Tree ridx);
-Tree sigReadOnlyTable(Tree n, Tree init, Tree ridx);
+EXPORT Tree sigWriteReadTable(Tree n, Tree init, Tree widx, Tree wsig, Tree ridx);
+EXPORT Tree sigReadOnlyTable(Tree n, Tree init, Tree ridx);
 
 // Tables for documentator
 // used to replace real tables for documentation purposes only
-
 Tree sigDocConstantTbl(Tree n, Tree init);
 Tree sigDocWriteTbl(Tree n, Tree init, Tree widx, Tree wsig);
 Tree sigDocAccessTbl(Tree doctbl, Tree ridx);
@@ -110,109 +112,91 @@ bool isSigDocConstantTbl(Tree s, Tree& n, Tree& init);
 bool isSigDocWriteTbl(Tree s, Tree& n, Tree& init, Tree& widx, Tree& wsig);
 bool isSigDocAccessTbl(Tree s, Tree& doctbl, Tree& ridx);
 
-// selectors
-
-Tree sigSelect2(Tree selector, Tree s1, Tree s2);
-Tree sigSelect3(Tree selector, Tree s1, Tree s2, Tree s3);
+// Selectors
+EXPORT Tree sigSelect2(Tree selector, Tree s1, Tree s2);
+EXPORT Tree sigSelect3(Tree selector, Tree s1, Tree s2, Tree s3);
 
 bool isSigSelect2(Tree t, Tree& selector, Tree& s1, Tree& s2);
-bool isSigSelect3(Tree t, Tree& selector, Tree& s1, Tree& s2, Tree& s3);
 
-// arithmetical operations
+// Interval annotation
+Tree sigAssertBounds(Tree s1, Tree s2, Tree s3);
+Tree sigLowest(Tree s);
+Tree sigHighest(Tree s);
 
-Tree sigBinOp(int op, Tree x, Tree y);
+bool isSigAssertBounds(Tree t, Tree& s1, Tree& s2, Tree& s3);
+bool isSigLowest(Tree t, Tree& s);
+bool isSigHighest(Tree t, Tree& s);
+
+// Arithmetical operations
+EXPORT Tree sigBinOp(int op, Tree x, Tree y);
 bool isSigBinOp(Tree s, int* op, Tree& x, Tree& y);
 
-// Foreign Functions
-
+// Foreign functions
 Tree sigFFun(Tree ff, Tree largs);
 bool isSigFFun(Tree s, Tree& ff, Tree& largs);
 
-// Foreign Constants
-
-Tree sigFConst(Tree type, Tree name, Tree file);
+// Foreign constants
+EXPORT Tree sigFConst(Tree type, Tree name, Tree file);
 bool isSigFConst(Tree s);
 bool isSigFConst(Tree s, Tree& type, Tree& name, Tree& file);
 
-// Foreign Variables
-
-Tree sigFVar(Tree type, Tree name, Tree file);
+// Foreign variables
+EXPORT Tree sigFVar(Tree type, Tree name, Tree file);
 bool isSigFVar(Tree s);
 bool isSigFVar(Tree s, Tree& type, Tree& name, Tree& file);
 
-// emulation of all fonctions
-inline Tree sigAdd(Tree x, Tree y)
-{
-    return sigBinOp(kAdd, x, y);
-}
-inline Tree sigSub(Tree x, Tree y)
-{
-    return sigBinOp(kSub, x, y);
-}
-inline Tree sigMul(Tree x, Tree y)
-{
-    return sigBinOp(kMul, x, y);
-}
-inline Tree sigDiv(Tree x, Tree y)
-{
-    return sigBinOp(kDiv, x, y);
-}
+// Emulation of all fonctions
+typedef Tree (* sigFun)(Tree, Tree);
+
+EXPORT Tree sigAdd(Tree x, Tree y);
+EXPORT Tree sigSub(Tree x, Tree y);
+EXPORT Tree sigMul(Tree x, Tree y);
+EXPORT Tree sigDiv(Tree x, Tree y);
 Tree sigRem(Tree x, Tree y);
 
-inline Tree sigAND(Tree x, Tree y)
-{
-    return sigBinOp(kAND, x, y);
-}
-inline Tree sigOR(Tree x, Tree y)
-{
-    return sigBinOp(kOR, x, y);
-}
-inline Tree sigXOR(Tree x, Tree y)
-{
-    return sigBinOp(kXOR, x, y);
-}
+EXPORT Tree sigAND(Tree x, Tree y);
+EXPORT Tree sigOR(Tree x, Tree y);
+EXPORT Tree sigXOR(Tree x, Tree y);
+EXPORT Tree sigLeftShift(Tree x, Tree y);
+EXPORT Tree sigLRightShift(Tree x, Tree y);
+EXPORT Tree sigARightShift(Tree x, Tree y);
+EXPORT Tree sigGT(Tree x, Tree y);
+EXPORT Tree sigLT(Tree x, Tree y);
+EXPORT Tree sigGE(Tree x, Tree y);
+EXPORT Tree sigLE(Tree x, Tree y);
+EXPORT Tree sigEQ(Tree x, Tree y);
+EXPORT Tree sigNE(Tree x, Tree y);
 
-inline Tree sigLeftShift(Tree x, Tree y)
-{
-    return sigBinOp(kLsh, x, y);
-}
-inline Tree sigRightShift(Tree x, Tree y)
-{
-    return sigBinOp(kRsh, x, y);
-}
+// Extended math functions
+EXPORT Tree sigAbs(Tree x);
+EXPORT Tree sigAcos(Tree x);
+EXPORT Tree sigTan(Tree x);
+EXPORT Tree sigSqrt(Tree x);
+EXPORT Tree sigSin(Tree x);
+EXPORT Tree sigRint(Tree x);
+EXPORT Tree sigRemainder(Tree x, Tree y);
+EXPORT Tree sigPow(Tree x, Tree y);
+EXPORT Tree sigMin(Tree x, Tree y);
+EXPORT Tree sigMax(Tree x, Tree y);
+EXPORT Tree sigLog(Tree x);
+EXPORT Tree sigLog10(Tree x);
+EXPORT Tree sigFmod(Tree x, Tree y);
+EXPORT Tree sigFloor(Tree x);
+EXPORT Tree sigExp(Tree x);
+EXPORT Tree sigExp10(Tree x);
+EXPORT Tree sigCos(Tree x);
+EXPORT Tree sigCeil(Tree x);
+EXPORT Tree sigAtan(Tree x);
+EXPORT Tree sigAtan2(Tree x, Tree y);
+EXPORT Tree sigAsin(Tree x);
 
-inline Tree sigGT(Tree x, Tree y)
-{
-    return sigBinOp(kGT, x, y);
-}
-inline Tree sigLT(Tree x, Tree y)
-{
-    return sigBinOp(kLT, x, y);
-}
-inline Tree sigGE(Tree x, Tree y)
-{
-    return sigBinOp(kGE, x, y);
-}
-inline Tree sigLE(Tree x, Tree y)
-{
-    return sigBinOp(kLE, x, y);
-}
-inline Tree sigEQ(Tree x, Tree y)
-{
-    return sigBinOp(kEQ, x, y);
-}
-inline Tree sigNE(Tree x, Tree y)
-{
-    return sigBinOp(kNE, x, y);
-}
-
-// pattern matching for old fonctions
+// Pattern matching for old fonctions
 bool isSigAdd(Tree a, Tree& x, Tree& y);
 bool isSigMul(Tree a, Tree& x, Tree& y);
 bool isSigSub(Tree a, Tree& x, Tree& y);
 bool isSigDiv(Tree a, Tree& x, Tree& y);
 
-// operations on tree representing numbers
+// Operations on tree representing numbers
 bool sameMagnitude(Tree a, Tree b);
 
 Tree addNums(Tree a, Tree b);
@@ -222,7 +206,7 @@ Tree divExtendedNums(Tree a, Tree b);
 Tree minusNum(Tree a);
 Tree inverseNum(Tree a);
 
-// tests on constant signals
+// Tests on constant signals
 inline bool isNum(Tree a)
 {
     faustassert(a);
@@ -254,7 +238,7 @@ inline bool isMinusOne(Tree a)
     return isMinusOne(a->node());
 }
 
-// projection for recursive groups
+// Projection for recursive groups
 Tree sigProj(int i, Tree rgroup);
 bool isProj(Tree t, int* i, Tree& rgroup);
 
@@ -278,36 +262,36 @@ inline bool isNum(const Tree& t, num& n)
                              User Interface Elements
 *****************************************************************************/
 
-Tree sigButton(Tree label);
+EXPORT Tree sigButton(Tree label);
 bool isSigButton(Tree s);
 bool isSigButton(Tree s, Tree& label);
 
-Tree sigCheckbox(Tree label);
+EXPORT Tree sigCheckbox(Tree label);
 bool isSigCheckbox(Tree s);
 bool isSigCheckbox(Tree s, Tree& label);
 
-Tree sigVSlider(Tree label, Tree cur, Tree min, Tree max, Tree step);
+EXPORT Tree sigVSlider(Tree label, Tree init, Tree min, Tree max, Tree step);
 bool isSigVSlider(Tree s);
-bool isSigVSlider(Tree s, Tree& label, Tree& cur, Tree& min, Tree& max, Tree& step);
+bool isSigVSlider(Tree s, Tree& label, Tree& init, Tree& min, Tree& max, Tree& step);
 
-Tree sigHSlider(Tree label, Tree cur, Tree min, Tree max, Tree step);
+EXPORT Tree sigHSlider(Tree label, Tree init, Tree min, Tree max, Tree step);
 bool isSigHSlider(Tree s);
-bool isSigHSlider(Tree s, Tree& label, Tree& cur, Tree& min, Tree& max, Tree& step);
+bool isSigHSlider(Tree s, Tree& label, Tree& init, Tree& min, Tree& max, Tree& step);
 
-Tree sigNumEntry(Tree label, Tree cur, Tree min, Tree max, Tree step);
+EXPORT Tree sigNumEntry(Tree label, Tree init, Tree min, Tree max, Tree step);
 bool isSigNumEntry(Tree s);
-bool isSigNumEntry(Tree s, Tree& label, Tree& cur, Tree& min, Tree& max, Tree& step);
+bool isSigNumEntry(Tree s, Tree& label, Tree& init, Tree& min, Tree& max, Tree& step);
 
-// output elements
-Tree sigVBargraph(Tree label, Tree min, Tree max, Tree t0);
+// Output elements
+EXPORT Tree sigVBargraph(Tree label, Tree min, Tree max, Tree t0);
 bool isSigVBargraph(Tree s);
 bool isSigVBargraph(Tree s, Tree& label, Tree& min, Tree& max, Tree& t0);
 
-Tree sigHBargraph(Tree label, Tree min, Tree max, Tree t0);
+EXPORT Tree sigHBargraph(Tree label, Tree min, Tree max, Tree t0);
 bool isSigHBargraph(Tree s);
 bool isSigHBargraph(Tree s, Tree& label, Tree& min, Tree& max, Tree& t0);
 
-Tree sigAttach(Tree x, Tree y);
+EXPORT Tree sigAttach(Tree x, Tree y);
 bool isSigAttach(Tree s);
 bool isSigAttach(Tree s, Tree& x, Tree& y);
 
@@ -326,13 +310,13 @@ bool isSigControl(Tree s, Tree& x, Tree& y);
 A boxSounfile(label,c) has 2 inputs and c+3 outputs:
     0   sigSoundfileLength(label, part):  the number of frames of the soundfile part (NK)
     1   sigSoundfileRate(label): the sampling rate encoded in the file (NK)
-    2.. sigSoundfileBuffer(label, c, part, ridx): the cth channel content (RK ou RS)
+    2.. sigSoundfileBuffer(label, c, part, ridx): the cth channel content (RK or RS)
 */
 
-Tree sigSoundfile(Tree label);
-Tree sigSoundfileLength(Tree sf, Tree part);
-Tree sigSoundfileRate(Tree sf, Tree part);
-Tree sigSoundfileBuffer(Tree sf, Tree chan, Tree part, Tree ridx);
+EXPORT Tree sigSoundfile(Tree label);
+EXPORT Tree sigSoundfileLength(Tree sf, Tree part);
+EXPORT Tree sigSoundfileRate(Tree sf, Tree part);
+EXPORT Tree sigSoundfileBuffer(Tree sf, Tree chan, Tree part, Tree ridx);
 
 bool isSigSoundfile(Tree s, Tree& label);
 bool isSigSoundfileLength(Tree s, Tree& sf, Tree& part);
@@ -343,7 +327,7 @@ bool isSigSoundfileBuffer(Tree s, Tree& sf, Tree& chan, Tree& part, Tree& ridx);
                              matrix extension
 *****************************************************************************/
 
-// a tuple of signals is basically a list of signals.
+// A tuple of signals is basically a list of signals.
 // mode = 0 means normal, mode = 1 means blocked
 Tree sigTuple(int mode, Tree ls);
 bool isSigTuple(Tree s, int* mode, Tree& ls);
@@ -353,7 +337,7 @@ bool isSigTuple(Tree s, int* mode, Tree& ls);
 Tree sigTupleAccess(Tree ts, Tree idx);
 bool isSigTupleAccess(Tree s, Tree& ts, Tree& idx);
 
-// create a tuple of signals
+// Create a tuple of signals
 Tree sigCartesianProd(Tree s1, Tree s2);
 
 /*****************************************************************************
@@ -364,10 +348,10 @@ Tree sigCartesianProd(Tree s1, Tree s2);
 Tree sigFTZ(Tree s);
 
 /*****************************************************************************
-                             access to sub signals of a signal
+                             Access to sub signals of a signal
 *****************************************************************************/
 
-int getSubSignals(Tree sig, vector<Tree>& vsigs, bool visitgen = true);
+int getSubSignals(Tree sig, tvec& vsigs, bool visitgen = true);
 
 /**
  * Test if exp is very simple that is it
@@ -378,5 +362,10 @@ int getSubSignals(Tree sig, vector<Tree>& vsigs, bool visitgen = true);
 bool verySimple(Tree exp);
 
 bool sigList2vecInt(Tree ls, vector<int>& v);
+
+/**
+ * Convert an stl vector of signals into a tree list of signals
+ */
+Tree listConvert(const siglist& a);
 
 #endif

@@ -2,8 +2,9 @@
 
 . faustpath
 . faustoptflags
+. usage.sh
 
-CXXFLAGS=$MYGCCFLAGS
+CXXFLAGS+=" $MYGCCFLAGS"  # So that additional CXXFLAGS can be used
 
 ARCHFILE=$FAUSTARCH/netjack-console.cpp
 
@@ -31,15 +32,18 @@ do
     p=$1
 
     if [ $p = "-help" ] || [ $p = "-h" ]; then
-        echo "faust2netjackconsole [-httpd] [-nvoices <num>] [-effect auto|<effect.dsp>] [-midi] [-osc] [additional Faust options (-vec -vs 8...)] <file.dsp>"
-        echo "Use '-httpd' to activate HTTP control"
-        echo "Use '-nvoices <num>' to produce a polyphonic self-contained DSP with <num> voices, ready to be used with MIDI or OSC"
-        echo "Use '-effect <effect.dsp>' to produce a polyphonic DSP connected to a global output effect, ready to be used with MIDI or OSC"
-        echo "Use '-effect auto' to produce a polyphonic DSP connected to a global output effect defined as 'effect' in <file.dsp>, ready to be used with MIDI or OSC"
-        echo "Use '-midi' to activate MIDI control"
-        echo "Use '-osc' to activate OSC control"
+        usage faust2netjackconsole "[options] [Faust options] <file.dsp>"
+        require Jack
+        echo "Compiles Faust programs to NetJack"
+        option
+        options -httpd -osc -midi
+        option "-nvoices <num>"
+        option "-effect <effect.dsp>"
+        option "-effect auto"
+        option "Faust options"
         exit
     fi
+    
     if [ $p = "-nvoices" ]; then
         POLYDEFS="-DPOLY"
         shift
@@ -52,7 +56,7 @@ do
         POLY="POLY2"
         shift
         EFFECT=$1
-   elif [ $p = "-osc" ]; then
+   	elif [ $p = "-osc" ]; then
 	 	OSCDEFS="-DOSCCTRL -lOSCFaust"
     elif [ $p = "-httpd" ]; then
 	 	HTTPDEFS="-DHTTPCTRL -lHTTPDFaust -lmicrohttpd"
@@ -60,7 +64,7 @@ do
         MIDIDEFS="-DMIDICTRL"
     elif [ ${p:0:1} = "-" ]; then
 	    OPTIONS="$OPTIONS $p"
-	elif [[ -f "$p" ]]; then
+	elif [[ -f "$p" ]] && [ ${p: -4} == ".dsp" ]; then
 	    FILES="$FILES $p"
 	else
 	    OPTIONS="$OPTIONS $p"
@@ -107,7 +111,10 @@ EndOfCode
     fi
 
     # compile c++ to binary
-    $CXX $CXXFLAGS "$TMP/${f%.dsp}.cpp" $FAUSTTOOLSFLAGS $ARCHLIB $OSCDEFS $HTTPDEFS $MIDIDEFS $POLYDEFS -o ${f%.dsp} || exit
+    $CXX $CXXFLAGS "$TMP/${f%.dsp}.cpp" $FAUSTTOOLSFLAGS $ARCHLIB $OSCDEFS $HTTPDEFS $MIDIDEFS $POLYDEFS -o "${f%.dsp}" || exit   
+    if [[ $(uname) == Darwin ]]; then
+        codesign --sign - --deep --force "${f%.dsp}"
+    fi   
     rm -rf "$TDR"
 
     # collect binary file name for FaustGIDE

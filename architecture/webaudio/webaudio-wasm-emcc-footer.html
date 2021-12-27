@@ -1,10 +1,13 @@
 
 <script>
     'use strict';
+    
     // Faust part
     if (!window.dspName) window.dspName = "mydsp";
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)(({ latencyHint: 0.00001 }));
+    audioCtx.destination.channelInterpretation = "discrete";
     let audioInput, dspNode, $faustUI;
+    let factory = null;
     let dspOutputHandler = () => {};
 
     // MIDI input handling
@@ -48,20 +51,24 @@
 
     // Audio input handling
     const activateAudioInput = () => {
-        if (!navigator.getUserMedia) {
-            navigator.getUserMedia = navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            const onSuccess = device => {
+                audioInput = audioCtx.createMediaStreamSource(device); // Create an AudioNode from the stream.
+                audioInput.connect(dspNode); // Connect it to the destination.
+            };
+
+            const onError = e => {
+                alert('Error getting audio input');
+                console.error(e);
+                audioInput = null;
+            };
+
+            navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false } })
+                .then(onSuccess)
+                .catch(onError);
+        } else {
+            alert('Audio input API not available');
         }
-        if (!navigator.getUserMedia) alert("Audio input API not available") 
-        const onSuccess = device => {
-            audioInput = audioCtx.createMediaStreamSource(device); // Create an AudioNode from the stream.
-            audioInput.connect(dspNode); // Connect it to the destination.
-        }
-        const onError = e => {
-            alert('Error getting audio input');
-            console.error(e);
-            audioInput = null;
-        }
-        navigator.getUserMedia({ audio: { echoCancellation: false } }, onSuccess, onError);
     }
 
     // Save/Load functions using local storage
@@ -99,9 +106,10 @@
 
     const initDSP = bufferSizeIn => {
         if (typeof WebAssembly === "undefined") return alert("WebAssembly is not supported in this browser !");
-        if (!window[dspName]) return console.error(dspName + " instance not found.");
         const bufferSize = parseInt(bufferSizeIn || 1024);
-        window[dspName].createDSP(audioCtx, bufferSize)
+        if (!window[dspName]) return console.error(dspName + " instance not found.");
+        factory = new window[dspName](audioCtx, "");
+        factory.load()
         .then(dsp => {
             if (!dsp) return console.error("Error in DSP creation.");
             if (dspNode) { // destroy current
@@ -126,6 +134,7 @@
             loadDSPState(); // Load DSP state from local storage
         });
     }
+
     // To activate audio on iOS
     window.addEventListener("touchstart", () => {
         if (audioCtx.state !== "suspended") return;

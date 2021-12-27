@@ -45,23 +45,25 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/raw_ostream.h>
+#include <llvm/Support/Host.h>
 
 using namespace llvm;
-
-#define MakeStructGEP(v1, v2) fBuilder->CreateStructGEP(0, v1, v2);
-#define MakeConstGEP32(type_def, llvm_name) fBuilder->CreateConstGEP2_32(type_def, llvm_name, 0, 0);
-#define MakeIntPtrType() fModule->getDataLayout().getIntPtrType(fModule->getContext())
 
 #define LLVMValue llvm::Value*
 #define LLVMType llvm::Type*
 #define LLVMPtrType llvm::PointerType*
-#define GetIterator(it) &(*(it))
 #define LLVMVecTypes vector<LLVMType>
 #define MapOfTtypes map<Typed::VarType, LLVMType>
+
 #define MakeIdx(beg, end) llvm::ArrayRef<LLVMValue>(beg, end)
 #define MakeArgs(args) llvm::ArrayRef<lLLVMValue>(args)
+#define MakeStructGEP(v1, v2) fBuilder->CreateStructGEP(v1, v2);
+#define MakeConstGEP32(type_def, llvm_name) fBuilder->CreateConstGEP2_32(type_def, llvm_name, 0, 0);
+#define MakeIntPtrType() fModule->getDataLayout().getIntPtrType(fModule->getContext())
+
 #define CreateFuncall(fun, args) fBuilder->CreateCall(fun, makeArrayRef(args))
 #define CreatePhi(type, name) fBuilder->CreatePHI(type, 0, name);
+#define GetIterator(it) &(*(it))
 
 #define dumpLLVM(val)                    \
     {                                    \
@@ -71,7 +73,15 @@ using namespace llvm;
         cout << out_str.str() << endl;   \
     }
 
-// Helper class
+#if defined(LLVM_140)
+    #define ADD_ATTRIBUTE_AT_INDEX(a, b, c) a->addAttributeAtIndex(b, c)
+#else
+    #define ADD_ATTRIBUTE_AT_INDEX(a, b, c) a->addAttribute(b, c)
+#endif
+
+//=============================
+// Helper class handling types
+//=============================
 
 struct LLVMTypeHelper {
     MapOfTtypes fTypeMap;
@@ -83,30 +93,35 @@ struct LLVMTypeHelper {
         fTypeMap[Typed::kFloat]         = getFloatTy();
         fTypeMap[Typed::kFloat_ptr]     = getTyPtr(fTypeMap[Typed::kFloat]);
         fTypeMap[Typed::kFloat_ptr_ptr] = getTyPtr(fTypeMap[Typed::kFloat_ptr]);
+    #if !defined(LLVM_120) && !defined(LLVM_130) && !defined(LLVM_140)
         fTypeMap[Typed::kFloat_vec]     = VectorType::get(fTypeMap[Typed::kFloat], gGlobal->gVecSize);
         fTypeMap[Typed::kFloat_vec_ptr] = getTyPtr(fTypeMap[Typed::kFloat_vec]);
-
+    #endif
         fTypeMap[Typed::kDouble]         = getDoubleTy();
         fTypeMap[Typed::kDouble_ptr]     = getTyPtr(fTypeMap[Typed::kDouble]);
         fTypeMap[Typed::kDouble_ptr_ptr] = getTyPtr(fTypeMap[Typed::kDouble_ptr]);
+    #if !defined(LLVM_120) && !defined(LLVM_130) && !defined(LLVM_140)
         fTypeMap[Typed::kDouble_vec]     = VectorType::get(fTypeMap[Typed::kDouble], gGlobal->gVecSize);
         fTypeMap[Typed::kDouble_vec_ptr] = getTyPtr(fTypeMap[Typed::kDouble_vec]);
-
+    #endif
         fTypeMap[Typed::kInt32]         = getInt32Ty();
         fTypeMap[Typed::kInt32_ptr]     = getTyPtr(fTypeMap[Typed::kInt32]);
+    #if !defined(LLVM_120) && !defined(LLVM_130) && !defined(LLVM_140)
         fTypeMap[Typed::kInt32_vec]     = VectorType::get(fTypeMap[Typed::kInt32], gGlobal->gVecSize);
         fTypeMap[Typed::kInt32_vec_ptr] = getTyPtr(fTypeMap[Typed::kInt32_vec]);
-
+    #endif
         fTypeMap[Typed::kInt64]         = getInt64Ty();
         fTypeMap[Typed::kInt64_ptr]     = getTyPtr(fTypeMap[Typed::kInt64]);
+    #if !defined(LLVM_120) && !defined(LLVM_130) && !defined(LLVM_140)
         fTypeMap[Typed::kInt64_vec]     = VectorType::get(fTypeMap[Typed::kInt64], gGlobal->gVecSize);
         fTypeMap[Typed::kInt64_vec_ptr] = getTyPtr(fTypeMap[Typed::kInt64_vec]);
-
+    #endif
         fTypeMap[Typed::kBool]         = getInt1Ty();
         fTypeMap[Typed::kBool_ptr]     = getTyPtr(fTypeMap[Typed::kBool]);
+    #if !defined(LLVM_120) && !defined(LLVM_130) && !defined(LLVM_140)
         fTypeMap[Typed::kBool_vec]     = VectorType::get(fTypeMap[Typed::kBool], gGlobal->gVecSize);
         fTypeMap[Typed::kBool_vec_ptr] = getTyPtr(fTypeMap[Typed::kBool_vec]);
-
+    #endif
         // Takes the type of internal real
         fTypeMap[Typed::kFloatMacro]         = fTypeMap[itfloat()];
         fTypeMap[Typed::kFloatMacro_ptr]     = getTyPtr(fTypeMap[Typed::kFloatMacro]);
@@ -119,7 +134,7 @@ struct LLVMTypeHelper {
         fTypeMap[Typed::kVoid_ptr_ptr] = getTyPtr(fTypeMap[Typed::kVoid_ptr]);
 
         // External structured type definition
-        for (auto& it : gGlobal->gExternalStructTypes) {
+        for (const auto& it : gGlobal->gExternalStructTypes) {
             LLVMType new_type                         = convertFIRType((it.second)->fType);
             fTypeMap[it.first]                        = new_type;
             fTypeMap[Typed::getPtrFromType(it.first)] = getTyPtr(new_type);
@@ -131,7 +146,7 @@ struct LLVMTypeHelper {
     // Value generation
     LLVMValue genInt1(int num) { return ConstantInt::get(llvm::Type::getInt1Ty(fModule->getContext()), num); }
     LLVMValue genInt32(int num) { return ConstantInt::get(llvm::Type::getInt32Ty(fModule->getContext()), num); }
-    LLVMValue genInt64(long long num) { return ConstantInt::get(llvm::Type::getInt64Ty(fModule->getContext()), num); }
+    LLVMValue genInt64(int64_t num) { return ConstantInt::get(llvm::Type::getInt64Ty(fModule->getContext()), num); }
     LLVMValue genFloat(float num) { return ConstantFP::get(fModule->getContext(), APFloat(num)); }
     LLVMValue genDouble(double num) { return ConstantFP::get(fModule->getContext(), APFloat(num)); }
    
@@ -149,6 +164,7 @@ struct LLVMTypeHelper {
     // Type generation
     LLVMType getFloatTy() { return llvm::Type::getFloatTy(fModule->getContext()); }
     LLVMType getDoubleTy() { return llvm::Type::getDoubleTy(fModule->getContext()); }
+    LLVMType getRealTy() { return fTypeMap[Typed::kFloatMacro]; }
     LLVMType getInt32Ty() { return llvm::Type::getInt32Ty(fModule->getContext()); }
     LLVMType getInt64Ty() { return llvm::Type::getInt64Ty(fModule->getContext()); }
     LLVMType getInt1Ty() { return llvm::Type::getInt1Ty(fModule->getContext()); }
@@ -159,7 +175,11 @@ struct LLVMTypeHelper {
     LLVMType getStructType(const string& name, const LLVMVecTypes& types)
     {
         // We want to have a unique creation for struct types, so check if the given type has already been created
+    #if defined(LLVM_120) || defined(LLVM_130) || defined(LLVM_140)
+        StructType* struct_type = StructType::getTypeByName(fModule->getContext(), name);
+    #else
         StructType* struct_type = fModule->getTypeByName(name);
+    #endif
         if (!struct_type) {
             struct_type = StructType::create(fModule->getContext(), name);
             // Create "packed" struct type to match the size of C++ "packed" defined ones
@@ -169,18 +189,22 @@ struct LLVMTypeHelper {
     }
 
     // Convert FIR types to LLVM types
-    LLVMType convertFIRType(Typed* type)
+    LLVMType convertFIRType(Typed* ext_type)
     {
-        BasicTyped*  basic_typed  = dynamic_cast<BasicTyped*>(type);
-        NamedTyped*  named_typed  = dynamic_cast<NamedTyped*>(type);
-        ArrayTyped*  array_typed  = dynamic_cast<ArrayTyped*>(type);
-        VectorTyped* vector_typed = dynamic_cast<VectorTyped*>(type);
-        StructTyped* struct_typed = dynamic_cast<StructTyped*>(type);
+        BasicTyped*  basic_typed  = dynamic_cast<BasicTyped*>(ext_type);
+        NamedTyped*  named_typed  = dynamic_cast<NamedTyped*>(ext_type);
+        ArrayTyped*  array_typed  = dynamic_cast<ArrayTyped*>(ext_type);
+        VectorTyped* vector_typed = dynamic_cast<VectorTyped*>(ext_type);
+        StructTyped* struct_typed = dynamic_cast<StructTyped*>(ext_type);
 
         if (basic_typed) {
             return fTypeMap[basic_typed->fType];
         } else if (named_typed) {
+        #if defined(LLVM_120) || defined(LLVM_130) || defined(LLVM_140)
+            LLVMType type = StructType::getTypeByName(fModule->getContext(), "struct.dsp" + named_typed->fName);
+        #else
             LLVMType type = fModule->getTypeByName("struct.dsp" + named_typed->fName);
+        #endif
             // Subcontainer type (RWTable...)
             return (type) ? getTyPtr(type) : convertFIRType(named_typed->fType);
         } else if (array_typed) {
@@ -189,15 +213,19 @@ struct LLVMTypeHelper {
                        ? fTypeMap[array_typed->getType()]
                        : ArrayType::get(fTypeMap[Typed::getTypeFromPtr(array_typed->getType())], array_typed->fSize);
         } else if (vector_typed) {
+        #if !defined(LLVM_120) && !defined(LLVM_130) && !defined(LLVM_140)
             return VectorType::get(fTypeMap[vector_typed->fType->fType], vector_typed->fSize);
+        #else
+            faustassert(false);
+            return nullptr;
+        #endif
         } else if (struct_typed) {
             LLVMVecTypes llvm_types;
-            for (auto& it : struct_typed->fFields) {
+            for (const auto& it : struct_typed->fFields) {
                 llvm_types.push_back(convertFIRType(it));
             }
             return getStructType("struct.dsp" + struct_typed->fName, llvm_types);
         } else {
-            
             faustassert(false);
             return nullptr;
         }
@@ -205,7 +233,9 @@ struct LLVMTypeHelper {
 
 };
 
+//=====================
 // LLVM code generator
+//=====================
 
 class LLVMInstVisitor : public InstVisitor, public LLVMTypeHelper {
    protected:
@@ -219,11 +249,15 @@ class LLVMInstVisitor : public InstVisitor, public LLVMTypeHelper {
     map<string, LLVMValue>       fStackVars;    // Variables on the stack
     map<string, GlobalVariable*> fStringTable;  // Global strings
 
-    static list<string> gMathLibTable;
-    
+    list<string> fMathLibTable;                 // All standard math functions
+
+#if defined(LLVM_80) || defined(LLVM_90) || defined(LLVM_100) || defined(LLVM_110) || defined(LLVM_120) || defined(LLVM_130) || defined(LLVM_140)
+    map<string, Intrinsic::ID> fUnaryIntrinsicTable;    // LLVM unary intrinsic
+    map<string, Intrinsic::ID> fBinaryIntrinsicTable;   // LLVM binary intrinsic
+#endif
     void printVarTable()
     {
-        for (auto& it : fStackVars) {
+        for (const auto& it : fStackVars) {
             cout << "Stack var = " << it.first << endl;
         }
     }
@@ -262,10 +296,7 @@ class LLVMInstVisitor : public InstVisitor, public LLVMTypeHelper {
 
     LLVMValue loadArrayAsPointer(LLVMValue variable, bool is_volatile = false)
     {
-        LoadInst* tmp_load = new LoadInst(variable);
-        bool      is_array = isa<ArrayType>(tmp_load->getType());
-        delete tmp_load;
-        if (is_array) {
+        if (isa<ArrayType>(variable->getType()->getPointerElementType())) {
             LLVMValue idx[] = {genInt32(0), genInt32(0)};
             return fBuilder->CreateInBoundsGEP(variable, MakeIdx(idx, idx + 2));
         } else {
@@ -293,71 +324,63 @@ class LLVMInstVisitor : public InstVisitor, public LLVMTypeHelper {
     {
         fTypeMap[Typed::kObj_ptr] = dsp_ptr;
         fAllocaBuilder            = new IRBuilder<>(fModule->getContext());
-
-        if (gMathLibTable.size()) {
-            return;
-        }
-
-        // Integer version
-        gMathLibTable.push_back("abs");
-
+ 
+    #if defined(LLVM_80) || defined(LLVM_90) || defined(LLVM_100) || defined(LLVM_110) || defined(LLVM_120) || defined(LLVM_130) || defined(LLVM_140)
+        
+        /* This does not work in visit(FunCallInst* inst) for intrinsic, which are deactivated for now
+        call_inst->addAttribute(AttributeList::FunctionIndex, Attribute::Builtin);
+        */
+        
+        /*
         // Float version
-        gMathLibTable.push_back("fabsf");
-        gMathLibTable.push_back("acosf");
-        gMathLibTable.push_back("asinf");
-        gMathLibTable.push_back("atanf");
-        gMathLibTable.push_back("atan2f");
-        gMathLibTable.push_back("ceilf");
-        gMathLibTable.push_back("cosf");
-        gMathLibTable.push_back("expf");
-        gMathLibTable.push_back("exp10f");
-        gMathLibTable.push_back("floorf");
-        gMathLibTable.push_back("fmodf");
-        gMathLibTable.push_back("logf");
-        gMathLibTable.push_back("log10f");
-        gMathLibTable.push_back("powf");
-        gMathLibTable.push_back("rintf");
-        gMathLibTable.push_back("roundf");
-        gMathLibTable.push_back("sinf");
-        gMathLibTable.push_back("sqrtf");
-        gMathLibTable.push_back("tanf");
-        
-        // Additional hyperbolic math functions
-        gMathLibTable.push_back("acoshf");
-        gMathLibTable.push_back("asinhf");
-        gMathLibTable.push_back("atanhf");
-        gMathLibTable.push_back("coshf");
-        gMathLibTable.push_back("sinhf");
-        gMathLibTable.push_back("tanhf");
-
+        fUnaryIntrinsicTable["ceilf"] = Intrinsic::ceil;
+        fUnaryIntrinsicTable["cosf"] = Intrinsic::cos;
+        fUnaryIntrinsicTable["expf"] = Intrinsic::exp;
+        fUnaryIntrinsicTable["floorf"] = Intrinsic::floor;
+        fUnaryIntrinsicTable["logf"] = Intrinsic::log;
+        fUnaryIntrinsicTable["log10f"] = Intrinsic::log10;
+        fUnaryIntrinsicTable["rintf"] = Intrinsic::rint;
+        fUnaryIntrinsicTable["roundf"] = Intrinsic::round;
+        fUnaryIntrinsicTable["sqrtf"] = Intrinsic::sqrt;
+        fBinaryIntrinsicTable["powf"] = Intrinsic::pow;
+        fUnaryIntrinsicTable["sinf"] = Intrinsic::sin;
+       
         // Double version
-        gMathLibTable.push_back("fabs");
-        gMathLibTable.push_back("acos");
-        gMathLibTable.push_back("asin");
-        gMathLibTable.push_back("atan");
-        gMathLibTable.push_back("atan2");
-        gMathLibTable.push_back("ceil");
-        gMathLibTable.push_back("cos");
-        gMathLibTable.push_back("exp");
-        gMathLibTable.push_back("exp10");
-        gMathLibTable.push_back("floor");
-        gMathLibTable.push_back("fmod");
-        gMathLibTable.push_back("log");
-        gMathLibTable.push_back("log10");
-        gMathLibTable.push_back("pow");
-        gMathLibTable.push_back("rint");
-        gMathLibTable.push_back("round");
-        gMathLibTable.push_back("sin");
-        gMathLibTable.push_back("sqrt");
-        gMathLibTable.push_back("tan");
+        fUnaryIntrinsicTable["ceil"] = Intrinsic::ceil;
+        fUnaryIntrinsicTable["cos"] = Intrinsic::cos;
+        fUnaryIntrinsicTable["exp"] = Intrinsic::exp;
+        fUnaryIntrinsicTable["floor"] = Intrinsic::floor;
+        fUnaryIntrinsicTable["log"] = Intrinsic::log;
+        fUnaryIntrinsicTable["log10"] = Intrinsic::log10;
+        fUnaryIntrinsicTable["rint"] = Intrinsic::rint;
+        fUnaryIntrinsicTable["round"] = Intrinsic::round;
+        fUnaryIntrinsicTable["sqrt"] = Intrinsic::sqrt;
+        fBinaryIntrinsicTable["pow"] = Intrinsic::pow;
+        fUnaryIntrinsicTable["sin"] = Intrinsic::sin;
+        */
+    #endif
         
-        // Additional hyperbolic math functions
-        gMathLibTable.push_back("acosh");
-        gMathLibTable.push_back("asinh");
-        gMathLibTable.push_back("atanh");
-        gMathLibTable.push_back("cosh");
-        gMathLibTable.push_back("sinh");
-        gMathLibTable.push_back("tanh");
+        fMathLibTable = {
+            // Integer version
+            "abs",
+            
+            // Float version
+            "fabsf", "acosf", "asinf", "atanf",
+            "atan2f", "ceilf", "cosf", "expf",
+            "exp10f", "floorf", "fmodf", "logf",
+            "log10f", "powf", "rintf", "roundf",
+            "sinf", "sqrtf", "tanf", "acoshf", "asinhf",
+            "atanhf", "coshf", "sinhf", "tanhf",
+            
+            // Double version
+            "fabs", "acos","asin", "atan",
+            "atan2", "ceil", "cos", "exp",
+            "exp10", "floor", "fmod", "log",
+            "log10f", "pow", "rint", "round",
+            "sin", "sqrt", "tan", "acosh", "asinh",
+            "atanh", "cosh", "sinh", "tanh"
+        };
+    
     }
 
     virtual ~LLVMInstVisitor() { delete fAllocaBuilder; }
@@ -370,7 +393,8 @@ class LLVMInstVisitor : public InstVisitor, public LLVMTypeHelper {
     {
         // Get LLVM constant string
         LLVMType type_def  = nullptr;
-        return MakeConstGEP32(type_def, addStringConstant(label, type_def));
+        GlobalVariable* var = addStringConstant(label, type_def);
+        return MakeConstGEP32(type_def, var);
     }
 
     //==============
@@ -419,11 +443,11 @@ class LLVMInstVisitor : public InstVisitor, public LLVMTypeHelper {
         // No result in fCurValue
         fCurValue = nullptr;
     }
-
+   
     virtual void visit(DeclareFunInst* inst)
     {
         Function* function = fModule->getFunction(inst->fName);
-
+  
         // Define it
         if (!function) {
             
@@ -437,7 +461,7 @@ class LLVMInstVisitor : public InstVisitor, public LLVMTypeHelper {
 
             // Prepare vector of LLVM types for args
             LLVMVecTypes fun_args_type;
-            for (auto& it : inst->fType->fArgsTypes) {
+            for (const auto& it : inst->fType->fArgsTypes) {
                 fun_args_type.push_back(fTypeMap[it->getType()]);
             }
 
@@ -450,16 +474,22 @@ class LLVMInstVisitor : public InstVisitor, public LLVMTypeHelper {
                                         inst->fName, fModule);
 
             // In order for auto-vectorization to correctly work with vectorizable math functions
-            if (find(gMathLibTable.begin(), gMathLibTable.end(), inst->fName) != gMathLibTable.end()) {
+            if (find(fMathLibTable.begin(), fMathLibTable.end(), inst->fName) != fMathLibTable.end()) {
                 function->setDoesNotAccessMemory();
             }
             function->setDoesNotThrow();
 
-            // Set name for function arguments
+            // Set name and 'noalias' (on pointers) for function arguments
             Function::arg_iterator args = function->arg_begin();
-            for (auto& it : inst->fType->fArgsTypes) {
+            int arg_index = 0;
+            for (const auto& it : inst->fType->fArgsTypes) {
                 LLVMValue arg = GetIterator(args++);
                 arg->setName(it->fName);
+                // Pointers are set with 'noalias' for non paired arguments, which are garantied to be unique
+                if (isPtrType(it->getType()) && !inst->fType->isPairedFunArg(it->fName)) {
+                    function->addParamAttr(arg_index, Attribute::NoAlias);
+                }
+                arg_index++;
             }
 
             // If there is a body, compile it
@@ -680,14 +710,30 @@ class LLVMInstVisitor : public InstVisitor, public LLVMTypeHelper {
     {
         // Compile instruction to be casted, result in fCurValue
         inst->fInst->accept(this);
-        visitCastAux(inst->fType->getType());
+        visitCast(inst->fType->getType());
     }
 
-    void visitCastAux(Typed::VarType type)
+    void visitCast(Typed::VarType type)
     {
         switch (type) {
-            case Typed::kFloat:
+                
+            case Typed::kInt32:
                 if (getCurType() == getInt32Ty()) {
+                    // Nothing to do
+                } else if (getCurType() == getFloatTy() || getCurType() == getDoubleTy()) {
+                    fCurValue = fBuilder->CreateFPToSI(fCurValue, getInt32Ty());
+                } else if (getCurType() == getInt64Ty()) {
+                    fCurValue = fBuilder->CreateTrunc(fCurValue, getInt32Ty());
+                } else if (getCurType()->isPointerTy()) {
+                    // Use BitCast for pointer to kInt32
+                    fCurValue = fBuilder->CreateBitCast(fCurValue, getInt32Ty());
+                } else {
+                    faustassert(false);
+                }
+                break;
+     
+            case Typed::kFloat:
+                if (getCurType() == getInt32Ty() || getCurType() == getInt64Ty()) {
                     fCurValue = fBuilder->CreateSIToFP(fCurValue, getFloatTy());
                 } else if (getCurType() == getFloatTy()) {
                     // Nothing to do
@@ -698,21 +744,8 @@ class LLVMInstVisitor : public InstVisitor, public LLVMTypeHelper {
                 }
                 break;
 
-            case Typed::kInt32:
-                if (getCurType() == getInt32Ty()) {
-                    // Nothing to do
-                } else if (getCurType() == getFloatTy() || getCurType() == getDoubleTy()) {
-                    fCurValue = fBuilder->CreateFPToSI(fCurValue, getInt32Ty());
-                } else if (getCurType()->isPointerTy()) {
-                    // Use BitCast for pointer to kInt32
-                    fCurValue = fBuilder->CreateBitCast(fCurValue, getInt32Ty());
-                } else {
-                    faustassert(false);
-                }
-                break;
-
             case Typed::kDouble:
-                if (getCurType() == getInt32Ty()) {
+                if (getCurType() == getInt32Ty() || getCurType() == getInt64Ty()) {
                     fCurValue = fBuilder->CreateSIToFP(fCurValue, getDoubleTy());
                 } else if (getCurType() == getFloatTy()) {
                     fCurValue = fBuilder->CreateFPExt(fCurValue, getDoubleTy());
@@ -723,19 +756,24 @@ class LLVMInstVisitor : public InstVisitor, public LLVMTypeHelper {
                 }
                 break;
 
+            case Typed::kFloat_ptr:
+            case Typed::kFloat_ptr_ptr:
+            case Typed::kDouble_ptr:
+            case Typed::kDouble_ptr_ptr:
+            case Typed::kInt32_ptr:
+            case Typed::kFloatMacro_ptr:
+            case Typed::kFloatMacro_ptr_ptr:
             case Typed::kObj_ptr:
-                fCurValue = fBuilder->CreateBitCast(fCurValue, fTypeMap[Typed::kObj_ptr]);
-                break;
-
             case Typed::kVoid_ptr:
-                fCurValue = fBuilder->CreateBitCast(fCurValue, fTypeMap[Typed::kVoid_ptr]);
+                fCurValue = fBuilder->CreateBitCast(fCurValue, fTypeMap[type]);
                 break;
-
+                
             case Typed::kUint_ptr:
                 fCurValue = fBuilder->CreatePtrToInt(fCurValue, MakeIntPtrType());
                 break;
 
             case Typed::kQuad:
+            case Typed::kInt64:
             default:
                 faustassert(false);
                 break;
@@ -779,7 +817,7 @@ class LLVMInstVisitor : public InstVisitor, public LLVMTypeHelper {
     {
         // Compile function arguments
         vector<LLVMValue> fun_args;
-        for (auto& it : inst->fArgs) {
+        for (const auto& it : inst->fArgs) {
             // Each argument is compiled and result is in fCurValue
             it->accept(this);
             fun_args.push_back(fCurValue);
@@ -790,25 +828,55 @@ class LLVMInstVisitor : public InstVisitor, public LLVMTypeHelper {
             fCurValue = generateFunPolymorphicMinMax(fun_args[0], fun_args[1], kLT);
         } else if (checkMax(inst->fName) && fun_args.size() == 2) {
             fCurValue = generateFunPolymorphicMinMax(fun_args[0], fun_args[1], kGT);
-        } else {
+    #if defined(LLVM_80) || defined(LLVM_90) || defined(LLVM_100) || defined(LLVM_110) || defined(LLVM_120) || defined(LLVM_130) || defined(LLVM_140)
+        // LLVM unary intrinsic
+        } else if (fUnaryIntrinsicTable.find(inst->fName) != fUnaryIntrinsicTable.end()) {
             
+            CallInst* call_inst = fBuilder->CreateUnaryIntrinsic(fUnaryIntrinsicTable[inst->fName], fun_args[0]);
+            ADD_ATTRIBUTE_AT_INDEX(call_inst, AttributeList::FunctionIndex, Attribute::Builtin);
+            fCurValue = call_inst;
+            
+        // LLVM binary intrinsic
+        } else if (fBinaryIntrinsicTable.find(inst->fName) != fBinaryIntrinsicTable.end()) {
+            
+            CallInst* call_inst = fBuilder->CreateBinaryIntrinsic(fBinaryIntrinsicTable[inst->fName], fun_args[0], fun_args[1]);
+            ADD_ATTRIBUTE_AT_INDEX(call_inst, AttributeList::FunctionIndex, Attribute::Builtin);
+            fCurValue = call_inst;  
+    #endif
+        } else {
             // Get function in the module
             Function* function = fModule->getFunction(gGlobal->getMathFunction(inst->fName));
             faustassert(function);
-
+        
             // Result is function call
-            fCurValue = CreateFuncall(function, fun_args);
+            CallInst* call_inst = CreateFuncall(function, fun_args);
+            ADD_ATTRIBUTE_AT_INDEX(call_inst, AttributeList::FunctionIndex, Attribute::Builtin);
+            fCurValue = call_inst;
         }
     }
-
+    
+    // Strict select
     virtual void visit(Select2Inst* inst)
+    {
+        visitSelect(inst);
+    }
+    
+    /*
+    // Lazy select
+    virtual void visit(Select2Inst* inst)
+    {
+        visitIf(inst);
+    }
+    */
+    
+    // Select that computes both branches
+    void visitSelect(Select2Inst* inst)
     {
         // Compile condition, result in fCurValue
         inst->fCond->accept(this);
-
-        // Convert condition to a bool by comparing to 0
-        LLVMValue cond_value =
-            fBuilder->CreateICmpNE(fCurValue, (getCurType() == getInt64Ty()) ? genInt64(0) : genInt32(0), "ifcond");
+     
+        // Compare condition to 0
+        LLVMValue cond_value = fBuilder->CreateICmp(ICmpInst::ICMP_NE, fCurValue, genInt32(0));
 
         // Compile then branch, result in fCurValue
         inst->fThen->accept(this);
@@ -821,47 +889,115 @@ class LLVMInstVisitor : public InstVisitor, public LLVMTypeHelper {
         // Creates the result
         fCurValue = fBuilder->CreateSelect(cond_value, then_value, else_value);
     }
-
+    
+    /*
+     Select that only computes one branch.
+     
+     This could be implemented using a PHI node (to group the result of the 'then' and 'else' blocks)
+     but is more complicated to do when hierarchical 'select' are compiled.
+     
+     Thus we create a local variable that is written in 'then' and 'else' blocks,
+     and loaded in the 'merge' block.
+     
+     LLVM passes will later one create a unique PHI node that groups all results,
+     especially when hierarchical 'select' are compiled.
+    */
+    virtual void visitIf(Select2Inst* inst)
+    {
+        // Compile condition, result in fCurValue
+        inst->fCond->accept(this);
+        
+        // Compare condition to 0
+        LLVMValue cond_value = fBuilder->CreateICmp(ICmpInst::ICMP_NE, fCurValue, genInt32(0));
+      
+        // Get enclosing function
+        Function* function = fBuilder->GetInsertBlock()->getParent();
+        
+        // Create blocks for the then and else cases. Insert the 'merge_block' block at the end of the function
+        BasicBlock* then_block  = genBlock("select_then_block", function);
+        BasicBlock* else_block  = genBlock("select_else_block");
+        BasicBlock* merge_block = genBlock("select_merge_block");
+        
+        fBuilder->CreateCondBr(cond_value, then_block, else_block);
+        
+        // Emit then block
+        fBuilder->SetInsertPoint(then_block);
+        
+        // Compile then branch
+        inst->fThen->accept(this);
+        
+        // Create typed local variable
+        
+        // Always at the begining since the block is already branched to next one...
+        fAllocaBuilder->SetInsertPoint(GetIterator(fAllocaBuilder->GetInsertBlock()->getFirstInsertionPt()));
+        LLVMValue typed_res = fAllocaBuilder->CreateAlloca(getCurType(), nullptr, "select_res");
+      
+        // "Then" is a BlockInst, result is in fCurValue
+        fBuilder->CreateStore(fCurValue, typed_res);
+        
+        // Branch in merge_block
+        fBuilder->CreateBr(merge_block);
+        
+        // Emit else block
+        function->getBasicBlockList().push_back(else_block);
+        fBuilder->SetInsertPoint(else_block);
+        
+        // Compile else branch
+        inst->fElse->accept(this);
+        
+        // "Else" is a BlockInst, result is in fCurValue
+        fBuilder->CreateStore(fCurValue, typed_res);
+        
+        // Branch in merge_block
+        fBuilder->CreateBr(merge_block);
+        
+        // Emit merge block
+        function->getBasicBlockList().push_back(merge_block);
+        fBuilder->SetInsertPoint(merge_block);
+        
+        // Load result in fCurValue
+        fCurValue = fBuilder->CreateLoad(typed_res);
+    }
+    
     virtual void visit(IfInst* inst)
     {
         // Compile condition, result in fCurValue
         inst->fCond->accept(this);
-
-        // Convert condition to a bool by comparing equal to comp_val value
-        LLVMValue cond_value = fBuilder->CreateICmpEQ(fCurValue, genInt32(1), "ifcond");
-
+  
+        // Compare condition to 0
+        LLVMValue cond_value = fBuilder->CreateICmp(ICmpInst::ICMP_NE, fCurValue, genInt32(0));
+ 
+        // Get enclosing function
         Function* function = fBuilder->GetInsertBlock()->getParent();
 
-        // Create blocks for the then and else cases. Insert the 'then' block at the end of the function
-        BasicBlock* then_block  = genBlock("then_block", function);
-        BasicBlock* else_block  = genBlock("else_block");
-        BasicBlock* merge_block = genBlock("if_end_block");
+        // Create blocks for the then and else cases. Insert the 'merge_block' block at the end of the function
+        BasicBlock* then_block  = genBlock("if_then_block", function);
+        BasicBlock* else_block  = genBlock("if_else_block");
+        BasicBlock* merge_block = genBlock("if_merge_block");
 
         fBuilder->CreateCondBr(cond_value, then_block, else_block);
 
         // Emit then block
         fBuilder->SetInsertPoint(then_block);
 
-        // Compile then branch, result in fCurValue
+        // Compile then branch
         inst->fThen->accept(this);
-        // "Then" is a BlockInst so no result in fCurValue
+        // "Then" is a BlockInst, so no result in fCurValue
 
+        // Branch in merge_block
         fBuilder->CreateBr(merge_block);
-        // Codegen of 'Then' can change the current block, update then_block for the PHI
-        then_block = fBuilder->GetInsertBlock();
-
+    
         // Emit else block
         function->getBasicBlockList().push_back(else_block);
         fBuilder->SetInsertPoint(else_block);
 
-        // Compile else branch, result in fCurValue
+        // Compile else branch
         inst->fElse->accept(this);
-        // "Else" is a BlockInst so no result in fCurValue
+        // "Else" is a BlockInst, so no result in fCurValue
 
+        // Branch in merge_block
         fBuilder->CreateBr(merge_block);
-        // Codegen of 'Else' can change the current block, update else_block for the PHI
-        else_block = fBuilder->GetInsertBlock();
-
+    
         // Emit merge block
         function->getBasicBlockList().push_back(merge_block);
         fBuilder->SetInsertPoint(merge_block);
@@ -919,10 +1055,10 @@ class LLVMInstVisitor : public InstVisitor, public LLVMTypeHelper {
         {
             // Compute end condition, result in fCurValue
             inst->fEnd->accept(this);
-
-            // Convert condition to a bool
-            LLVMValue end_cond = fBuilder->CreateTrunc(fCurValue, fBuilder->getInt1Ty());
-
+   
+            // Compare condition to 0
+            LLVMValue end_cond = fBuilder->CreateICmp(ICmpInst::ICMP_NE, fCurValue, genInt32(0));
+      
             // Insert the conditional branch into the last block of loop
             fBuilder->CreateCondBr(end_cond, loop_body_block, exit_block);
         }
@@ -986,10 +1122,10 @@ class LLVMInstVisitor : public InstVisitor, public LLVMTypeHelper {
 
         // Create the exit_block and insert it
         BasicBlock* exit_block = genBlock("exit_block", function);
-
-        // Convert condition to a bool
-        LLVMValue end_cond = fBuilder->CreateTrunc(fCurValue, fBuilder->getInt1Ty());
-
+ 
+        // Compare condition to 0
+        LLVMValue end_cond = fBuilder->CreateICmp(ICmpInst::ICMP_NE, fCurValue, genInt32(0));
+    
         // Insert the conditional branch into the end of cond_block
         fBuilder->CreateCondBr(end_cond, test_block, exit_block);
 
@@ -1026,9 +1162,8 @@ class LLVMInstVisitor : public InstVisitor, public LLVMTypeHelper {
         }
 
         // Generates block internal code
-        list<StatementInst*>::const_iterator it;
-        for (it = inst->fCode.begin(); it != inst->fCode.end(); it++) {
-            (*it)->accept(this);
+        for (const auto& it : inst->fCode) {
+            it->accept(this);
         }
 
         // No result in fCurValue
@@ -1154,9 +1289,7 @@ class LLVMInstVisitor : public InstVisitor, public LLVMTypeHelper {
         faustassert(arg1->getType() == arg2->getType());
 
         if (arg1->getType() == getFloatTy() || arg1->getType() == getDoubleTy()) {
-            LLVMValue comp_value =
-                fBuilder->CreateFCmp((CmpInst::Predicate)gBinOpTable[comp]->fLLVMFloatInst, arg1, arg2);
-            return fBuilder->CreateSelect(comp_value, arg1, arg2);
+            return (comp == kLT) ? fBuilder->CreateMinNum(arg1, arg2) : fBuilder->CreateMaxNum(arg1, arg2);
         } else if (arg1->getType() == getInt32Ty()) {
             LLVMValue comp_value =
                 fBuilder->CreateICmp((CmpInst::Predicate)gBinOpTable[comp]->fLLVMIntInst, arg1, arg2);

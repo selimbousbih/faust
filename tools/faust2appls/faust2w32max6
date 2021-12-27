@@ -12,8 +12,7 @@
 . faustpath
 . faustoptflags
 
-CXXFLAGS=$MYGCCFLAGS
-CXXFLAGS+=" -fbracket-depth=512"
+CXXFLAGS+=" $MYGCCFLAGS -fbracket-depth=512"  # So that additional CXXFLAGS can be used
 
 POLY=""
 NOPATCH="0"
@@ -73,7 +72,7 @@ for p in $@; do
     	ignore=" "
     elif [ ${p:0:1} = "-" ]; then
 	    OPTIONS="$OPTIONS $p"
-	elif [[ -e "$p" ]]; then
+	elif [[ -f "$p" ]] && [ ${p: -4} == ".dsp" ]; then
 	    FILES="$FILES $p"
 	else
 	    OPTIONS="$OPTIONS $p"
@@ -95,7 +94,7 @@ for p in $FILES; do
     mkdir "$TMP"
 
     # compile faust to c++
-	faust -i -double -a $FAUSTARCH/max-msp/max-msp64.cpp $OPTIONS "$SRCDIR/$f" -o "$TMP/${f%.dsp}.cpp" || exit
+	faust -i -double -cn ${f%.dsp} -uim -a $FAUSTARCH/max-msp/max-msp64.cpp $OPTIONS "$SRCDIR/$f" -o "$TMP/${f%.dsp}.cpp" || exit
 
     # compile c++ to binary
     (

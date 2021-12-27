@@ -42,7 +42,7 @@ class BufferWithRandomAccess : public std::vector<uint8_t> {
     bool debug;
 
    public:
-    BufferWithRandomAccess(bool debug = false) : debug(debug) {}
+    BufferWithRandomAccess(bool dbg = false) : debug(dbg) {}
 
     BufferWithRandomAccess& operator<<(int8_t x)
     {
@@ -224,14 +224,14 @@ class BufferWithRandomAccess : public std::vector<uint8_t> {
     string toString()
     {
         stringstream str;
-        for (auto c : *this) str << c;
+        for (const auto& c : *this) str << c;
         return str.str();
     }
 
     template <typename T>
     void writeTo(T& o)
     {
-        for (auto c : *this) o << c;
+        for (const auto& c : *this) o << c;
     }
 };
 
@@ -250,7 +250,7 @@ inline void finishSectionAux(BufferWithRandomAccess* out, int32_t start)
 
 inline S32LEB type2Binary(Typed::VarType type)
 {
-    if (isIntOrPtrType(type)) {
+    if (isIntOrPtrType(type) || isBoolType(type)) {
         return S32LEB(BinaryConsts::EncodedType::i32);
     } else if (type == Typed::kFloat) {
         return S32LEB(BinaryConsts::EncodedType::f32);
@@ -294,7 +294,6 @@ struct LocalVariableCounter : public DispatchVisitor {
         string         name = inst->fAddress->getName();
         Typed::VarType type = inst->fType->getType();
 
-        // std::cout << "WASMInstVisitor::DeclareVarInst " << name << std::endl;
         faustassert(fLocalVarTable.find(name) == fLocalVarTable.end());
 
         // stack/loop variables accessed by [var_num, type] pairs
@@ -316,7 +315,7 @@ struct LocalVariableCounter : public DispatchVisitor {
     virtual void visit(DeclareFunInst* inst)
     {
         // funarg variable accessed by [var_num, type] pairs
-        for (auto& argType : inst->fType->fArgsTypes) {
+        for (const auto& argType : inst->fType->fArgsTypes) {
             fLocalVarTable[argType->fName] = LocalVarDesc(fFunArgIndex++, argType->fType->getType(), Address::kFunArgs);
         }
 
@@ -352,7 +351,7 @@ struct LocalVariableCounter : public DispatchVisitor {
     void dump()
     {
         std::cout << "===== LocalVariableCounter begin =====" << std::endl;
-        for (auto& varDesc : fLocalVarTable) {
+        for (const auto& varDesc : fLocalVarTable) {
             std::cout << "varDesc " << varDesc.first << " index = " << varDesc.second.fIndex
                       << " type = " << Typed::gTypeString[varDesc.second.fType] << std::endl;
         }
@@ -455,10 +454,11 @@ struct FunAndTypeCounter : public DispatchVisitor, public WASInst {
 
     virtual void visit(DeclareVarInst* inst)
     {
-        bool is_struct =
-            (inst->fAddress->getAccess() & Address::kStruct) || (inst->fAddress->getAccess() & Address::kStaticStruct);
+        bool is_struct = (inst->fAddress->getAccess() & Address::kStruct)
+                        || (inst->fAddress->getAccess() & Address::kStaticStruct);
+        
         ArrayTyped* array_typed = dynamic_cast<ArrayTyped*>(inst->fType);
-        string      name        = inst->fAddress->getName();
+        string name = inst->fAddress->getName();
 
         if (array_typed && array_typed->fSize > 1) {
             if (is_struct) {
@@ -486,38 +486,33 @@ struct FunAndTypeCounter : public DispatchVisitor, public WASInst {
         if (fFunctionSymbolTable.find(inst->fName) != fFunctionSymbolTable.end()) {
             return;
         } else {
-            fFunctionSymbolTable[inst->fName] = 1;
+            fFunctionSymbolTable[inst->fName] = true;
         }
 
         // Math library functions are part of the 'global' module, 'fmod', 'log10' and 'remainder'
         // will be manually generated
         if (fMathLibTable.find(inst->fName) != fMathLibTable.end()) {
-            faustassert(fMathLibTable.find(inst->fName) != fMathLibTable.end());
             MathFunDesc desc = fMathLibTable[inst->fName];
 
             if (desc.fMode == MathFunDesc::Gen::kExtMath || desc.fMode == MathFunDesc::Gen::kExtWAS) {
+                
                 // Build function type (args type same as return type)
                 list<NamedTyped*> args;
                 if (desc.fArgs == 1) {
-                    args.push_back(InstBuilder::genNamedTyped(gGlobal->getFreshID("v1"), desc.fType));
+                    args.push_back(InstBuilder::genNamedTyped(gGlobal->getFreshID("v1"), desc.fTypeIn));
                 } else if (desc.fArgs == 2) {
-                    args.push_back(InstBuilder::genNamedTyped(gGlobal->getFreshID("v1"), desc.fType));
-                    args.push_back(InstBuilder::genNamedTyped(gGlobal->getFreshID("v2"), desc.fType));
+                    args.push_back(InstBuilder::genNamedTyped(gGlobal->getFreshID("v1"), desc.fTypeIn));
+                    args.push_back(InstBuilder::genNamedTyped(gGlobal->getFreshID("v2"), desc.fTypeIn));
                 } else {
                     faustassert(false);
                 }
 
-                // Args type same as return type
                 FunTyped* fun_type =
-                    InstBuilder::genFunTyped(args, InstBuilder::genBasicTyped(desc.fType), FunTyped::kDefault);
+                    InstBuilder::genFunTyped(args, InstBuilder::genBasicTyped(desc.fTypeOut), FunTyped::kDefault);
                 fFunTypes[inst->fName] = fun_type;
 
                 // Build function import
-                if (desc.fMode == MathFunDesc::Gen::kExtMath || desc.fMode == MathFunDesc::Gen::kExtWAS) {
-                    fFunImports[inst->fName] = std::make_pair("env", desc.fName);
-                } else {
-                    faustassert(false);
-                }
+                fFunImports[inst->fName] = std::make_pair("env", desc.fName);
             }
 
         } else {
@@ -532,7 +527,7 @@ struct FunAndTypeCounter : public DispatchVisitor, public WASInst {
         // If imported function
         if (fFunImports.find(name) != fFunImports.end()) {
             int i = 0;
-            for (auto& import : fFunImports) {
+            for (const auto& import : fFunImports) {
                 if (import.first == name) {
                     return i;
                 }
@@ -541,7 +536,7 @@ struct FunAndTypeCounter : public DispatchVisitor, public WASInst {
             // Otherwise module defined function
         } else {
             int i = int(fFunImports.size());
-            for (auto& type : fFunTypes) {
+            for (const auto& type : fFunTypes) {
                 if (fFunImports.find(type.first) == fFunImports.end()) {
                     if (type.first == name) {
                         return i;
@@ -560,7 +555,7 @@ struct FunAndTypeCounter : public DispatchVisitor, public WASInst {
     int32_t getFunctionTypeIndex(const string& name)
     {
         int i = 0;
-        for (auto& type : fFunTypes) {
+        for (const auto& type : fFunTypes) {
             if (type.first == name) {
                 return i;
             }
@@ -576,7 +571,7 @@ struct FunAndTypeCounter : public DispatchVisitor, public WASInst {
         int32_t start = startSectionAux(out, BinaryConsts::Section::Type);
         *out << U32LEB(uint32_t(fFunTypes.size()));
 
-        for (auto& type_int : fFunTypes) {
+        for (const auto& type_int : fFunTypes) {
             FunTyped* type = type_int.second;
             *out << S32LEB(BinaryConsts::EncodedType::Func);
             *out << U32LEB(uint32_t(type->fArgsTypes.size()));
@@ -610,7 +605,7 @@ struct FunAndTypeCounter : public DispatchVisitor, public WASInst {
                                 // size (shoud be OK for any JSON)
         }
 
-        for (auto& import : fFunImports) {
+        for (const auto& import : fFunImports) {
             *out << import.second.first;  // module
             // Possibly map fastmath functions, emcc compiled functions are prefixed with '_'
             *out << ("_" + gGlobal->getMathFunction(import.first));  // base
@@ -636,7 +631,7 @@ struct FunAndTypeCounter : public DispatchVisitor, public WASInst {
         *out << U32LEB(uint32_t(fFunTypes.size() - fFunImports.size()));
 
         // Module internally defined functions (those not in FunImports)
-        for (auto& type : fFunTypes) {
+        for (const auto& type : fFunTypes) {
             if (fFunImports.find(type.first) == fFunImports.end()) {
                 *out << U32LEB(getFunctionTypeIndex(type.first));
             }
@@ -746,12 +741,12 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
         local_counter.generateStackMap(fOut);
 
         // Index in the dsp
-        *fOut << int8_t(BinaryConsts::GetLocal) << U32LEB(0);  // 0 = dsp
-        *fOut << int8_t(BinaryConsts::GetLocal) << U32LEB(1);  // 1 = index
+        *fOut << int8_t(BinaryConsts::LocalGet) << U32LEB(0);  // 0 = dsp
+        *fOut << int8_t(BinaryConsts::LocalGet) << U32LEB(1);  // 1 = index
         *fOut << int8_t(gBinOpTable[kAdd]->fWasmInt32);
 
         // Value
-        *fOut << int8_t(BinaryConsts::GetLocal) << U32LEB(2);  // 2 = value
+        *fOut << int8_t(BinaryConsts::LocalGet) << U32LEB(2);  // 2 = value
 
         // Store value at index
         *fOut << ((gGlobal->gFloatSize == 1) ? int8_t(BinaryConsts::F32StoreMem) : int8_t(BinaryConsts::F64StoreMem));
@@ -774,8 +769,8 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
         local_counter.generateStackMap(fOut);
 
         // Index in the dsp
-        *fOut << int8_t(BinaryConsts::GetLocal) << U32LEB(0);  // 0 = dsp
-        *fOut << int8_t(BinaryConsts::GetLocal) << U32LEB(1);  // 1 = index
+        *fOut << int8_t(BinaryConsts::LocalGet) << U32LEB(0);  // 0 = dsp
+        *fOut << int8_t(BinaryConsts::LocalGet) << U32LEB(1);  // 1 = index
         *fOut << int8_t(gBinOpTable[kAdd]->fWasmInt32);
 
         // Load value from index
@@ -811,16 +806,25 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
         }
         finishSection(start);
     }
+    
+    virtual void visit(AddSoundfileInst* inst)
+    {
+        // Not supported for now
+        throw faustexception("ERROR : 'soundfile' primitive not yet supported for wasm\n");
+    }
 
     virtual void visit(DeclareVarInst* inst)
     {
-        bool is_struct =
-            (inst->fAddress->getAccess() & Address::kStruct) || (inst->fAddress->getAccess() & Address::kStaticStruct);
+        bool is_struct = (inst->fAddress->getAccess() & Address::kStruct)
+                        || (inst->fAddress->getAccess() & Address::kStaticStruct);
+        
         ArrayTyped* array_typed = dynamic_cast<ArrayTyped*>(inst->fType);
-        string      name        = inst->fAddress->getName();
-
-        // std::cout << "WASMInstVisitor::DeclareVarInst " << name << std::endl;
-        faustassert(fFieldTable.find(name) == fFieldTable.end());
+    
+        // fSampleRate may appear several time (in subcontainers and in main DSP)
+        string name = inst->fAddress->getName();
+        if (name != "fSampleRate") {
+            faustassert(fFieldTable.find(name) == fFieldTable.end());
+        }
 
         if (array_typed && array_typed->fSize > 1) {
             if (is_struct) {
@@ -857,7 +861,7 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
         if (fFunctionSymbolTable.find(inst->fName) != fFunctionSymbolTable.end()) {
             return;
         } else {
-            fFunctionSymbolTable[inst->fName] = 1;
+            fFunctionSymbolTable[inst->fName] = true;
         }
 
         // Generate function body
@@ -900,8 +904,12 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
             if (isRealType(type)) {
                 *fOut << ((gGlobal->gFloatSize == 1) ? int8_t(BinaryConsts::F32LoadMem)
                                                      : int8_t(BinaryConsts::F64LoadMem));
-            } else {
+            } else if (isInt64Type(type)) {
+                *fOut << int8_t(BinaryConsts::I64LoadMem);
+            } else if (isInt32Type(type) || isPtrType(type)) {
                 *fOut << int8_t(BinaryConsts::I32LoadMem);
+            } else {
+                faustassert(false);
             }
             // Possibly used offset (if > 0)
             generateMemoryAccess(offset);
@@ -909,7 +917,7 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
         } else {
             faustassert(fLocalVarTable.find(name) != fLocalVarTable.end());
             LocalVarDesc local = fLocalVarTable[name];
-            *fOut << int8_t(BinaryConsts::GetLocal) << U32LEB(local.fIndex);
+            *fOut << int8_t(BinaryConsts::LocalGet) << U32LEB(local.fIndex);
         }
     }
 
@@ -924,10 +932,10 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
         // All future access simply use a local.get
         if (fTeeMap.find(name) == fTeeMap.end()) {
             inst->fValue->accept(this);
-            *fOut << int8_t(BinaryConsts::TeeLocal) << U32LEB(local.fIndex);
+            *fOut << int8_t(BinaryConsts::LocalTee) << U32LEB(local.fIndex);
             fTeeMap[name] = true;
         } else {
-            *fOut << int8_t(BinaryConsts::GetLocal) << U32LEB(local.fIndex);
+            *fOut << int8_t(BinaryConsts::LocalGet) << U32LEB(local.fIndex);
         }
     }
 
@@ -951,8 +959,12 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
             if (isRealType(type) || isRealPtrType(type)) {
                 *fOut << ((gGlobal->gFloatSize == 1) ? int8_t(BinaryConsts::F32StoreMem)
                                                      : int8_t(BinaryConsts::F64StoreMem));
-            } else {
+            } else if (isInt64Type(type)) {
+                *fOut << int8_t(BinaryConsts::I64StoreMem);
+            } else if (isInt32Type(type) || isPtrType(type) || isBoolType(type)) {
                 *fOut << int8_t(BinaryConsts::I32StoreMem);
+            } else {
+                faustassert(false);
             }
             // Possibly used offset (if > 0)
             generateMemoryAccess(offset);
@@ -961,7 +973,7 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
             faustassert(fLocalVarTable.find(name) != fLocalVarTable.end());
             LocalVarDesc local = fLocalVarTable[name];
             inst->fValue->accept(this);
-            *fOut << int8_t(BinaryConsts::SetLocal) << U32LEB(local.fIndex);
+            *fOut << int8_t(BinaryConsts::LocalSet) << U32LEB(local.fIndex);
         }
     }
 
@@ -973,14 +985,14 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
             if (fFastMemory) {
                 *fOut << int8_t(BinaryConsts::I32Const) << S32LEB(tmp.fOffset);
             } else {
-                *fOut << int8_t(BinaryConsts::GetLocal) << U32LEB(0);  // Assuming $dsp is at 0 local variable index
+                *fOut << int8_t(BinaryConsts::LocalGet) << U32LEB(0);  // Assuming $dsp is at 0 local variable index
                 *fOut << int8_t(BinaryConsts::I32Const) << S32LEB(tmp.fOffset);
                 *fOut << int8_t(WasmOp::I32Add);
             }
         } else {
             faustassert(fLocalVarTable.find(named->getName()) != fLocalVarTable.end());
             LocalVarDesc local = fLocalVarTable[named->getName()];
-            *fOut << int8_t(BinaryConsts::GetLocal) << U32LEB(local.fIndex);
+            *fOut << int8_t(BinaryConsts::LocalGet) << U32LEB(local.fIndex);
         }
     }
 
@@ -995,7 +1007,7 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
             faustassert(num);
             // "inputs" is 'compute' method third parameter, so with index 2
             // "outputs" is 'compute' method fourth parameter, so with index 3
-            *fOut << int8_t(BinaryConsts::GetLocal)
+            *fOut << int8_t(BinaryConsts::LocalGet)
                   << ((startWith(indexed->getName(), "inputs")) ? U32LEB(2) : U32LEB(3));
             *fOut << int8_t(BinaryConsts::I32Const) << S32LEB(num->fNum << 2);
             *fOut << int8_t(WasmOp::I32Add);
@@ -1003,7 +1015,7 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
         } else if ((startWith(indexed->getName(), "input") || startWith(indexed->getName(), "output"))) {
             faustassert(fLocalVarTable.find(indexed->getName()) != fLocalVarTable.end());
             LocalVarDesc local = fLocalVarTable[indexed->getName()];
-            *fOut << int8_t(BinaryConsts::GetLocal) << U32LEB(local.fIndex);
+            *fOut << int8_t(BinaryConsts::LocalGet) << U32LEB(local.fIndex);
             indexed->fIndex->accept(this);
             // If 'i' loop variable moves in bytes, save index code generation of input/output
             if (gGlobal->gLoopVarInBytes) {
@@ -1026,7 +1038,7 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
                     if (fFastMemory) {
                         *fOut << int8_t(BinaryConsts::I32Const) << S32LEB((tmp.fOffset + (num->fNum << offStrNum)));
                     } else {
-                        *fOut << int8_t(BinaryConsts::GetLocal)
+                        *fOut << int8_t(BinaryConsts::LocalGet)
                               << U32LEB(0);  // Assuming $dsp is at 0 local variable index
                         *fOut << int8_t(BinaryConsts::I32Const) << S32LEB((tmp.fOffset + (num->fNum << offStrNum)));
                         *fOut << int8_t(WasmOp::I32Add);
@@ -1049,14 +1061,14 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
                     } else {
                         // Micro optimization if the field is actually the first one in the structure
                         if (tmp.fOffset == 0) {
-                            *fOut << int8_t(BinaryConsts::GetLocal)
+                            *fOut << int8_t(BinaryConsts::LocalGet)
                                   << U32LEB(0);  // Assuming $dsp is at 0 local variable index
                             indexed->fIndex->accept(this);
                             *fOut << int8_t(BinaryConsts::I32Const) << S32LEB(offStrNum);
                             *fOut << int8_t(WasmOp::I32Shl);
                             *fOut << int8_t(WasmOp::I32Add);
                         } else {
-                            *fOut << int8_t(BinaryConsts::GetLocal)
+                            *fOut << int8_t(BinaryConsts::LocalGet)
                                   << U32LEB(0);  // Assuming $dsp is at 0 local variable index
                             *fOut << int8_t(BinaryConsts::I32Const) << S32LEB(tmp.fOffset);
                             indexed->fIndex->accept(this);
@@ -1074,7 +1086,7 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
                 if ((num = dynamic_cast<Int32NumInst*>(indexed->fIndex))) {
                     // Hack for 'soundfile'
                     DeclareStructTypeInst* struct_type = isStructType(indexed->getName());
-                    *fOut << int8_t(BinaryConsts::GetLocal) << U32LEB(local.fIndex);
+                    *fOut << int8_t(BinaryConsts::LocalGet) << U32LEB(local.fIndex);
                     if (struct_type) {
                         *fOut << int8_t(BinaryConsts::I32Const) << S32LEB(struct_type->fType->getOffset(num->fNum));
                     } else {
@@ -1082,7 +1094,7 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
                     }
                     *fOut << int8_t(WasmOp::I32Add);
                 } else {
-                    *fOut << int8_t(BinaryConsts::GetLocal) << U32LEB(local.fIndex);
+                    *fOut << int8_t(BinaryConsts::LocalGet) << U32LEB(local.fIndex);
                     indexed->fIndex->accept(this);
                     *fOut << int8_t(BinaryConsts::I32Const) << S32LEB(offStrNum);
                     *fOut << int8_t(WasmOp::I32Shl);
@@ -1121,7 +1133,7 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
     virtual void visit(Int64NumInst* inst)
     {
         fTypingVisitor.visit(inst);
-        *fOut << int8_t(BinaryConsts::I64Const) << S32LEB(inst->fNum);
+        *fOut << int8_t(BinaryConsts::I64Const) << S64LEB(inst->fNum);
     }
 
     // Numerical computation
@@ -1129,9 +1141,9 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
     {
         inst->fInst1->accept(this);
         inst->fInst2->accept(this);
-        if (type == Typed::kInt32 || type == Typed::kBool) {
+        if (isInt32Type(type) || isBoolType(type)) {
             *fOut << int8_t(gBinOpTable[inst->fOpcode]->fWasmInt32);
-        } else if (type == Typed::kInt64) {
+        } else if (isInt64Type(type)) {
             *fOut << int8_t(gBinOpTable[inst->fOpcode]->fWasmInt64);
         } else {
             faustassert(false);
@@ -1142,9 +1154,9 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
     {
         inst->fInst1->accept(this);
         inst->fInst2->accept(this);
-        if (type == Typed::kFloat) {
+        if (isFloatType(type)) {
             *fOut << int8_t(gBinOpTable[inst->fOpcode]->fWasmFloat);
-        } else if (type == Typed::kDouble) {
+        } else if (isDoubleType(type)) {
             *fOut << int8_t(gBinOpTable[inst->fOpcode]->fWasmDouble);
         } else {
             faustassert(false);
@@ -1166,7 +1178,7 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
                 visitAuxReal(inst, type2);
             } else if (isIntType(type1) || isIntType(type2)) {
                 visitAuxInt(inst, type2);
-            } else if (type1 == Typed::kBool && type2 == Typed::kBool) {
+            } else if (isBoolType(type1) && isBoolType(type2)) {
                 visitAuxInt(inst, type1);
             } else {
                 // Should never happen...
@@ -1181,25 +1193,47 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
     {
         inst->fInst->accept(&fTypingVisitor);
         Typed::VarType type = fTypingVisitor.fCurType;
-
-        if (inst->fType->getType() == Typed::kInt32) {
-            if (type == Typed::kInt32) {
-                // std::cout << "CastInst : cast to int, but arg already int !" << std::endl;
-                inst->fInst->accept(this);
-            } else {
-                inst->fInst->accept(this);
-                *fOut << ((gGlobal->gFloatSize == 1) ? int8_t(BinaryConsts::I32STruncF32)
-                                                     : int8_t(BinaryConsts::I32STruncF64));
-            }
-        } else {
-            if (isRealType(type)) {
-                // std::cout << "CastInst : cast to real, but arg already real !" << std::endl;
-                inst->fInst->accept(this);
-            } else {
-                inst->fInst->accept(this);
-                *fOut << ((gGlobal->gFloatSize == 1) ? int8_t(BinaryConsts::F32SConvertI32)
-                                                     : int8_t(BinaryConsts::F64SConvertI32));
-            }
+   
+        switch (inst->fType->getType()) {
+            case Typed::kInt32:
+                if (isInt32Type(type)) {
+                    // std::cout << "CastInst : cast to int, but arg already int !" << std::endl;
+                    inst->fInst->accept(this);
+                } else if (isInt64Type(type)) {
+                    inst->fInst->accept(this);
+                    *fOut << int8_t(BinaryConsts::I32WrapI64);
+                } else {
+                    inst->fInst->accept(this);
+                    *fOut << ((gGlobal->gFloatSize == 1) ? int8_t(BinaryConsts::I32STruncF32)
+                                                         : int8_t(BinaryConsts::I32STruncF64));
+                }
+                break;
+                
+            case Typed::kInt64:
+                faustassert(false);
+                break;
+                
+            case Typed::kFloat:
+            case Typed::kDouble:
+                if (isRealType(type)) {
+                    // std::cout << "CastInst : cast to real, but arg already real !" << std::endl;
+                    inst->fInst->accept(this);
+                } else if (isInt64Type(type)) {
+                    inst->fInst->accept(this);
+                    *fOut << ((gGlobal->gFloatSize == 1) ? int8_t(BinaryConsts::F32SConvertI64)
+                                                         : int8_t(BinaryConsts::F64SConvertI64));
+                } else if (isInt32Type(type) || isBoolType(type)) {
+                    inst->fInst->accept(this);
+                    *fOut << ((gGlobal->gFloatSize == 1) ? int8_t(BinaryConsts::F32SConvertI32)
+                                                         : int8_t(BinaryConsts::F64SConvertI32));
+                } else {
+                    faustassert(false);
+                }
+                break;
+                
+            default:
+                faustassert(false);
+                break;
         }
 
         fTypingVisitor.visit(inst);
@@ -1251,9 +1285,8 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
     virtual void visit(FunCallInst* inst)
     {
         // Compile args first
-        list<ValueInst*>::const_iterator it;
-        for (it = inst->fArgs.begin(); it != inst->fArgs.end(); it++) {
-            (*it)->accept(this);
+        for (const auto& it : inst->fArgs) {
+            it->accept(this);
         }
 
         // Then compile funcall
@@ -1274,7 +1307,8 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
         }
     }
 
-    // Conditional : select
+    // Select that computes both branches
+    /*
     virtual void visit(Select2Inst* inst)
     {
         inst->fThen->accept(this);
@@ -1283,7 +1317,7 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
         inst->fCond->accept(this);
         // Possibly convert i64 to i32
         inst->fCond->accept(&fTypingVisitor);
-        if (isIntType64(fTypingVisitor.fCurType)) {
+        if (isInt64Type(fTypingVisitor.fCurType)) {
             // Compare to 0
             *fOut << int8_t(BinaryConsts::I64Const) << S32LEB(0);
             *fOut << int8_t(WasmOp::I64Ne);
@@ -1292,14 +1326,41 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
 
         fTypingVisitor.visit(inst);
     }
-
+    */
+    
+    // Select that only computes one branch
+    virtual void visit(Select2Inst* inst)
+    {
+        // Condition is first item
+        inst->fCond->accept(this);
+        // Possibly convert i64 to i32
+        inst->fCond->accept(&fTypingVisitor);
+        if (isInt64Type(fTypingVisitor.fCurType)) {
+            // Compare to 0
+            *fOut << int8_t(BinaryConsts::I64Const) << S32LEB(0);
+            *fOut << int8_t(WasmOp::I64Ne);
+        }
+        // Result type
+        inst->fThen->accept(&fTypingVisitor);
+        *fOut << int8_t(BinaryConsts::If) << S32LEB(type2Binary(fTypingVisitor.fCurType));
+        // Compile 'then'
+        inst->fThen->accept(this);
+        // Compile 'else'
+        *fOut << int8_t(BinaryConsts::Else);
+        inst->fElse->accept(this);
+        // End of if
+        *fOut << int8_t(BinaryConsts::End);
+        
+        fTypingVisitor.visit(inst);
+    }
+  
     // Conditional : if (TO CHECK : utilise drop ?)
     virtual void visit(IfInst* inst)
     {
         inst->fCond->accept(this);
         // Possibly convert i64 to i32
         inst->fCond->accept(&fTypingVisitor);
-        if (isIntType64(fTypingVisitor.fCurType)) {
+        if (isInt64Type(fTypingVisitor.fCurType)) {
             // Compare to 0
             *fOut << int8_t(BinaryConsts::I64Const) << S32LEB(0);
             *fOut << int8_t(WasmOp::I64Ne);
@@ -1354,11 +1415,6 @@ class WASMInstVisitor : public DispatchVisitor, public WASInst {
         *fOut << int8_t(BinaryConsts::End);
     }
 
-    virtual void visit(AddSoundfileInst* inst)
-    {
-        // Not supported for now
-        //throw faustexception("ERROR : AddSoundfileInst not supported for wasm\n");
-    }
 };
 
 #endif

@@ -1,9 +1,11 @@
-version := 2.19.0
+version := 2.38.15
 
 system	?= $(shell uname -s)
 
+-include user.mk
 DESTDIR ?=
 PREFIX ?= /usr/local
+INSTALL_LIBDIR ?= lib
 CROSS=i586-mingw32msvc-
 BUILDLOCATION := build
 DEBUGFOLDER := faustdebug
@@ -36,6 +38,10 @@ developer : updatesubmodules
 
 all : updatesubmodules
 	$(MAKE) -C $(BUILDLOCATION) cmake BACKENDS=all.cmake TARGETS=all.cmake
+	$(MAKE) -C $(BUILDLOCATION)
+
+libsall : updatesubmodules
+	$(MAKE) -C $(BUILDLOCATION) cmake BACKENDS=regular.cmake TARGETS=all.cmake
 	$(MAKE) -C $(BUILDLOCATION)
 
 travis : updatesubmodules
@@ -114,6 +120,7 @@ help :
 	@echo " 'most'          : builds the Faust compiler with LLVM backend and every static libraries"
 	@echo " 'developer'     : builds the Faust compiler with every possible backends and every static libraries"
 	@echo " 'all'           : builds the Faust compiler with every possible backends and every static and dynamic libraries"
+	@echo " 'libsall'       : builds the Faust compiler (without the LLVM backend) and includes all the static and dynamic libraries"
 	@echo
 	@echo " 'install'       : install the compiler, tools and the architecture files in $(prefix)/bin $(prefix)/share/faust $(prefix)/include/faust"
 	@echo " 'clean'         : remove all object files"
@@ -178,7 +185,7 @@ format :
 
 # the target 'lib' can be used to init and update the libraries submodule
 updatesubmodules :
-	if test -d .git; then git submodule update --init; fi
+	if test -d .git; then git submodule update --init --recursive; fi
 
 
 doclib : updatesubmodules
@@ -198,7 +205,7 @@ uninstall :
 devinstall:
 	$(MAKE) -C tools/benchmark install
 
-# make a faust distribution tarball
+# make a Faust distribution tarball
 dist = faust-$(version)
 submodules = libraries
 dist :

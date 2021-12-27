@@ -5,8 +5,7 @@
  each section for license and copyright information.
  *************************************************************************/
 
-/*******************BEGIN ARCHITECTURE SECTION (part 1/2)****************/
-
+/******************* BEGIN pa-gtk.cpp ****************/
 /************************************************************************
  FAUST Architecture File
  Copyright (C) 2003-2019 GRAME, Centre National de Creation Musicale
@@ -64,8 +63,8 @@
 
 /*******************BEGIN ARCHITECTURE SECTION (part 2/2)***************/
 
-mydsp		DSP;
-list<GUI*>	GUI::fGuiList;
+mydsp DSP;
+std::list<GUI*> GUI::fGuiList;
 ztimedmap GUI::gTimedZoneMap;
 
 //-------------------------------------------------------------------------
@@ -117,5 +116,4 @@ int main(int argc, char *argv[])
   	return 0;
 }
 
-/********************END ARCHITECTURE SECTION (part 2/2)****************/
-
+/******************* END pa-gtk.cpp ****************/

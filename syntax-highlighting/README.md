@@ -11,6 +11,7 @@ This folder contains syntax highlighting files for various editors. The editors 
 * [GNU nano](https://www.nano-editor.org/)
 * [Atom](https://atom.io/)
 * [Visual Studio Code](https://code.visualstudio.com/)
+* [Sublime Text](https://www.sublimetext.com)
 
 ## KDE Kate/Kwrite
 
@@ -19,7 +20,6 @@ Install the file `faust.xml` into Kate syntax folder (`/opt/kde3/share/apps/kate
 ## gedit
 
 Install the file `faust.lang` into gedit syntax folder (`/usr/share/gtksourceview-2.0/language-specs` on Ubuntu 9.10)
-
 
 ## TextWrangler
 Install the file `Faust.plist` into `~/Library/Application Support/TextWrangler/Language Modules/`
@@ -81,3 +81,8 @@ Copy the directory `atom/language-faust` into `~/.atom/packages/` and follow the
 3. Click Install to automatically download and install the extension.
 
 NB: This is the latest version of [faust extension](https://marketplace.visualstudio.com/items?itemName=glen-anderson.vscode-faust) created by Glen Anderson, cf. https://github.com/hellbent/vscode-faust.
+
+## Sublime Text 4 completions and snippets
+
+Copy the folder [sublime-text/Faust](sublime-text/Faust) to your `Packages/User` directory. To find the right directory, use Preferences > Browse Packages...  
+More info in [sublime-text/Faust/README.md](sublime-text/Faust/README.md)

@@ -49,43 +49,92 @@ EXPORT interpreter_dsp_factory* createInterpreterDSPFactoryFromString(const stri
     LOCK_API
     string expanded_dsp_content, sha_key;
 
-    if ((expanded_dsp_content = expandDSPFromString(name_app, dsp_content, argc, argv, sha_key, error_msg)) == "") {
+    if ((expanded_dsp_content = sha1FromDSP(name_app, dsp_content, argc, argv, sha_key)) == "") {
         return nullptr;
     } else {
-        int         argc1 = 0;
-        const char* argv1[32];
-
-        argv1[argc1++] = "faust";
-        argv1[argc1++] = "-lang";
-        argv1[argc1++] = "interp";
-        argv1[argc1++] = "-o";
-        argv1[argc1++] = "string";
-
-        for (int i = 0; i < argc; i++) {
-            argv1[argc1++] = argv[i];
-        }
-        argv1[argc1] = 0;  // NULL terminated argv
-
+     
         dsp_factory_table<SDsp_factory>::factory_iterator it;
-        interpreter_dsp_factory*                          factory = 0;
-
         if (gInterpreterFactoryTable.getFactory(sha_key, it)) {
             SDsp_factory sfactory = (*it).first;
             sfactory->addReference();
             return sfactory;
         } else {
-            dsp_factory_base* dsp_factory_aux =
-                compileFaustFactory(argc1, argv1, name_app.c_str(), dsp_content.c_str(), error_msg, true);
-            if (dsp_factory_aux) {
-                dsp_factory_aux->setName(name_app);
-                factory = new interpreter_dsp_factory(dsp_factory_aux);
-                gInterpreterFactoryTable.setFactory(factory);
-                factory->setSHAKey(sha_key);
-                factory->setDSPCode(expanded_dsp_content);
-                return factory;
-            } else {
+            try {
+                int         argc1 = 0;
+                const char* argv1[64];
+                argv1[argc1++] = "faust";
+                argv1[argc1++] = "-lang";
+                argv1[argc1++] = "interp";
+                argv1[argc1++] = "-o";
+                argv1[argc1++] = "string";
+                // Copy arguments
+                for (int i = 0; i < argc; i++) {
+                    argv1[argc1++] = argv[i];
+                }
+                argv1[argc1] = nullptr;  // NULL terminated argv
+                
+                dsp_factory_base* dsp_factory_aux = createFactory(name_app.c_str(), dsp_content.c_str(), argc1, argv1, error_msg, true);
+                if (dsp_factory_aux) {
+                    dsp_factory_aux->setName(name_app);
+                    interpreter_dsp_factory* factory = new interpreter_dsp_factory(dsp_factory_aux);
+                    gInterpreterFactoryTable.setFactory(factory);
+                    factory->setSHAKey(sha_key);
+                    factory->setDSPCode(expanded_dsp_content);
+                    return factory;
+                } else {
+                    return nullptr;
+                }
+            } catch (faustexception& e) {
+                error_msg = e.what();
                 return nullptr;
             }
         }
+    }
+}
+
+EXPORT interpreter_dsp_factory* createInterpreterDSPFactoryFromSignals(const std::string& name_app, tvec signals,
+                                                                       int argc, const char* argv[], std::string& error_msg)
+{
+    LOCK_API
+    try {
+        int         argc1 = 0;
+        const char* argv1[64];
+        argv1[argc1++] = "faust";
+        argv1[argc1++] = "-lang";
+        argv1[argc1++] = "interp";
+        argv1[argc1++] = "-o";
+        argv1[argc1++] = "string";
+        // Copy arguments
+        for (int i = 0; i < argc; i++) {
+            argv1[argc1++] = argv[i];
+        }
+        argv1[argc1] = nullptr;  // NULL terminated argv
+        
+        dsp_factory_base* dsp_factory_aux = createFactory(name_app.c_str(), signals, argc1, argv1, error_msg);
+        if (dsp_factory_aux) {
+            dsp_factory_aux->setName(name_app);
+            interpreter_dsp_factory* factory = new interpreter_dsp_factory(dsp_factory_aux);
+            gInterpreterFactoryTable.setFactory(factory);
+            return factory;
+        } else {
+            return nullptr;
+        }
+    } catch (faustexception& e) {
+        error_msg = e.what();
+        return nullptr;
+    }
+}
+
+EXPORT interpreter_dsp_factory* createInterpreterDSPFactoryFromBoxes(const std::string& name_app, Tree box,
+                                                                     int argc, const char* argv[],
+                                                                     std::string& error_msg)
+{
+    LOCK_API
+    try {
+        tvec signals = boxesToSignalsAux(box);
+        return createInterpreterDSPFactoryFromSignals(name_app, signals, argc, argv, error_msg);
+    } catch (faustexception& e) {
+        error_msg = e.Message();
+        return nullptr;
     }
 }

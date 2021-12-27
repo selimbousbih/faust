@@ -5,7 +5,7 @@
  each section for license and copyright information.
  *************************************************************************/
 
-/*******************BEGIN ARCHITECTURE SECTION (part 1/2)****************/
+/******************* BEGIN minimal.c ****************/
 
 /************************************************************************
  FAUST Architecture File
@@ -86,7 +86,7 @@ int main(int argc, char* argv[])
     
     // Print output buffers
     for (int frame = 0; frame < BUFFER_SIZE; ++frame) {
-        for (int chan = 0; chan <  getNumOutputsmydsp(dsp); ++chan) {
+        for (int chan = 0; chan < getNumOutputsmydsp(dsp); ++chan) {
             printf("Audio output chan: %d sample: %f\n", chan, outputs[chan][frame]);
         }
     }
@@ -100,4 +100,4 @@ int main(int argc, char* argv[])
     deletemydsp(dsp);
 }
 
-/********************END ARCHITECTURE SECTION (part 2/2)****************/
+/******************** END minimal.c ****************/

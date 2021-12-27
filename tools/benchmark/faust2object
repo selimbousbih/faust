@@ -1,0 +1,226 @@
+#!/bin/bash
+
+#####################################################################
+#                                                                   #
+#               Compiles Faust DSP to machine code                  #
+#               for several CPUs using dynamic-faust                #
+#               (c) Grame, 2020-2021                                #
+#                                                                   #
+#####################################################################
+
+. faustpath
+. faustoptflags
+
+FILES=""
+# always include
+CPU="generic"
+OPT=""
+SOURCES=false
+MULTI=false
+MULTIFUN=false
+LLVM=false
+TEST=false
+US="0"
+DS="0"
+FILTER="0"
+LLVM_ADAPTER=$FAUSTINC/faust/dsp/llvm-dsp-adapter.h
+CPP_ADAPTER=$FAUSTINC/faust/dsp/cpp-dsp-adapter.h
+MULTI_ADAPTER=$FAUSTINC/faust/dsp/dsp-multi.h
+MULTIFUN_ADAPTER=$FAUSTINC/faust/dsp/dsp-multifun.h
+SOUNDFILE="0"
+SOUNDFILEDEFS=""
+SOUNDFILEINCS=""
+SOUNDFILELIBS=""
+dspName=""
+
+if [ $(uname -s) == Darwin ] && [ $(arch) == arm64 ]; then
+    CXX="arch -arch x86_64 "$CXX
+fi
+
+ALL_CPU_LIST="nocona core2 penryn bonnell atom silvermont slm goldmont goldmont-plus tremont nehalem corei7 westmere sandybridge corei7-avx ivybridge core-avx-i haswell core-avx2 broadwell skylake skylake-avx512 skx cascadelake cooperlake cannonlake icelake-client icelake-server tigerlake knl knm k8 athlon64 athlon-fx opteron k8-sse3 athlon64-sse3 opteron-sse3 amdfam10 barcelona btver1 btver2 bdver1 bdver2 bdver3 bdver4 znver1 znver2 x86-64 generic"
+
+while [ $1 ]
+do
+    p=$1
+ 
+    if [ $p = "-help" ] || [ $p = "-h" ]; then
+        echo "faust2object [nocona] [core2] [penryn] [bonnell] [atom] [silvermont] [slm] [goldmont] [goldmont-plus] [tremont] [nehalem] [corei7] [westmere] [sandybridge] [corei7-avx] [ivybridge] [core-avx-i] [haswell] [core-avx2] [broadwell] [skylake] [skylake-avx512] [skx] [cascadelake] [cooperlake] [cannonlake] [icelake-client] [icelake-server] [tigerlake] [knl] [knm] [k8] [athlon64] [athlon-fx] [opteron] [k8-sse3] [athlon64-sse3] [opteron-sse3] [amdfam10] [barcelona] [btver1] [btver2] [bdver1] [bdver2] [bdver3] [bdver4] [znver1] [znver2] [x86-64] [generic] [-all] [-soundfile] [-sources] [-multi] [-multifun] [-opt native|generic] [-llvm] [-test] [-us <factor>] [-ds <factor>] [-filter <filter(0..4)>] [additional Faust options (-vec -vs 8...)] <file.dsp>"
+        echo "Use 'xxx' to compile for 'xxx' CPU"
+        echo "Use 'generic' to compile for generic CPU"
+        echo "Use '-all' to compile for all CPUs"
+        echo "Use '-soundfile' when compiling a DSP using the 'soundfile' primitive, add required resources"
+        echo "Use '-sources' to only generate source files"
+        echo "Use '-multi' to compile for several CPUs and aggregate them in a 'multi' class that choose the correct one at runtime"
+        echo "Use '-multifun' to compile for several CPUs using GCC MultiFun feature and aggregate them in a 'multi' class that choose the correct one at runtime"
+        echo "Use '-opt native' to activate the best compilation options for the native CPU"
+        echo "Use '-opt generic' to activate the best compilation options for a generic CPU"
+        echo "Use '-llvm' to compile using the LLVM backend, otherwise the C++ backend is used"
+        echo "Use '-test' to compile a test program which will bench the DSP and render it"
+        echo "Use '-us <factor>' to upsample the DSP by a factor"
+        echo "Use '-ds <factor>' to downsample the DSP by a factor"
+        echo "Use '-filter <filter>' for upsampling or downsampling [0..4]"
+        exit
+    fi
+
+    if [ $p = "-opt" ]; then
+        shift
+        OPT=$1
+    elif [ $p = "-cn" ]; then
+        shift
+        dspName=$1
+    elif [ $p = "-sources" ]; then
+        SOURCES=true
+    elif [ $p = "-llvm" ]; then
+        LLVM=true
+    elif [ $p = "-multi" ]; then
+        MULTI=true
+    elif [ $p = "-multifun" ]; then
+        MULTIFUN=true
+    elif [ $p = "-test" ]; then
+        TEST=true
+    elif [ $p = "-all" ]; then
+        CPU=$ALL_CPU_LIST
+    elif [ $p = "-us" ]; then
+        shift
+        US=$1
+    elif [ $p = "-ds" ]; then
+        shift
+        DS=$1
+    elif [ $p = "-filter" ]; then
+        shift
+        FILTER=$1
+    # '-A path' also added as '-I path' in the C++ command 
+    elif [ $p = "-A" ]; then
+        shift
+        CXXFLAGS="$CXXFLAGS -I $1"
+        OPTIONS="$OPTIONS -A $1"
+    elif [ $p = "-soundfile" ]; then
+        SOUNDFILE="1"
+        SOUNDFILEDEFS="-DSOUNDFILE"
+        SOUNDFILEINCS=`pkg-config --cflags sndfile`
+        SOUNDFILELIBS=`pkg-config --static --libs sndfile`
+    elif [ ${p:0:1} = "-" ]; then
+        OPTIONS="$OPTIONS $p"
+    elif [[ -f "$p" ]] && [ ${p: -4} == ".dsp" ]; then
+        FILES="$FILES $p"
+    elif echo $ALL_CPU_LIST | grep -E "(\s|^)$p(\s|$)" > /dev/null; then  #See https://www.golinuxcloud.com/grep-exact-match/
+        # 'generic' is always included
+        if [ $p != "generic" ]; then
+            CPU="$CPU $p"
+        fi
+    else
+        OPTIONS="$OPTIONS $p"
+    fi
+
+shift
+done
+
+# If no CPU is gven, compile by default for 'generic'
+if [ -z "$CPU" ]; then
+    echo "ERROR : no CPU was given"
+    exit
+fi
+
+for p in $FILES; do
+
+    f=$(basename "$p")
+
+    if [ -z $dspName ]; then
+        dspName="${f%.dsp}"
+    fi
+
+    # discover best compilation options
+    if [ "$OPT" = "generic" ]; then
+        echo "Look for best compilation options in 'generic' mode..."
+        OPTIONS="$OPTIONS $(faustbench-llvm -notrace -generic $OPTIONS $f)"
+        echo $OPTIONS
+    elif [ "$OPT" = "native" ]; then
+        echo "Look for best compilation options in 'native' mode..."
+        OPTIONS="$OPTIONS $(faustbench-llvm -notrace $OPTIONS $f)"
+        echo $OPTIONS
+    fi
+
+    # compile for each CPU
+    for arch_cpu in $CPU; do
+
+        # replace '-' with '_'
+        cpu=$(echo $arch_cpu | sed -e 's/-/_/g')
+        echo $cpu
+
+        # renaming
+        if [ $arch_cpu = "generic" ]; then
+            arch_cpu=""
+        fi
+
+        if [ $LLVM = true ]; then
+            # generating the LLVM code
+            echo "Compiled using LLVM"
+            sed -e "s/mydsp/$dspName$cpu/g" $LLVM_ADAPTER > $dspName$cpu".h"
+
+            # compiling
+            if [ $SOURCES = false ]; then
+                dynamic-faust -target x86_64-apple-darwin15.6.0:$arch_cpu -cn $dspName$cpu $OPTIONS $f -o $dspName$cpu".o"
+            fi
+        else
+            # generating the C++ code
+            echo "Compiled using C++"
+            sed -e "s/mydsp/$dspName$cpu/g" $CPP_ADAPTER > $dspName$cpu".h"
+            if [ $MULTIFUN = true ]; then
+                faust -lang c -a $FAUSTARCH/minimal-effect.c -cn $dspName$cpu $OPTIONS $f -o $dspName$cpu".cpp"
+            else
+                faust -a $FAUSTARCH/minimal-effect.cpp -cn $dspName$cpu $OPTIONS $f -o $dspName$cpu".cpp"
+            fi
+
+            # compiling
+            if [ $SOURCES = false ]; then
+                $CXX $CXXFLAGS -Ofast -std=c++14 -march=$arch_cpu -I `faust -includedir` $SOUNDFILEDEFS $SOUNDFILEINCS -c $dspName$cpu".cpp"
+            fi
+        fi
+    done
+
+    # possibly aggregate in a unique multi file
+    if [ $MULTI = true ]; then
+        # create file
+        echo "" > $dspName"multi.h"
+        # add conditional #define 'cpu'
+        for arch_cpu in $CPU; do
+            # replace '-' with '_'
+            cpu=$(echo $arch_cpu | sed -e 's/-/_/g')
+            echo "#define "$cpu >> $dspName"multi.h"
+        done
+        # class naming
+        sed -e "s/mydsp/$dspName/g" $MULTI_ADAPTER >> $dspName"multi.h"
+    fi
+    
+    # possibly aggregate in a unique multi file
+    if [ $MULTIFUN = true ]; then
+        # class naming
+        sed -e "s/mydsp/$dspName/g" $MULTIFUN_ADAPTER >> $dspName"multi.h"
+    fi
+
+    # add info for DS/US + filter adapter
+    echo "#define DOWN_SAMPLING $DS" | cat -  $dspName"multi.h" > temp && mv temp $dspName"multi.h"
+    echo "#define UP_SAMPLING $US" | cat -  $dspName"multi.h" > temp && mv temp $dspName"multi.h"
+    echo "#define FILTER_TYPE $FILTER" | cat -  $dspName"multi.h" > temp && mv temp $dspName"multi.h"
+
+    # create a test program
+    if [ $TEST = true ]; then
+    
+        if [ $MULTI = false ] && [ $MULTIFUN = false ]; then
+            echo "ERROR : -test option can only be used with -multi or -multifun options"
+            exit
+        fi
+        
+        # create and compile the test (note that -inj $dspName"multi.h" will correctly be used instead of any other use of 'inj -foo.cpp' in $OPTIONS)
+        faust $OPTIONS -inj $dspName"multi.h" -a $FAUSTARCH/minimal-bench.cpp -cn $dspName"multi" $p -o $dspName"multi.cpp"
+
+        if [ $MULTI = true ]; then
+            $CXX $CXXFLAGS -Ofast -std=c++14 $dspName"multi.cpp" -dead_strip $SOUNDFILEDEFS $SOUNDFILELIBS -I `llvm-config --includedir --ldflags --libs all --system-libs` $dspName*".o" -o $dspName"multi"
+        elif [ $MULTIFUN = true ]; then
+            $CXX $CXXFLAGS -Ofast -std=c++14 $dspName"multi.cpp" $dspName"generic.cpp" $SOUNDFILEDEFS $SOUNDFILELIBS -o $dspName"multi"
+        fi
+         
+        echo "Run ./"$dspName"multi"" to test the program"
+    fi
+
+done

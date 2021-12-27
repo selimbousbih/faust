@@ -22,12 +22,13 @@
 #include <string>
 #include <fstream>
 #include <iostream>
+#include <memory>
 
 void streamCopyLicense(std::istream& src, std::ostream& dst, const std::string& exceptiontag);
 void streamCopyUntil(std::istream& src, std::ostream& dst, const std::string& until);
 void streamCopyUntilEnd(std::istream& src, std::ostream& dst);
 
-std::ifstream* openArchStream(const char* filename);
+std::unique_ptr<std::ifstream> openArchStream(const char* filename);
 
 FILE* fopenSearch(const char* filename, std::string& fullpath);
 
@@ -38,3 +39,5 @@ const char* fileBasename(const char* name);         // returns a pointer on the 
 std::string fileDirname(const std::string& name);   // allocate a string containing the dirname of name
 
 std::string stripEnd(const std::string& name, const std::string& ext);
+
+std::string makeOutputFile(const std::string& fname);

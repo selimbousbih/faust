@@ -33,13 +33,11 @@ class Exp10Prim : public xtended {
 
     virtual bool needCache() { return true; }
 
-    virtual ::Type infereSigType(const vector< ::Type>& args)
+    virtual ::Type infereSigType(const vector<::Type>& args)
     {
         faustassert(args.size() == arity());
         return floatCast(args[0]);
     }
-
-    virtual void sigVisit(Tree sig, sigvisitor* visitor) {}
 
     virtual int infereSigOrder(const vector<int>& args)
     {
@@ -51,7 +49,12 @@ class Exp10Prim : public xtended {
     {
         num n;
         faustassert(args.size() == arity());
-        if (isNum(args[0], n)) {
+    
+        // exp10(log10(sig)) ==> sig
+        xtended* xt = (xtended*)getUserData(args[0]);
+        if (xt == gGlobal->gLogPrim) {
+            return args[0]->branch(0);
+        } else if (isNum(args[0], n)) {
             return tree(exp(double(n)));
         } else {
             return tree(symbol(), args[0]);
@@ -59,7 +62,7 @@ class Exp10Prim : public xtended {
     }
 
     virtual ValueInst* generateCode(CodeContainer* container, const list<ValueInst*>& args, ::Type result,
-                                    vector< ::Type> const& types)
+                                    vector<::Type> const& types)
     {
         faustassert(args.size() == arity());
         faustassert(types.size() == arity());
@@ -72,7 +75,7 @@ class Exp10Prim : public xtended {
         return container->pushFunction(subst("exp10$0", isuffix()), result_type, arg_types, casted_args);
     }
 
-    virtual string old_generateCode(Klass* klass, const vector<string>& args, const vector<Type>& types)
+    virtual string generateCode(Klass* klass, const vector<string>& args, const vector<::Type>& types)
     {
         faustassert(args.size() == arity());
         faustassert(types.size() == arity());
@@ -80,7 +83,7 @@ class Exp10Prim : public xtended {
         return subst("exp10$1($0)", args[0], isuffix());
     }
 
-    virtual string generateLateq(Lateq* lateq, const vector<string>& args, const vector< ::Type>& types)
+    virtual string generateLateq(Lateq* lateq, const vector<string>& args, const vector<::Type>& types)
     {
         faustassert(args.size() == arity());
         faustassert(types.size() == arity());

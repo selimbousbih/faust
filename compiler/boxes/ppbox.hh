@@ -23,24 +23,21 @@
 #define _PPBOX_H
 
 /**********************************************************************
-            - ppbox.h : pretty print box expressions (projet FAUST) -
-
+        - ppbox.h : pretty print box expressions (projet FAUST) -
 
         Historique :
         -----------
         12-07-2002  first implementation  (yo)
-
 ***********************************************************************/
 
 #include <iostream>
 #include <sstream>
+#include <map>
+
 #include "boxes.hh"
 #include "garbageable.hh"
 
 using namespace std;
-
-// void 		fppbox (FILE* fout, Tree box, int priority=0);
-// inline void	ppbox  (Tree box, int priority=0) 					{ fppbox(stdout, box, priority); }
 
 const char *prim0name(CTree *(*ptr)());
 const char *prim1name(CTree *(*ptr)(CTree *));
@@ -53,14 +50,29 @@ const char *prim5name(CTree *(*ptr)(CTree *, CTree *, CTree *, CTree *, CTree *)
 // usage : out << boxpp(aBoxExp);
 
 class boxpp : public virtual Garbageable {
-   protected:
-    Tree box;
-    int  priority;
+    protected:
+        Tree fBox;
+        int  fPriority;
+        
+    public:
+        boxpp(Tree b, int p = 0) : fBox(b), fPriority(p) {}
+        virtual ~boxpp() {}
+        virtual ostream &print(ostream &fout) const;
+};
 
-   public:
-    boxpp(Tree b, int p = 0) : box(b), priority(p) {}
-    virtual ~boxpp() {}
-    virtual ostream &print(ostream &fout) const;
+// Use a map <ID, expression> to reuse already written expressions.
+// printIDs allow to print the <ID, expression> list before 'process = exp;' final line.
+
+class boxppShared : public boxpp {
+    protected:
+        static std::map<Tree, std::string> fExpTable;
+        
+    public:
+        boxppShared(Tree b, int p = 0) : boxpp(b, p) {}
+        virtual ~boxppShared() {}
+        virtual ostream &print(ostream &fout) const;
+    
+        static void printIDs(ostream& fout);
 };
 
 inline ostream &operator<<(ostream &file, const boxpp &bpp)
@@ -68,17 +80,15 @@ inline ostream &operator<<(ostream &file, const boxpp &bpp)
     return bpp.print(file);
 }
 
-// box pretty printer.
-// usage : out << boxpp(aBoxExp);
-
-// Used on the stack so not Garbageable
+// environment pretty printer.
+// usage : out << envpp(aEnvExp);
 
 class envpp : public virtual Garbageable {
     Tree fEnv;
 
-   public:
-    envpp(Tree e) : fEnv(e) {}
-    ostream &print(ostream &fout) const;
+    public:
+        envpp(Tree e) : fEnv(e) {}
+        ostream &print(ostream &fout) const;
 };
 
 inline ostream &operator<<(ostream &file, const envpp &epp)

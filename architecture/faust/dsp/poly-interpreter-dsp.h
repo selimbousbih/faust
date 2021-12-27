@@ -32,7 +32,6 @@
 /**
  *  Interpreter backend based Polyphonic DSP factory class.
  */
-
 struct interpreter_dsp_poly_factory : public dsp_poly_factory {
     
     interpreter_dsp_poly_factory(const std::string& name_app,
@@ -141,4 +140,4 @@ static void writeInterpreterPolyDSPFactoryToMachineFile(dsp_poly_factory* factor
 }
 
 #endif // __poly_dsp_tools__
-/**************************  END  poly-interpreter-dsp.h **************************/
+/************************** END poly-interpreter-dsp.h **************************/

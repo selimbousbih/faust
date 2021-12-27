@@ -82,12 +82,11 @@ static Tree simplification(Tree sig)
 {
     faustassert(sig);
     int  opnum;
-    Tree t1, t2, t3, t4;
+    Tree t1, t2, t3;
 
     xtended* xt = (xtended*)getUserData(sig);
     // primitive elements
     if (xt) {
-        // return 3;
         vector<Tree> args;
         for (int i = 0; i < sig->arity(); i++) {
             args.push_back(sig->branch(i));
@@ -102,7 +101,6 @@ static Tree simplification(Tree sig)
 
     } else if (isSigBinOp(sig, &opnum, t1, t2)) {
         BinOp* op = gBinOpTable[opnum];
-
         Node n1 = t1->node();
         Node n2 = t2->node();
 
@@ -124,8 +122,8 @@ static Tree simplification(Tree sig)
     } else if (isSigDelay1(sig, t1)) {
         return normalizeDelay1Term(t1);
 
-    } else if (isSigFixDelay(sig, t1, t2)) {
-        return normalizeFixedDelayTerm(t1, t2);
+    } else if (isSigDelay(sig, t1, t2)) {
+        return normalizeDelayTerm(t1, t2);
 
     } else if (isSigIntCast(sig, t1)) {
         Tree   tx;
@@ -161,20 +159,6 @@ static Tree simplification(Tree sig)
 
         return sig;
 
-    } else if (isSigSelect3(sig, t1, t2, t3, t4)) {
-        Node n1 = t1->node();
-
-        if (isZero(n1)) return t2;
-        if (isOne(n1)) return t3;
-        if (isNum(n1)) return t4;
-
-        if (t3 == t4) return simplification(sigSelect2(t1, t2, t3));
-
-        return sig;
-
-        // Enable(t1, 0) => 0
-        // Enable(t1, 1) => t1
-        // otherwise sig
     } else if (isSigEnable(sig, t1, t2)) {
         Node n2 = t2->node();
 
@@ -201,7 +185,15 @@ static Tree simplification(Tree sig)
 
         else
             return sig;
-
+	
+    } else if (isSigLowest(sig, t1)){
+        Type ty = getCertifiedSigType(t1);
+        return sigReal(ty->getInterval().lo);
+        
+    } else if (isSigHighest(sig, t1)){
+        Type ty = getCertifiedSigType(t1);
+        return sigReal(ty->getInterval().hi);
+        
     } else {
         return sig;
     }
@@ -253,17 +245,17 @@ static Tree sigMapRename(Tree key, Tree env, tfun f, Tree t)
     Tree p, id, body;
 
     if (getProperty(t, key, p)) {
-        return (isNil(p)) ? t : p;  // truc pour eviter les boucles
+        return (isNil(p)) ? t : p;  // trick to avoid loops
 
     } else if (isRec(t, id, body)) {
-        faustassert(isRef(t, id));  // controle temporaire
+        faustassert(isRef(t, id));  // temporary control
 
         Tree id2;
         if (searchEnv(id, id2, env)) {
-            // déjà en cours de visite de cette recursion
+            // already in the process of visiting this recursion
             return ref(id2);
         } else {
-            // premiere visite de cette recursion
+            // first visit of this recursion
             id2        = tree(Node(unique("renamed")));
             Tree body2 = sigMapRename(key, pushEnv(id, id2, env), f, body);
             return rec(id2, body2);
@@ -312,7 +304,7 @@ static void eraseProperties (Tree key, Tree t)
 	}
 }
 
-void eraseAllProperties(Tree t)
+static void eraseAllProperties(Tree t)
 {
     cerr << "begin eraseAllProperties" << endl;
 	eraseProperties(tree(Node(unique("erase_"))), t);

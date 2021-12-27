@@ -24,14 +24,18 @@
  
 #ifndef __bela_midi__
 #define __bela_midi__ 
- 
+  
 #include <iostream>
 #include <cstdlib>
-#include "Midi.h"
+
+#include <libraries/Midi/Midi.h>
 #include "faust/midi/midi.h"
 
 class MapUI;
 
+/**
+ * MIDI handler for the Bela board: https://bela.io
+ */
 class bela_midi : public midi_handler {
 
     private:
@@ -41,31 +45,31 @@ class bela_midi : public midi_handler {
         static void midiCallback(MidiChannelMessage message, void* arg)
         {
             bela_midi* midi = static_cast<bela_midi*>(arg);
-            int type = message.getType()        // which MIDI message, 128-255
+            int type = message.getType();       // which MIDI message, 128-255
             int channel = message.getChannel(); // which MIDI channel, 1-16
             double time = 0.;
             
             switch (type) {
                 case kmmNoteOff:
-                    handleKeyOff(time, channel, message.getDataByte(0), message.getDataByte(1));
+                    midi->handleKeyOff(time, channel, message.getDataByte(0), message.getDataByte(1));
                     break;
                 case kmmNoteOn:
-                    handleKeyOn(time, channel, message.getDataByte(0), message.getDataByte(1));
+                    midi->handleKeyOn(time, channel, message.getDataByte(0), message.getDataByte(1));
                     break;
                 case kmmPolyphonicKeyPressure:
-                    handlePolyAfterTouch(time, channel, message.getDataByte(0), message.getDataByte(1));
+                    midi->handlePolyAfterTouch(time, channel, message.getDataByte(0), message.getDataByte(1));
                     break;
                 case kmmControlChange:
-                    handleCtrlChange(time, channel, message.getDataByte(0), message.getDataByte(1));
+                    midi->handleCtrlChange(time, channel, message.getDataByte(0), message.getDataByte(1));
                     break;
                 case kmmProgramChange:
-                    handleProgChange(time, channel, message.getDataByte(0));
+                    midi->handleProgChange(time, channel, message.getDataByte(0));
                     break;
                 case kmmChannelPressure:
-                    handleAfterTouch(time, channel, message.getDataByte(0));
+                    midi->handleAfterTouch(time, channel, message.getDataByte(0));
                     break;
                 case kmmPitchBend:
-                    handlePitchWheel(time, channel, message.getDataByte(0), message.getDataByte(1));
+                    midi->handlePitchWheel(time, channel, message.getDataByte(0), message.getDataByte(1));
                     break;
                 case kmmSystem:
                     {
@@ -76,17 +80,15 @@ class bela_midi : public midi_handler {
                         switch (systemRealtimeByte)
                         {
                             case MIDI_CLOCK:
-                                handleClock(time);
+                                midi->handleClock(time);
                                 break;
                             case MIDI_START:
-                                handleStart(time);
-                                break;
+                            // We can consider start and continue as identical messages
                             case MIDI_CONT:
-                                // We can consider start and continue as identical messages.
-                                handleStart(time);
+                                midi->handleStart(time);
                                 break;
                             case MIDI_STOP:
-                                handleStop(0);
+                                midi->handleStop(time);
                                 break;
                             case MIDI_SYSEX_START:
                         #if 0 // this is not implemented on Bela yet
@@ -96,9 +98,7 @@ class bela_midi : public midi_handler {
                                 }
                                 // Would be nice to do this:
                                 // std::vector<unsigned char> sysex(message.getData(), message.getData() + message.getNumDataBytes());
-                                for (unsigned int i = 0; i < midi->fMidiInputs.size(); i++) {
-                                    midi->fMidiInputs[i]->sysEx(sysex);
-                                }
+                                midi->handleSysex(time, sysex);
                         #endif
                                 break;
                             default:
@@ -115,8 +115,7 @@ class bela_midi : public midi_handler {
     
     public:
     
-        bela_midi()
-            :midi_handler("bela")
+        bela_midi():midi_handler("bela")
         {}
     
         virtual ~bela_midi()

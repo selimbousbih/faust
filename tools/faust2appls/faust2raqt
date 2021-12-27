@@ -9,8 +9,9 @@
 
 . faustpath
 . faustoptflags
+. usage.sh
 
-CXXFLAGS=$MYGCCFLAGS
+CXXFLAGS+=" $MYGCCFLAGS"  # So that additional CXXFLAGS can be used
 
 ARCHFILE=$FAUSTARCH/ra-qt.cpp
 ARCHLIB="-L/usr/local/lib -lrtaudio"
@@ -35,13 +36,12 @@ DEPLOY="yes"
 
 for p in $@; do
     if [ $p = "-help" ] || [ $p = "-h" ]; then
-        echo "faust2raqt [-osc] [-httpd] [-poly] [-midi] [-nodeploy] [additional Faust options (-vec -vs 8...)] <file.dsp>"
-        echo "Use '-httpd' to activate HTTP control"
-        echo "Use '-qrcode' to activate QR code generation"
-        echo "Use '-poly' to produce a polyphonic DSP, ready to be used with MIDI events"
-        echo "Use '-midi' to activate MIDI control"
-        echo "Use '-osc' to activate OSC control"
-        echo "Use '-nodeploy' to not create a self-contained application using 'macdeployqt'"
+        usage faust2raqt "[options] [Faust options] <file.dsp>"
+        require Qt
+        echo "Compiles Faust programs to RtAudio-Qt"
+        option
+        options -httpd -osc -midi -qrcode -poly -nodeploy
+        option "Faust options"
         exit
     fi
     
@@ -61,7 +61,7 @@ for p in $@; do
 		QRDEFS="DEFINES += QRCODECTRL"
     elif [ ${p:0:1} = "-" ]; then
 	    OPTIONS="$OPTIONS $p"
-	elif [[ -f "$p" ]]; then
+	elif [[ -f "$p" ]] && [ ${p: -4} == ".dsp" ]; then
 	    FILES="$FILES $p"
     else
 	    OPTIONS="$OPTIONS $p"        
@@ -127,7 +127,10 @@ for p in $FILES; do
     fi
 
     rm -rf "$SRCDIR/${f%.dsp}$EXT"
-    cp -r "$TMP/${f%.dsp}$EXT" "$SRCDIR/${f%.dsp}$EXT"
+    cp -a "$TMP/${f%.dsp}$EXT" "$SRCDIR/${f%.dsp}$EXT"
+    if [[ $(uname) == Darwin ]]; then
+        codesign --sign - --deep --force "$SRCDIR/${f%.dsp}$EXT"
+    fi
     rm -rf "$TDR"
 
     # collect binary file name for FaustGIDE
@@ -135,5 +138,3 @@ for p in $FILES; do
 done
 
 echo $BINARIES
-
-

@@ -25,14 +25,15 @@
 #ifndef __Soundfile__
 #define __Soundfile__
 
-#include <iostream>
 #include <string.h>
+#include <string>
+#include <vector>
 
 #ifndef FAUSTFLOAT
 #define FAUSTFLOAT float
 #endif
 
-#define BUFFER_SIZE 16384
+#define BUFFER_SIZE 1024
 #define SAMPLE_RATE 44100
 #define MAX_CHAN 64
 #define MAX_SOUNDFILE_PARTS 256
@@ -63,28 +64,102 @@
 
 PRE_PACKED_STRUCTURE
 struct Soundfile {
-    FAUSTFLOAT** fBuffers;
-    int* fLength;   // length of each part
-    int* fSR;       // sample rate of each part
-    int* fOffset;   // offset of each part in the global buffer
+    void* fBuffers; // will be set with double** or float** chosen at runtime
+    int* fLength;   // length of each part (so fLength[P] contains the length in frames of part P)
+    int* fSR;       // sample rate of each part (so fSR[P] contains the SR of part P)
+    int* fOffset;   // offset of each part in the global buffer (so fOffset[P] contains the offset in frames of part P)
     int fChannels;  // max number of channels of all concatenated files
+    bool fIsDouble; // keep the sample format (float or double)
 
-    Soundfile()
+    Soundfile(int cur_chan, int length, int max_chan, bool is_double)
     {
-        fBuffers  = NULL;
-        fChannels = -1;
         fLength   = new int[MAX_SOUNDFILE_PARTS];
         fSR       = new int[MAX_SOUNDFILE_PARTS];
         fOffset   = new int[MAX_SOUNDFILE_PARTS];
+        fIsDouble = is_double;
+        fChannels = cur_chan;
+        if (fIsDouble) {
+            fBuffers = allocBufferReal<double>(cur_chan, length, max_chan);
+        } else {
+            fBuffers = allocBufferReal<float>(cur_chan, length, max_chan);
+        }
     }
-
+    
+    template <typename REAL>
+    void* allocBufferReal(int cur_chan, int length, int max_chan)
+    {
+        REAL** buffers = new REAL*[max_chan];
+        for (int chan = 0; chan < cur_chan; chan++) {
+            buffers[chan] = new REAL[length];
+            memset(buffers[chan], 0, sizeof(REAL) * length);
+        }
+        return buffers;
+    }
+    
+    void copyToOut(int size, int channels, int max_channels, int offset, void* buffer)
+    {
+        if (fIsDouble) {
+            copyToOutReal<double>(size, channels, max_channels, offset, buffer);
+       } else {
+            copyToOutReal<float>(size, channels, max_channels, offset, buffer);
+        }
+    }
+    
+    void shareBuffers(int cur_chan, int max_chan)
+    {
+        // Share the same buffers for all other channels so that we have max_chan channels available
+        if (fIsDouble) {
+            for (int chan = cur_chan; chan < max_chan; chan++) {
+                static_cast<double**>(fBuffers)[chan] = static_cast<double**>(fBuffers)[chan % cur_chan];
+            }
+        } else {
+            for (int chan = cur_chan; chan < max_chan; chan++) {
+                static_cast<float**>(fBuffers)[chan] = static_cast<float**>(fBuffers)[chan % cur_chan];
+            }
+        }
+    }
+    
+    template <typename REAL>
+    void copyToOutReal(int size, int channels, int max_channels, int offset, void* buffer)
+    {
+        for (int sample = 0; sample < size; sample++) {
+            for (int chan = 0; chan < channels; chan++) {
+                static_cast<REAL**>(fBuffers)[chan][offset + sample] = static_cast<REAL*>(buffer)[sample * max_channels + chan];
+            }
+        }
+    }
+    
+    template <typename REAL>
+    void getBuffersOffsetReal(void* buffers, int offset)
+    {
+        for (int chan = 0; chan < fChannels; chan++) {
+            static_cast<REAL**>(buffers)[chan] = &(static_cast<REAL**>(fBuffers))[chan][offset];
+        }
+    }
+    
+    void emptyFile(int part, int& offset)
+    {
+        fLength[part] = BUFFER_SIZE;
+        fSR[part] = SAMPLE_RATE;
+        fOffset[part] = offset;
+        // Update offset
+        offset += fLength[part];
+    }
+ 
     ~Soundfile()
     {
         // Free the real channels only
-        for (int chan = 0; chan < fChannels; chan++) {
-            delete fBuffers[chan];
+        if (fIsDouble) {
+            for (int chan = 0; chan < fChannels; chan++) {
+                delete[] static_cast<double**>(fBuffers)[chan];
+            }
+            delete[] static_cast<double**>(fBuffers);
+        } else {
+            for (int chan = 0; chan < fChannels; chan++) {
+                delete[] static_cast<float**>(fBuffers)[chan];
+            }
+            delete[] static_cast<float**>(fBuffers);
         }
-        delete[] fBuffers;
         delete[] fLength;
         delete[] fSR;
         delete[] fOffset;
@@ -101,47 +176,7 @@ class SoundfileReader {
    protected:
     
     int fDriverSR;
-    
-    void emptyFile(Soundfile* soundfile, int part, int& offset)
-    {
-        soundfile->fLength[part] = BUFFER_SIZE;
-        soundfile->fSR[part] = SAMPLE_RATE;
-        soundfile->fOffset[part] = offset;
-        // Update offset
-        offset += soundfile->fLength[part];
-    }
-
-    Soundfile* createSoundfile(int cur_chan, int length, int max_chan)
-    {
-        Soundfile* soundfile = new Soundfile();
-        if (!soundfile) {
-            throw std::bad_alloc();
-        }
-        
-        soundfile->fBuffers = new FAUSTFLOAT*[max_chan];
-        if (!soundfile->fBuffers) {
-            throw std::bad_alloc();
-        }
-        
-        for (int chan = 0; chan < cur_chan; chan++) {
-            soundfile->fBuffers[chan] = new FAUSTFLOAT[length];
-            if (!soundfile->fBuffers[chan]) {
-                throw std::bad_alloc();
-            }
-            memset(soundfile->fBuffers[chan], 0, sizeof(FAUSTFLOAT) * length);
-        }
-        
-        soundfile->fChannels = cur_chan;
-        return soundfile;
-    }
-
-    void getBuffersOffset(Soundfile* soundfile, FAUSTFLOAT** buffers, int offset)
-    {
-        for (int chan = 0; chan < soundfile->fChannels; chan++) {
-            buffers[chan] = &soundfile->fBuffers[chan][offset];
-        }
-    }
-    
+   
     // Check if a soundfile exists and return its real path_name
     std::string checkFile(const std::vector<std::string>& sound_directories, const std::string& file_name)
     {
@@ -173,12 +208,12 @@ class SoundfileReader {
      * Check the availability of a sound resource.
      *
      * @param buffer - the sound buffer
-     * @param buffer - the sound buffer length
+     * @param size - the sound buffer length
      *
      * @return true if the sound resource is available, false otherwise.
      */
 
-    virtual bool checkFile(unsigned char* buffer, size_t length) { return true; }
+    virtual bool checkFile(unsigned char* buffer, size_t size) { return true; }
 
     /**
      * Get the channels and length values of the given sound resource.
@@ -194,7 +229,7 @@ class SoundfileReader {
      * Get the channels and length values of the given sound resource.
      *
      * @param buffer - the sound buffer
-     * @param buffer - the sound buffer length
+     * @param size - the sound buffer length
      * @param channels - the channels value to be filled with the sound resource number of channels
      * @param length - the length value to be filled with the sound resource length in frames
      *
@@ -204,6 +239,7 @@ class SoundfileReader {
     /**
      * Read one sound resource and fill the 'soundfile' structure accordingly
      *
+     * @param soundfile - the soundfile to be filled
      * @param path_name - the name of the file, or sound resource identified this way
      * @param part - the part number to be filled in the soundfile
      * @param offset - the offset value to be incremented with the actual sound resource length in frames
@@ -215,14 +251,15 @@ class SoundfileReader {
     /**
      * Read one sound resource and fill the 'soundfile' structure accordingly
      *
+     * @param soundfile - the soundfile to be filled
      * @param buffer - the sound buffer
-     * @param buffer - the sound buffer length
+     * @param size - the sound buffer length
      * @param part - the part number to be filled in the soundfile
      * @param offset - the offset value to be incremented with the actual sound resource length in frames
      * @param max_chan - the maximum number of mono channels to fill
      *
      */
-    virtual void readFile(Soundfile* soundfile, unsigned char* buffer, size_t length, int part, int& offset, int max_chan) {}
+    virtual void readFile(Soundfile* soundfile, unsigned char* buffer, size_t size, int part, int& offset, int max_chan) {}
 
   public:
     
@@ -230,10 +267,10 @@ class SoundfileReader {
     
     void setSampleRate(int sample_rate) { fDriverSR = sample_rate; }
    
-    Soundfile* createSoundfile(const std::vector<std::string>& path_name_list, int max_chan)
+    Soundfile* createSoundfile(const std::vector<std::string>& path_name_list, int max_chan, bool is_double)
     {
         try {
-            int cur_chan = 1; // At least one buffer
+            int cur_chan = 1; // At least one channel
             int total_length = 0;
             
             // Compute total length and channels max of all files
@@ -253,7 +290,7 @@ class SoundfileReader {
             total_length += (MAX_SOUNDFILE_PARTS - path_name_list.size()) * BUFFER_SIZE;
             
             // Create the soundfile
-            Soundfile* soundfile = createSoundfile(cur_chan, total_length, max_chan);
+            Soundfile* soundfile = new Soundfile(cur_chan, total_length, max_chan, is_double);
             
             // Init offset
             int offset = 0;
@@ -261,7 +298,7 @@ class SoundfileReader {
             // Read all files
             for (int i = 0; i < int(path_name_list.size()); i++) {
                 if (path_name_list[i] == "__empty_sound__") {
-                    emptyFile(soundfile, i, offset);
+                    soundfile->emptyFile(i, offset);
                 } else {
                     readFile(soundfile, path_name_list[i], i, offset, max_chan);
                 }
@@ -269,18 +306,15 @@ class SoundfileReader {
             
             // Complete with empty parts
             for (int i = int(path_name_list.size()); i < MAX_SOUNDFILE_PARTS; i++) {
-                emptyFile(soundfile, i, offset);
+                soundfile->emptyFile(i, offset);
             }
             
             // Share the same buffers for all other channels so that we have max_chan channels available
-            for (int chan = cur_chan; chan < max_chan; chan++) {
-                soundfile->fBuffers[chan] = soundfile->fBuffers[chan % cur_chan];
-            }
-            
+            soundfile->shareBuffers(cur_chan, max_chan);
             return soundfile;
             
         } catch (...) {
-            return NULL;
+            return nullptr;
         }
     }
 

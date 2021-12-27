@@ -29,12 +29,12 @@
 
 //-----------------------new environment management----------------------------
 //
-// The environement is made of layers. Each layer contains a set of definitions
+// The environment is made of layers. Each layer contains a set of definitions
 // stored as properties of the layer. Each definition can refers to other
 // definitions of the same layer or of subsequent layers. Recursive
 // definitions are not allowed. Multiple definitions of the same symbol
 // in a layer is allowed but generate a warning when the definition is
-// different
+// different.
 //-----------------------------------------------------------------------------
 
 /**
@@ -84,7 +84,7 @@ bool isEnvBarrier(Tree lenv)
 static void addLayerDef(Tree id, Tree def, Tree lenv)
 {
     // check for multiple definitions of a symbol in the same layer
-    Tree olddef = NULL;
+    Tree olddef = nullptr;
     if (getProperty(lenv, id, olddef)) {
         if (def == olddef) {
             // evalwarning(getDefFileProp(id), getDefLineProp(id), "equivalent re-definitions of", id);
@@ -152,6 +152,7 @@ bool searchIdDef(Tree id, Tree& def, Tree lenv)
     // or a barrier (or nil) is reached
 
     while (!isEnvBarrier(lenv) && !getProperty(lenv, id, def)) {
+        faustassert(lenv->arity() > 0);
         lenv = lenv->branch(0);
     }
     return !isEnvBarrier(lenv);
@@ -186,6 +187,7 @@ Tree copyEnvReplaceDefs(Tree anEnv, Tree ldefs, Tree visited, Tree curEnv)
     Tree         copyEnv;
 
     anEnv->exportProperties(ids, clos);        // get the definitions of the environment
+    faustassert(anEnv->arity() > 0);
     copyEnv = pushNewLayer(anEnv->branch(0));  // create new environment with same stack
     updateClosures(clos, anEnv, copyEnv);      // update the closures replacing oldEnv with newEnv
 

@@ -9,11 +9,11 @@
 #include "faust/gui/SoundUI.h"
 
 #include "faust/dsp/llvm-dsp.h"
+#include "faust/dsp/libfaust.h"
 #include "faust/dsp/one-sample-dsp.h"
 #include "faust/gui/GUI.h"
 #include "faust/dsp/poly-dsp.h"
 #include "faust/audio/channels.h"
-#include "faust/audio/fpe.h"
 #include "faust/gui/DecoratorUI.h"
 #include "faust/gui/FUI.h"
 #include "faust/gui/MidiUI.h"
@@ -29,32 +29,6 @@ using namespace std;
 
 std::list<GUI*> GUI::fGuiList;
 ztimedmap GUI::gTimedZoneMap;
-
-//----------------------------------------------------------------------------
-// me_dsp:  A decorator to check math exceptions
-//----------------------------------------------------------------------------
-
-class me_dsp : public decorator_dsp {
-    
-    public:
-    
-        me_dsp(dsp* dsp):decorator_dsp(dsp) {}
-        
-        virtual void compute(int count, FAUSTFLOAT** inputs, FAUSTFLOAT** outputs)
-        {
-            TRY_FPE
-            fDSP->compute(count, inputs, outputs);
-            CATCH_FPE
-        }
-        
-        virtual void compute(double date_usec, int count, FAUSTFLOAT** inputs, FAUSTFLOAT** outputs)
-        {
-            TRY_FPE
-            fDSP->compute(date_usec, count, inputs, outputs);
-            CATCH_FPE
-        }
-  
-};
 
 //----------------------------------------------------------------------------
 // Test MemoryReader
@@ -80,9 +54,17 @@ struct TestMemoryReader : public MemoryReader {
         soundfile->fOffset[part] = offset;
         
         // Audio frames have to be written for each chan
-        for (int sample = 0; sample < SOUND_LENGTH; sample++) {
-            for (int chan = 0; chan < SOUND_CHAN; chan++) {
-                soundfile->fBuffers[chan][offset + sample] = std::sin(part + (2 * M_PI * float(sample)/SOUND_LENGTH));
+       if (soundfile->fIsDouble) {
+            for (int sample = 0; sample < SOUND_LENGTH; sample++) {
+                for (int chan = 0; chan < SOUND_CHAN; chan++) {
+                    static_cast<double**>(soundfile->fBuffers)[chan][offset + sample] = std::sin(part + (2 * M_PI * double(sample)/SOUND_LENGTH));
+                }
+            }
+        } else {
+            for (int sample = 0; sample < SOUND_LENGTH; sample++) {
+                for (int chan = 0; chan < SOUND_CHAN; chan++) {
+                    static_cast<float**>(soundfile->fBuffers)[chan][offset + sample] = std::sin(part + (2 * M_PI * float(sample)/SOUND_LENGTH));
+                }
             }
         }
 
@@ -128,7 +110,7 @@ struct CheckControlUI : public GenericUI {
    
     bool checkDefaults()
     {
-        for (auto& it : fControlZone) {
+        for (const auto& it : fControlZone) {
             if (*it.first != it.second) return false;
         }
         return true;
@@ -136,7 +118,7 @@ struct CheckControlUI : public GenericUI {
     
     void initRandom()
     {
-        for (auto& it : fControlZone) {
+        for (const auto& it : fControlZone) {
             *it.first = 0.123456789;
         }
     }
@@ -189,10 +171,8 @@ static void runPolyDSP(dsp* dsp, int& linenum, int nbsamples, int num_voices = 4
     
     // Soundfile
     TestMemoryReader memory_reader;
-    SoundUI sound_ui("", -1, &memory_reader);
-    DSP->setGroup(false);
+    SoundUI sound_ui("", -1, &memory_reader, (sizeof(FAUSTFLOAT) == sizeof(double)));
     DSP->buildUserInterface(&sound_ui);
-    DSP->setGroup(true);
   
     // Get control and then 'initRandom'
     CheckControlUI controlui;
@@ -280,7 +260,7 @@ static void runDSP(dsp* DSP, const string& file, int& linenum, int nbsamples, bo
     
     // Soundfile
     TestMemoryReader memory_reader;
-    SoundUI sound_ui("", -1, &memory_reader);
+    SoundUI sound_ui("", -1, &memory_reader, (sizeof(FAUSTFLOAT) == sizeof(double)));
     DSP->buildUserInterface(&sound_ui);
     
     // Get control and then 'initRandom'
@@ -320,8 +300,14 @@ static void runDSP(dsp* DSP, const string& file, int& linenum, int nbsamples, bo
         cerr << "ERROR runDSP in checkDefaults after 'instanceInit'" << std::endl;
     }
     
-    // Init again
-    DSP->init(44100);
+    // To test that instanceInit properly init a cloned DSP
+    DSP = DSP->clone();
+    DSP->instanceInit(44100);
+    
+    // Init UIs on cloned DSP
+    DSP->buildUserInterface(&finterface);
+    DSP->buildUserInterface(&sound_ui);
+    DSP->buildUserInterface(&midi_ui);
     
     int nins = DSP->getNumInputs();
     int nouts = DSP->getNumOutputs();
@@ -348,7 +334,7 @@ static void runDSP(dsp* DSP, const string& file, int& linenum, int nbsamples, bo
     GUI::updateAllGuis();
     
     // print audio frames
-    int i;
+    int i = 0;
     try {
         while (nbsamples > 0) {
             if (run == 0) {
@@ -373,7 +359,7 @@ static void runDSP(dsp* DSP, const string& file, int& linenum, int nbsamples, bo
            
             run++;
             // Print samples
-            for (int i = 0; i < nFrames; i++) {
+            for (i = 0; i < nFrames; i++) {
                 printf("%6d : ", linenum++);
                 for (int c = 0; c < nouts; c++) {
                     FAUSTFLOAT f = normalize(ochan->buffers()[c][i]);
@@ -384,7 +370,7 @@ static void runDSP(dsp* DSP, const string& file, int& linenum, int nbsamples, bo
             nbsamples -= nFrames;
         }
     } catch (...) {
-        cerr << "ERROR in " << file << " line : " << i << std::endl;
+        cerr << "ERROR in '" << file << "' at line : " << i << std::endl;
     }
     
     delete ichan;

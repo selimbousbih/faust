@@ -30,6 +30,7 @@
 #include <map>
 #include <set>
 #include <string>
+
 #include "garbageable.hh"
 #include "signals.hh"
 #include "tlib.hh"
@@ -61,13 +62,7 @@ class Description : public virtual Garbageable {
 
    public:
     Description()
-        : /*fName("Unknow"),
-          fAuthor("Unknow"),
-          fCopyright("Unknow"),
-          fLicense("Unknow"),
-          fVersion("Unknow"),*/
-
-          fInputs(0),
+        : fInputs(0),
           fOutputs(0),
           fWidgetID(0),
           fActiveWidgetCount(0),

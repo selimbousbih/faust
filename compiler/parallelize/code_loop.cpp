@@ -19,15 +19,6 @@
  ************************************************************************
  ************************************************************************/
 
-/**********************************************************************
-            - code_gen.h : generic code generator (projet FAUST) -
-
-
-        Historique :
-        -----------
-
-***********************************************************************/
-
 #include <list>
 #include <map>
 #include <set>
@@ -37,6 +28,7 @@
 #include "code_loop.hh"
 #include "floats.hh"
 #include "global.hh"
+#include "fir_to_fir.hh"
 
 using namespace std;
 
@@ -57,11 +49,7 @@ ForLoopInst* CodeLoop::generateScalarLoop(const string& counter, bool loop_var_i
         loop_increment = loop_decl->store(InstBuilder::genAdd(loop_decl->load(), 1));
     }
 
-    BlockInst* block = InstBuilder::genBlockInst();
-    pushBlock(fPreInst, block);
-    pushBlock(fComputeInst, block);
-    pushBlock(fPostInst, block);
-
+    BlockInst* block = generateOneSample();
     ForLoopInst* loop = InstBuilder::genForLoopInst(loop_decl, loop_end, loop_increment, block, fIsRecursive);
 
     BasicCloneVisitor cloner;
@@ -74,23 +62,38 @@ SimpleForLoopInst* CodeLoop::generateSimpleScalarLoop(const string& counter)
     ValueInst* upper_bound = InstBuilder::genLoadFunArgsVar(counter);
     ValueInst* lower_bound = InstBuilder::genInt32NumInst(0);
 
-    BlockInst* block = InstBuilder::genBlockInst();
-    pushBlock(fPreInst, block);
-    pushBlock(fComputeInst, block);
-    pushBlock(fPostInst, block);
-
+    BlockInst* block = generateOneSample();
     SimpleForLoopInst* loop = InstBuilder::genSimpleForLoopInst(fLoopIndex, upper_bound, lower_bound, false, block);
 
     BasicCloneVisitor cloner;
     return static_cast<SimpleForLoopInst*>(loop->clone(&cloner));
 }
 
+IteratorForLoopInst* CodeLoop::generateSimpleScalarLoop(const std::vector<string>& iterators)
+{
+    std::vector<NamedAddress*> iterators_value_inst;
+    for (const auto& iterator : iterators) {
+        iterators_value_inst.push_back(InstBuilder::genNamedAddress(iterator, Address::kStack));
+    }
+
+    BlockInst* block = generateOneSample();
+    IteratorForLoopInst* loop = InstBuilder::genIteratorForLoopInst(iterators_value_inst, false, block);
+
+    BasicCloneVisitor cloner;
+    return static_cast<IteratorForLoopInst*>(loop->clone(&cloner));
+}
+
 BlockInst* CodeLoop::generateOneSample()
 {
     BlockInst* block = InstBuilder::genBlockInst();
+
     pushBlock(fPreInst, block);
     pushBlock(fComputeInst, block);
     pushBlock(fPostInst, block);
+
+    // Expand and rewrite ControlInst as 'if (cond) {....}' instructions
+    ControlExpander exp;
+    block = exp.getCode(block);
 
     BasicCloneVisitor cloner;
     return static_cast<BlockInst*>(block->clone(&cloner));
@@ -157,7 +160,6 @@ bool CodeLoop::isEmpty()
  * returns true is this loop has recursive dependencies
  * and must be included in an enclosing loop
  */
-
 bool CodeLoop::hasRecDependencyIn(Tree S)
 {
     CodeLoop* l = this;

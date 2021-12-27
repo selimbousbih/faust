@@ -33,21 +33,18 @@ class FmodPrim : public xtended {
 
     virtual bool needCache() { return true; }
 
-    virtual ::Type infereSigType(const vector< ::Type>& args)
+    virtual ::Type infereSigType(const vector<::Type>& args)
     {
         faustassert(args.size() == arity());
+    
         interval i = args[0]->getInterval();
         interval j = args[1]->getInterval();
-
-        if (j.haszero()) {
-            // potential division by zero
-            // std::cerr << "potential division by zero in fmod(" << i << ", " << j << ")" << std::endl;
+        if (j.valid && gGlobal->gMathExceptions && j.haszero()) {
+            cerr << "WARNING : potential division by zero in fmod(" << i << ", " << j << ")" << endl;
         }
 
         return castInterval(floatCast(args[0] | args[1]), fmod(i, j));
     }
-
-    virtual void sigVisit(Tree sig, sigvisitor* visitor) {}
 
     virtual int infereSigOrder(const vector<int>& args)
     {
@@ -59,10 +56,19 @@ class FmodPrim : public xtended {
     {
         num n, m;
         faustassert(args.size() == arity());
-        if (isNum(args[0], n) && isNum(args[1], m)) {
+        if (isZero(args[1])) {
+            stringstream error;
+            error << "ERROR : % by 0 in " << ppsig(args[0]) << " % " << ppsig(args[1]) << endl;
+            throw faustexception(error.str());
+        } else if (isNum(args[0], n) && isNum(args[1], m)) {
             return tree(fmod(double(n), double(m)));
         } else {
-            return tree(symbol(), args[0], args[1]);
+            if (gGlobal->gMathApprox) {
+                // res = x - (y * T(int(x / y)))
+                return sigBinOp(kSub, args[0], sigBinOp(kMul, args[1], sigIntCast(sigBinOp(kDiv, args[0], args[1]))));
+            } else {
+                return tree(symbol(), args[0], args[1]);
+            }
         }
     }
 
@@ -80,7 +86,7 @@ class FmodPrim : public xtended {
         return container->pushFunction(subst("fmod$0", isuffix()), result_type, arg_types, casted_args);
     }
 
-    virtual string old_generateCode(Klass* klass, const vector<string>& args, const vector<Type>& types)
+    virtual string generateCode(Klass* klass, const vector<string>& args, const vector<::Type>& types)
     {
         faustassert(args.size() == arity());
         faustassert(types.size() == arity());
@@ -88,7 +94,7 @@ class FmodPrim : public xtended {
         return subst("fmod$2($0,$1)", args[0], args[1], isuffix());
     }
 
-    virtual string generateLateq(Lateq* lateq, const vector<string>& args, const vector< ::Type>& types)
+    virtual string generateLateq(Lateq* lateq, const vector<string>& args, const vector<::Type>& types)
     {
         faustassert(args.size() == arity());
         faustassert(types.size() == arity());

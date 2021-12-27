@@ -51,24 +51,24 @@ template <typename C> struct mapping
 /*!
 	\brief a faust node is a terminal node and represents a faust parameter controler
 */
-template <typename C> class FaustNode : public MessageDriven, public uiTypedItem<C>
+template <typename C> class FaustNode : public MessageDriven, public uiTypedItemReal<C>
 {
 	mapping<C>	fMapping;
-    RootNode* fRoot;
-    bool fInput;  // true for input nodes (slider, button...)
+    RootNode*   fRoot;
+    bool        fInput;  // true for input nodes (slider, button...)
 	
 	//---------------------------------------------------------------------
 	// Warning !!!
-	// The cast (C *)fZone is necessary because the real size allocated is
+	// The cast (C*)fZone is necessary because the real size allocated is
 	// only known at execution time. When the library is compiled, fZone is
 	// uniquely defined by FAUSTFLOAT.
 	//---------------------------------------------------------------------
-	bool	store(C val) { *(C *)this->fZone = fMapping.clip(val); return true; }
-	void	sendOSC() const;
+	bool store(C val) { *(C*)this->fZone = fMapping.clip(val); return true; }
+	void sendOSC() const;
 
 	protected:
 		FaustNode(RootNode* root, const char *name, C* zone, C init, C min, C max, const char* prefix, GUI* ui, bool initZone, bool input) 
-			: MessageDriven(name, prefix), uiTypedItem<C>(ui, zone), fMapping(min, max), fRoot(root), fInput(input)
+			: MessageDriven(name, prefix), uiTypedItemReal<C>(ui, zone), fMapping(min, max), fRoot(root), fInput(input)
 			{
                 if (initZone) {
                     *zone = init; 

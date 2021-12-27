@@ -33,18 +33,21 @@ class LogPrim : public xtended {
 
     virtual bool needCache() { return true; }
 
-    virtual ::Type infereSigType(const vector< ::Type>& args)
+    virtual ::Type infereSigType(const vector<::Type>& args)
     {
         faustassert(args.size() == arity());
         interval i = args[0]->getInterval();
-        if (i.valid && i.lo > 0) {
-            return castInterval(floatCast(args[0]), interval(log(i.lo), log(i.hi)));
-        } else {
-            return floatCast(args[0]);
+    
+        if (i.valid) {
+            // log(0) gives -INF but is still in the function domain
+            if (i.lo >= 0) {
+                return castInterval(floatCast(args[0]), interval(log(i.lo), log(i.hi)));
+            } else if (gGlobal->gMathExceptions) {
+                cerr << "WARNING : potential out of domain in log(" << i << ")" << endl;
+            }
         }
+        return floatCast(args[0]);
     }
-
-    virtual void sigVisit(Tree sig, sigvisitor* visitor) {}
 
     virtual int infereSigOrder(const vector<int>& args)
     {
@@ -56,8 +59,19 @@ class LogPrim : public xtended {
     {
         num n;
         faustassert(args.size() == arity());
-        if (isNum(args[0], n)) {
-            return tree(log(double(n)));
+    
+        // log(exp(sig)) ==> sig
+        xtended* xt = (xtended*)getUserData(args[0]);
+        if (xt == gGlobal->gExpPrim) {
+            return args[0]->branch(0);
+        } else if (isNum(args[0], n)) {
+            if (double(n) < 0) {
+                stringstream error;
+                error << "ERROR : out of domain log(" << ppsig(args[0]) << ")" << endl;
+                throw faustexception(error.str());
+            } else {
+                return tree(log(double(n)));
+            }
         } else {
             return tree(symbol(), args[0]);
         }
@@ -77,7 +91,7 @@ class LogPrim : public xtended {
         return container->pushFunction(subst("log$0", isuffix()), result_type, arg_types, casted_args);
     }
 
-    virtual string old_generateCode(Klass* klass, const vector<string>& args, const vector<Type>& types)
+    virtual string generateCode(Klass* klass, const vector<string>& args, const vector<::Type>& types)
     {
         faustassert(args.size() == arity());
         faustassert(types.size() == arity());
@@ -85,7 +99,7 @@ class LogPrim : public xtended {
         return subst("log$1($0)", args[0], isuffix());
     }
 
-    virtual string generateLateq(Lateq* lateq, const vector<string>& args, const vector< ::Type>& types)
+    virtual string generateLateq(Lateq* lateq, const vector<string>& args, const vector<::Type>& types)
     {
         faustassert(args.size() == arity());
         faustassert(types.size() == arity());

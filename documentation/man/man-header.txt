@@ -1,9 +1,9 @@
-% man(1) Version 2.19.0 (04-October-2019) | Faust man page
+% man(1) Version 2.38.15 (22-December-2021) | Faust man page
 
 NAME
 ====
 
-Faust  -  DSP  to  C/C++,  Rust,  LLVM  IR,  JAVA, WebAssembly (wast/wasm), Interpreter compiler
+Faust - DSP to C/C++, CSharp, DLang, Interpreter, Java, LLVM IR, Rust, SOUL, and WebAssembly (wast/wasm)
 
 SYNOPSIS
 ========

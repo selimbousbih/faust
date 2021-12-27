@@ -1,6 +1,6 @@
 /************************************************************************
  FAUST Architecture File
- Copyright (C) 2019 GRAME, Centre National de Creation Musicale
+ Copyright (C) 2019-2020 GRAME, Centre National de Creation Musicale
  ---------------------------------------------------------------------
  This Architecture section is free software; you can redistribute it
  and/or modify it under the terms of the GNU General Public License
@@ -22,10 +22,7 @@
  ************************************************************************/
 
 #include <iostream>
-#include <sstream>
-#include <fstream>
 #include <string>
-#include <map>
 
 #include "faust/gui/GTKUI.h"
 #include "faust/audio/jack-dsp.h"
@@ -37,60 +34,73 @@
 
 using namespace std;
 
+list<GUI*> GUI::fGuiList;
+ztimedmap GUI::gTimedZoneMap;
+
+#define FAUST_FILE        "faust.soul"
+#define FAUST_PATCH_FILE  "faust.soulpatch"
+
+#define HYBRID_FILE       "hybrid.soul"
+#define HYBRID_PATCH_FILE "hybrid.soulpatch"
+
 static bool endWith(const string& str, const string& suffix)
 {
     size_t i = str.rfind(suffix);
     return (i != string::npos) && (i == (str.length() - suffix.length()));
 }
 
-list<GUI*> GUI::fGuiList;
-ztimedmap GUI::gTimedZoneMap;
-
-#define HYBRID_FILE      "hybrid.soul"
-#define HYBRID_PATH_FILE "hybrid.soulpatch"
-
 int main(int argc, char* argv[])
 {
     if (isopt(argv, "-h") || isopt(argv, "-help")) {
-        cout << "soul-faust-player foo.soulpatch (pure SOUL patch) or foo.soul (pure SOUL code or Faust/SOUL hybrid)" << endl;
+        cout << "soul-faust-player <foo.dsp> (pure Faust code), <foo.soulpatch> (pure SOUL patch) or <foo.soul> (pure SOUL code or Faust/SOUL hybrid code)" << endl;
         exit(-1);
     }
     
     char* filename = argv[argc-1];
     string real_file;
     
-    if (endWith(filename, ".soul")) {
+    int argc1 = 0;
+    const char* argv1[64];
+    for (int i = 1; i < argc-1; i++) {
+        argv1[argc1++] = argv[i];
+    }
+    
+    if (endWith(filename, ".dsp")) {
         
-        // We have a pure SOUL file or a Faust/SOUL file. Parse it, compile the Faust part to SOUL, generate the SOUL result
+        // We have a pure Faust file, compile it to SOUL
         faust_soul_parser parser;
-        if (!parser.parse(filename, HYBRID_FILE)) {
-            cerr << "ERROR : file '" << filename << "' cannot be opened!\n";
+        if (!parser.generateSOULFile(filename, FAUST_FILE, argc1, argv1)) {
+            cerr << "ERROR : file '" << filename << "' cannot be opened or compiled!\n";
             exit(-1);
         }
         
         // Generate "soulpatch" file
-        std::ofstream patch_file(HYBRID_PATH_FILE);
-        patch_file << "{";
-        patch_file << "\"soulPatchV1\":" << endl;
-            patch_file << "\t{" << endl;
-                patch_file << "\t\t\"ID\": \"grame.soul.hybrid\"," << endl;
-                patch_file << "\t\t\"version\": \"1.0\"," << endl;
-                patch_file << "\t\t\"name\": \"hybrid\"," << endl;
-                patch_file << "\t\t\"description\": \"SOUL example\"," << endl;
-                patch_file << "\t\t\"category\": \"synth\"," << endl;
-                patch_file << "\t\t\"manufacturer\": \"GRAME\"," << endl;
-                patch_file << "\t\t\"website\": \"https://faust.grame.fr\"," << endl;
-                patch_file << "\t\t\"isInstrument\": true," << endl;
-                patch_file << "\t\t\"source\": "; patch_file << "\"" << HYBRID_FILE << "\"" << endl;
-            patch_file << "\t}" << endl;
-        patch_file << "}";
-        patch_file.close();
+        parser.createSOULPatch(FAUST_FILE);
+        real_file = FAUST_PATCH_FILE;
         
-        real_file = HYBRID_PATH_FILE;
-    } else {
+    } else if (endWith(filename, ".soul")) {
+        
+        // We have a pure SOUL file or a Faust/SOUL file, parse it, compile the Faust part to SOUL, generate the SOUL result
+        faust_soul_parser parser;
+        if (!parser.parseSOULFile(filename, HYBRID_FILE, argc1, argv1)) {
+            cerr << "ERROR : file '" << filename << "' cannot be opened or compiled!\n";
+            exit(-1);
+        }
+        
+        // Generate "soulpatch" file
+        parser.createSOULPatch(HYBRID_FILE);
+        real_file = HYBRID_PATCH_FILE;
+        
+    } else if (endWith(filename, ".soulpatch")) {
+        
+        // We have a SOUL patchfile
         real_file = filename;
+        
+    } else {
+        cerr << "Unsupported file extension" << endl;
+        exit(1);
     }
-    
+   
     try {
         string error_msg;
         soul_dsp_factory* factory = createSOULDSPFactoryFromFile(real_file, argc, (const char**)argv, error_msg);
@@ -117,8 +127,7 @@ int main(int argc, char* argv[])
         midi_handler.startMidi();
         audio.start();
         
-        // Call run all GUI instances
-        GUI::runAllGuis();
+        interface.run();
         
         midi_handler.stopMidi();
         audio.stop();

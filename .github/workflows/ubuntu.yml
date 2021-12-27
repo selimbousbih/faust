@@ -1,0 +1,22 @@
+name: Ubuntu
+
+on:
+  push:
+    branches: 
+        - master
+        - master-dev
+  pull_request:
+    branches: [ master-dev ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install libmicrohttpd
+      run: sudo apt-get install libmicrohttpd-dev
+    - name: Build Faust
+      run: make

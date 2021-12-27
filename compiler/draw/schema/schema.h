@@ -43,7 +43,6 @@ struct point : public virtual Garbageable {
 
     point() : x(0.0), y(0.0) {}
     point(double u, double v) : x(u), y(v) {}
-    point(const point& p) : x(p.x), y(p.y) {}
 
     bool operator<(const point& p) const
     {
@@ -64,7 +63,7 @@ struct trait : public virtual Garbageable {
     bool  hasRealInput;
     bool  hasRealOutput;
 
-    trait(const point& p1, const point& p2) : start(p1), end(p2) {}
+    trait(const point& p1, const point& p2) : start(p1), end(p2), hasRealInput(false), hasRealOutput(false) {}
     void draw(device& dev) const { dev.trait(start.x, start.y, end.x, end.y); }
 
     bool operator<(const trait& t) const

@@ -4,29 +4,83 @@ Several programs and tools are available to test the dynamic compilation chain, 
 
 ## dynamic-faust
 
-The **dynamic-faust** tool uses the dynamic compilation chain, and compiles a Faust DSP source to a LLVM IR (.ll), bicode (.bc), machine code (.mc) or object code (.o) output file.
+The **dynamic-faust** tool uses the dynamic compilation chain (based on the LLVM backend), and compiles a Faust DSP source to a LLVM IR (.ll), bicode (.bc), machine code (.mc) or object code (.o) output file. CPU cross-compilation can be done using the `-target` option. The best compilation options for the native CPU (at Faust compiler level) can be discovered using the `-opt` option. 
 
-`dynamic-faust [-target xxx] [-opt (native|generic)] [additional Faust options (-vec -vs 8...)] foo.dsp`
+`dynamic-faust [-target xxx] [-opt native|generic] [-o foo.ll|foo.bc|foo.mc|foo.o] [additional Faust options (-vec -vs 8...)] foo.dsp`
 
 Here are the available options:
 
-- `-target xxx to cross-compile the code for a different architecture (like 'i386-apple-macosx10.6.0:opteron')`
-- `-opt (native|generic) to discover and compile with the best compilation parameters`
+- `-target xxx to cross-compile the code for a different architecture (like 'x86_64-apple-darwin15.6.0:haswell')`
+- `-opt native to activate the best compilation options for the native CPU`
+- `-opt generic to activate the best compilation options for a generic CPU`
 - `-o foo.ll to generate an LLVM IR textual file`
 - `-o foo.bc to generate an LLVM bitcode file`
 - `-o foo.mc to generate an LLVM machine code file`
 - `-o foo.o to generate an object code file`
 
-## dynamic-jack-gtk
+## faust2object
 
-The **dynamic-jack-gtk** tool uses the dynamic compilation chain, compiles a Faust DSP source, and runs it with the LLVM or Interpreter backend. It can also read a precompiled DSP factory, either in IR (.ll), bitcode (.bc), or machine code (.mc) when using the LLVM backend, or byte code (.bc) when using the Interpreter backend.
+The **faust2object** tool  either uses the standard C++ compiler or the LLVM dynamic compilation chain (the **dynamic-faust** tool) to compile a Faust DSP to object code files (.o) and wrapper C++ header files for different CPUs. The DSP name is used in the generated C++ and object code files, thus allowing to generate distinct versions of the code that can finally be linked together in a single binary. Using a C++ wrapper, the DSP can be downsampled of upsampled by a factor, with a filter going from 0 (= no filter), then 1 (lower quality) to 4 (better quality).
 
-`dynamic-jack-gtk [-llvm|interp] [-nvoices N] [-midi] [-osc] [-httpd] [-resample] [additional Faust options (-vec -vs 8...)] foo.dsp/foo.fbc/foo.ll/foo.bc/foo.mc`
+`faust2object [nocona] [core2] [penryn] [bonnell] [atom] [silvermont] [slm] [goldmont] [goldmont-plus] [tremont] [nehalem] [corei7] [westmere] [sandybridge] [corei7-avx] [ivybridge] [core-avx-i] [haswell] [core-avx2] [broadwell] [skylake] [skylake-avx512] [skx] [cascadelake] [cooperlake] [cannonlake] [icelake-client] [icelake-server] [tigerlake] [knl] [knm] [k8] [athlon64] [athlon-fx] [opteron] [k8-sse3] [athlon64-sse3] [opteron-sse3] [amdfam10] [barcelona] [btver1] [btver2] [bdver1] [bdver2] [bdver3] [bdver4] [znver1] [znver2] [x86-64] [generic] [-all] [-soundfile] [-sources] [-multi] [-multifun] [-opt native|generic] [-llvm] [-test] [-us <factor>] [-ds <factor>] [-filter <filter(0..4)>] [additional Faust options (-vec -vs 8...)] <file.dsp>`
 
 Here are the available options:
 
-- `-llvm/interp to choose either LLVM or Interpreter backend`
-- `-nvoices N to start the DSP in polyphonic mode with N voices`
+- `'xxx' to compile for 'xxx' CPU`
+- `generic to compile for generic CPU`
+- `-all to compile for all CPUs`
+- `-soundfile when compiling a DSP using the 'soundfile' primitive, add required resources`
+- `-sources' to only generate source files`
+- `-multi to compile for several CPUs and aggregate them in a 'multi' class that choose the correct one at runtime`
+- `-multifun to compile for several CPUs using GCC MultiFun feature and aggregate them in a 'multi' class that choose the correct one at runtime`
+- `-opt native to activate the best compilation options for the native CPU`
+- `-opt generic to activate the best compilation options for a generic CPU`
+- `-llvm to compile using the LLVM backend, otherwise the C++ backend is used`
+- `-test to compile a test program which will bench the DSP and render it`
+- `-us <factor> to upsample the DSP by a factor (can be 2, 3, 4, 8, 16, 32)`
+- `-ds <factor> to downsample the DSP by a factor (can be 2, 3, 4, 8, 16, 32)`
+- `-filter <filter> for upsampling or downsampling [0..4], 0 means no filtering`
+
+
+A set of header and object code files will be generated, and will have to be added in the final project. The header file typically contains the `<DSPName><CPU>` class and a `create<DSPName><CPU>` function needed to create a DSP instance (for instance compiling a `noise.dsp` DSP for a generic CPU will generate the `createnoisegeneric()` creation function). The `-opt native|generic` option runs the **faustbench-llvm** to discover the best possible compilation options and use them in the C++ or LLVM compilation step.
+
+The `-multi` mode generates an additional header file (like `<DSPName>multi.h`, containing a `<DSPName>multi` class) that will dynamically load and instantiate the correct code for the machine CPU (or a generic version if the given CPU is not supported). An instance of this aggregation class will have to be created at runtime (like with `dsp* dsp = new<DSPName>multi();`  or  `dsp* dsp = create<DSPName>multi();`) to load the appropriate object code version depending on the running machine CPU. 
+
+The `-multifun` mode uses the GCC [multiversion feature](https://gcc.gnu.org/wiki/FunctionMultiVersioning) to generate an additional header file (like `<DSPName>multi.h`, containing a `<DSPName>multi` class) that will dynamically load and instantiate the correct code for the machine CPU (or a generic version if the given CPU is not supported). An instance of this aggregation class will have to be created at runtime (like with `dsp* dsp = new<DSPName>multi();`  or  `dsp* dsp = create<DSPName>multi();`) to load the appropriate object code version depending on the running machine CPU. The list of CPUs to be compiled for must be defined in the `FAUST_ARCHS` environment variable.
+
+Note that this code uses the [LLVM](https://llvm.org) `llvm::sys::getHostCPUName()` function to discover the machine CPU. Thus the LLVM tool chain has to be installed, and the `llvm-config --ldflags --libs all --system-libs` command will typically have to be used at link time to add the needed LLVM libraries, along with `-dead_strip` to only keep what is really mandatory in the final binary.
+
+When used with the `-source` option, the `-DSOUNDFILE` and `pkg-config --cflags sndfile` flags have to be added to compile the generated C++ files, and `pkg-config --static --libs` sndfile has to be added at link time.
+
+The `-test` parameter can be used to compile a test program which will bench the DSP, print its UI, and render it.
+
+Note that using the `-inj foo.cpp` option allows to compile any C++ class containing a `dsp` subclass (which **must** be named `mydsp`), so for instance a manually written C++ class. This is a convenient way to optimise any C++ DSP class. 
+
+ Examples:
+
+ - create multi-cpu files using the C++ backend (giving an explicit list of supported CPUs), and then compile them as object files: `faust2object haswell core2 foo.dsp`. 
+ - create multi-cpu files using the LLVM backend (giving an explicit list of supported CPUs), and then compile them as object files: `faust2object -llvm haswell core2 foo.dsp`. 
+ - create multi-cpu files for all possible CPUs using C++ backend, and then compile them as object files: `faust2object -all foo.dsp`. 
+ - create multi-cpu files for all possible CPUs and the multi-loader file, and them compile them as object files: `faust2object -all -multi foo.dsp`. 
+ - create multi-cpu files for all possible CPUs and the multi-loader file, them compile them as object files, and compile a test program: `faust2object -all -multi -test foo.dsp`. 
+ - define the `FAUST_ARCHS` environment variable, create a multi-cpu file for all possible CPUs defined in this variable and create the multi-loader file: `export FAUST_ARCHS="core2 haswell" && faust2object -sources -multifun foo.dsp`. 
+ - define the `FAUST_ARCHS` environment variable, create a multi-cpu file for all possible CPUs defined in this variable and create the multi-loader file, and compile a test program: `export FAUST_ARCHS="core2 haswell" && faust2object -multifun -test foo.dsp`. 
+ - compile a `foo.cpp` file (possibly manually written) and containing the `mydsp` class: `faust2object haswell -inj foo.cpp -multi -test foo.dsp`. 
+
+## dynamic-jack-gtk/dynamic-coreaudio-gtk
+
+The **dynamic-jack-gtk/dynamic-coreaudio-gtk** tools use the dynamic compilation chain, compile a Faust DSP source, and run it with the LLVM or Interpreter backend. They can also read a precompiled DSP factory, either in IR (.ll), bitcode (.bc), or machine code (.mc) when using the LLVM backend, or byte code (.fbc) when using the Interpreter backend. The `-edit` option can be used to start an *edit/compile/run loop* where the DSP can be edited with an external editor, and will be recompiled on the fly and executed. 
+
+`dynamic-jack-gtk|dynamic-coreaudio-gtk [-llvm|interp] [-edit] [-generic] [-nvoices <num>] [-all] [-midi] [-osc] [-httpd] [-resample] [additional Faust options (-vec -vs 8...)] foo.dsp/foo.ll/foo.bc/foo.mc/foo.fbc`
+
+Here are the available options:
+
+- `-llvm' to use LLVM backend, using either .dsp, .ll, .bc or .mc files`
+- `-interp' to use Interpreter backend, using either .dsp or .fbc (Faust Byte Code) files)`
+- `-edit' to start an edit/compile/run loop, using a foo.dsp kind of source file`
+- `-generic to JIT for a generic CPU (otherwise 'native' mode is used)`
+- `-nvoices <num> to start the DSP in polyphonic mode with <num> voices`
+- `-all' to active the 'all voices always playing' mode when polyphony is used`
 - `-midi to activate MIDI control`
 - `-osc to activate OSC control`
 - `-httpd to activate HTTPD control`
@@ -38,12 +92,12 @@ Additional Faust compiler options can be given. Note that the Interpreter backen
 
 The **poly-dynamic-jack-gtk** tool uses the dynamic compilation chain, compiles a Faust DSP source, activate the -effect auto model by default, and runs it with the LLVM or Interpreter backend.
 
-`poly-dynamic-jack-gtk [-llvm|interp] [-nvoices N] [-midi] [-osc] [-httpd] [-resample] [additional Faust options (-vec -vs 8...)] foo.dsp`
+`poly-dynamic-jack-gtk [-llvm|interp] [-nvoices <num>] [-midi] [-osc] [-httpd] [-resample] [additional Faust options (-vec -vs 8...)] foo.dsp`
 
 Here are the available options:
 
 - `-llvm/interp to choose either LLVM or Interpreter backend`
-- `-nvoices N to start the DSP in polyphonic mode with N voices`
+- `-nvoices <num> to start the DSP in polyphonic mode with <num> voices`
 - `-midi to activate MIDI control`
 - `-osc to activate OSC control`
 - `-httpd to activate HTTPD control`
@@ -55,65 +109,101 @@ Additional Faust compiler options can be given. Note that the Interpreter backen
 
 The **dynamic-machine-jack-gtk** tool runs a previously compiled Faust program (as FBC, that is as 'Faust Byte Code') in the Interpreter backend, configurated to use the FBC => LLVM IR => executable code chain. 
 
-`dynamic-machine-jack-gtk [-nvoices N] [-midi] [-osc] [-httpd] foo.fbc`
+`dynamic-machine-jack-gtk [-nvoices <num>] [-midi] [-osc] [-httpd] foo.fbc`
 
 Here are the available options:
 
-- `-nvoices N to start the DSP in polyphonic mode with N voices`
+- `-nvoices <num> to start the DSP in polyphonic mode with <num> voices`
 - `-midi to activate MIDI control`
 - `-osc to activate OSC control`
 - `-httpd to activate HTTPD control`
 
 ## interp-tracer
 
-The **interp-tracer** tool runs and instruments the compiled program using the Interpreter backend. Various statistics on the code are collected and displayed while running and/or when closing the application, typically FP_SUBNORMAL, FP_INFINITE and FP_NAN values, or INTEGER_OVERFLOW and DIV_BY_ZERO operations. Mode 4 and 5 allow to display the stack trace of the running code when FP_INFINITE, FP_NAN or INTEGER_OVERFLOW values are produced. The -control mode allows to check control parameters, by explicitly setting their *min* and *max* values (for now).
+**Note** : In Faust, the interval calculation system on signals is supposed to detect possible problematic computations at compile time, and refuse to compile the corresponding DSP code. But **since the interval calculation is currently quite imperfect**, it can misbehave and generate possible problematic code, that will possibly crash at runtime. 
+
+The **interp-tracer** tool runs and instruments the compiled program (precisely the `compute` method) using the Interpreter backend. Various statistics on the code are collected and displayed while running and/or when closing the application, typically FP_SUBNORMAL, FP_INFINITE and FP_NAN values, or INTEGER_OVERFLOW, CAST_INT_OVERFLOW and DIV_BY_ZERO operations, or LOAD/STORE errors. 
+
+- [FP_SUBNORMAL, FP_INFINITE and FP_NAN values](https://www.gnu.org/software/libc/manual/html_node/Floating-Point-Classes.html)(*) are produced when compiling with floating point numbers. 
+- [INTEGER_OVERFLOW](https://en.wikipedia.org/wiki/Integer_overflow) is produced when computing with integer numbers (actually 32 bits Integer supported by the compiler) and producing out-of-range result. They can be a wanted effect like in the implementation of the [no.noise](https://github.com/grame-cncm/faustlibraries/blob/master/noises.lib#L63) generator.
+- [CAST_INT_OVERFLOW](https://frama-c.com/2013/10/09/Overflow-float-integer.html)(*) happen when converting a floating point number back in an integer number (like when using the `int(val)` expression). 
+- DIV_BY_ZERO(*) happens when dividing a number by 0. 
+-  LOAD/STORE(*) happens when reading or writing outside of `rdtable` or `rwtable`, or when loading a non initialized value (typically used by the Faust compiler developers to check the generated code). 
+
+(*) Those errors typically reveal incorrectly written code which must be corrected.
+
+Mode 4 and 5 allow to display the stack trace of the running code when FP_INFINITE, FP_NAN, INTEGER_OVERFLOW, DIV_BY_ZERO, CAST_INT_OVERFLOW and LOAD/STORE errors are produced. 
+
+The `-control` mode allows to check control parameters, by explicitly setting their *min* and *max* values, then running the DSP and setting all controllers (inside their range) in a random way. 
+
+Mode 4 up to 7 also check LOAD/STORE errors, mode 7 is typically used by the Faust compiler developers to check the generated code. 
 
 `interp-tracer [-trace <1-7>] [-control] [-output] [additional Faust options (-ftz xx)] foo.dsp`
 
 Here are the available options:
 
- - `-control to activate min/max control check`
+ - `-control to activate min/max control check then setting all controllers (inside their range) in a random way`
  - `-output to print output frames`
  - `-trace 1 to collect FP_SUBNORMAL only` 
  - `-trace 2 to collect FP_SUBNORMAL, FP_INFINITE and FP_NAN`
- - `-trace 3 to collect FP_SUBNORMAL, FP_INFINITE, FP_NAN, INTEGER_OVERFLOW and DIV_BY_ZERO`
- - `-trace 4 to collect FP_SUBNORMAL, FP_INFINITE, FP_NAN, INTEGER_OVERFLOW, DIV_BY_ZERO and LOAD/STORE errors, fails at first FP_INFINITE, FP_NAN or LOAD/STORE error`
- - `-trace 5 to collect FP_SUBNORMAL, FP_INFINITE, FP_NAN, INTEGER_OVERFLOW, DIV_BY_ZERO and LOAD/STORE errors, continue after FP_INFINITE, FP_NAN or LOAD/STORE error`
+ - `-trace 3 to collect FP_SUBNORMAL, FP_INFINITE, FP_NAN, INTEGER_OVERFLOW, DIV_BY_ZERO and CAST_INT_OVERFLOW`
+ - `-trace 4 to collect FP_SUBNORMAL, FP_INFINITE, FP_NAN, INTEGER_OVERFLOW, DIV_BY_ZERO, CAST_INT_OVERFLOW and LOAD/STORE errors, fails at first FP_INFINITE, FP_NAN, CAST_INT_OVERFLOW or LOAD/STORE error`
+ - `-trace 5 to collect FP_SUBNORMAL, FP_INFINITE, FP_NAN, INTEGER_OVERFLOW, DIV_BY_ZERO, CAST_INT_OVERFLOW and LOAD/STORE errors, continue after FP_INFINITE, FP_NAN, CAST_INT_OVERFLOW or LOAD/STORE error`
  - `-trace 6 to only check LOAD/STORE errors and continue`
  - `-trace 7 to only check LOAD/STORE errors and exit`
 
 ## faustbench
 
-The **faustbench** tool uses the C++ backend to generate a set of C++ files produced with different Faust compiler options. All files are then compiled in a unique binary that will measure DSP CPU of all versions of the compiled DSP. The tool is supposed to be launched in a terminal, but it can be used to generate an iOS project, ready to be launched and tested in Xcode. 
+The **faustbench** tool uses the C++ backend to generate a set of C++ files produced with different Faust compiler options. All files are then compiled in a unique binary that will measure the DSP CPU of all versions of the compiled DSP. The tool is supposed to be launched in a terminal, but it can be used to generate an iOS project, ready to be launched and tested in Xcode. Using the `-source` option allows to create and keep the intermediate C++ files, with a Makefile to produce the binary. The generated DSP struct memory size in bytes is also printed for each compiler option.
 
-`faustbench [-notrace] [-generic] [-ios] [-single] [-fast] [-run <num>] [-opt <level(0..3|-1)>] [-double] [additional Faust options (-vec -vs 8...)] foo.dsp` 
+Note that result is given as *MBytes/sec* (higher is better) which is computed as the mean of the 10 best values on the measurement period. An estimation of the DSP CPU use (in percentage of the available bandwidth at 44.1 kHz) is also computed using the effective duration of the measure. This value may not be perfectly coherent with the MBytes/sec value which is the one to be taken in account.
+
+`faustbench [-notrace] [-generic] [-ios] [-single] [-fast] [-run <num>] [-bs <frames>] [-source] [-double] [-opt <level(0..3|-1)>] [-us <factor>] [-ds <factor>] [-filter <filter(0..4)>] [additional Faust options (-vec -vs 8...)] foo.dsp` 
 
 Here are the available options:
 
  - `-notrace to only generate the best compilation parameters`
  - `-generic' to compile for a generic processor, otherwise -march=native will be used`
  - `-ios to generate an iOS project`
- - `-single to only execute the scalar test`
+ - `-single to only execute the one test (scalar by default)`
  - `-fast to only execute some tests`
  - `-run <num> to execute each test <num> times`
- - `-opt <level (0..3|-1)>' to pass an optimisation level to c++ (-1 means "maximal level =-Ofast for now" if range changes in the future)`
+ - `-bs <frames> to set the buffer-size in frames`
+ - `-source to keep the intermediate source folder and exit`
  - `-double to compile DSP in double and set FAUSTFLOAT to double`
+ - `-opt <level (0..3|-1)>' to pass an optimisation level to C++ (-1 means 'maximal level =-Ofast for now' but may change in the future)`
+ - `-us <factor> to upsample the DSP by a factor (can be 2, 3, 4, 8, 16, 32)`
+ - `-ds <factor> to downsample the DSP by a factor (can be 2, 3, 4, 8, 16, 32)`
+ - `-filter <filter> for upsampling or downsampling [0..4], 0 means no filtering`
 
 Use `export CXX=/path/to/compiler` before running faustbench to change the C++ compiler, and `export CXXFLAGS=options` to change the C++ compiler options. Additional Faust compiler options can be given.
+
+Using `-single` and additional Faust options (like `-vec -vs 8...`) allows to run a single test with specific options.
 
 ## faustbench-llvm
 
 The **faustbench-llvm** tool uses the libfaust library and its LLVM backend to dynamically compile DSP objects produced with different Faust compiler options, and then measure their DSP CPU. Additional Faust compiler options can be given beside the ones that will be automatically explored by the tool.
 
-`faustbench-llvm [-notrace] [-generic] [-single] [-run <num] [-opt <level(0..4|-1)>] [additional Faust options (-vec -vs 8...)] foo.dsp` 
+Note that result is given as *MBytes/sec* (higher is better) which is computed as the mean of the 10 best values on the measurement period. An estimation of the DSP CPU use (in percentage of the available bandwidth at 44.1 kHz) is also computed using the effective duration of the measure. This value may not be perfectly coherent with the MBytes/sec value which is the one to be taken in account, and is finally used to return the best estimation.
+
+Alhough they are estimated using the LLVM backend, note that the result given by **faustbench-llvm** can perfectly be used to optimize the C++ code later on, since both compilation chains are based on the same LLVM infrastructure.
+
+`faustbench-llvm [-notrace] [-control] [-generic] [-single] [-run <num] [-bs <frames>] [-opt <level(0..4|-1)>] [-us <factor>] [-ds <factor>] [-filter <filter(0..4)>] [additional Faust options (-vec -vs 8...)] foo.dsp` 
 
 Here are the available options:
 
 - `-notrace to only generate the best compilation parameters`
+- `-control to update all controller with random values at each cycle`
 - `-generic to compile for a generic processor, otherwise the native CPU will be used`
-- `-single to only execute the scalar test`
+- `-single to only execute the one test (scalar by default)`
 - `-run <num> to execute each test <num> times`
-- `-opt <level>' to pass an optimisation level to LLVM, between 0 and 4 (-1 means "maximal level" if range changes in the future)`
+- `-bs <frames> to set the buffer-size in frames`
+- `-opt <level>' to pass an optimisation level to LLVM, between 0 and 4 (-1 means 'maximal level' if range changes in the future)`
+- `-us <factor> to upsample the DSP by a factor (can be 2, 3, 4, 8, 16, 32)`
+- `-ds <factor> to downsample the DSP by a factor (can be 2, 3, 4, 8, 16, 32)`
+- `-filter <filter> for upsampling or downsampling [0..4], 0 means no filtering`
+
+Using `-single` and additional Faust options (like `-vec -vs 8...`) allows to run a single test with specific options.
 
 ## faustbench-wasm
 
@@ -138,12 +228,13 @@ Here is the available options:
 
 The **faust-tester** tool allows to test a Faust effect DSP with test input signals, like dirac impulse or periodic pulses.
 
-`faust-tester [-imp] [-pulse] foo.dsp` 
+`faust-tester [-imp] [-pulse <num (in samples)>] [-display <num>] foo.dsp` 
 
 Here is the available options:
 
-- `-imp to test with an dirac impulse`
-- `-pulse to test with a periodic pulse`
+- `-imp to test with a Dirac impulse`
+- `-pulse <num (in samples)> to test with a periodic pulse generated every 'num' samples`
+- `-display <num> to diplay 'num' samples (default 44100)`
 
 ## faust-osc-controller
 
@@ -153,6 +244,7 @@ The **faust-osc-controller** tool allows to control an OSC aware Faust running p
 
 Set root to the OSC program name (like '/freeverb'). Then use the available options:
 
+- `-ip <host_ip> to set the remote application IP address (default 'localhost')`
 - `-port <port> to set the OSC input port`
 - `-outport <port>' to set the OSC output port`
 

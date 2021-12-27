@@ -66,6 +66,14 @@ EXPORT llvm_dsp_factory* createDSPFactoryFromString(const std::string& name_app,
                                                     int argc, const char* argv[], const std::string& target,
                                                     std::string& error_msg, int opt_level = -1);
 
+EXPORT llvm_dsp_factory* createDSPFactoryFromSignals(const std::string& name_app, tvec signals,
+                                                     int argc, const char* argv[], const std::string& target,
+                                                     std::string& error_msg, int opt_level = -1);
+
+EXPORT llvm_dsp_factory* createDSPFactoryFromBoxes(const std::string& name_app, Tree box,
+                                                   int argc, const char* argv[], const std::string& target,
+                                                   std::string& error_msg, int opt_level = -1);
+
 // Bitcode <==> string
 EXPORT llvm_dsp_factory* readDSPFactoryFromBitcode(const std::string& bit_code, const std::string& target,
                                                    std::string& error_msg, int opt_level = 0);
@@ -106,6 +114,19 @@ EXPORT llvm_dsp_factory* createCDSPFactoryFromFile(const char* filename, int arg
 EXPORT llvm_dsp_factory* createCDSPFactoryFromString(const char* name_app, const char* dsp_content, int argc,
                                                      const char* argv[], const char* target, char* error_msg,
                                                      int opt_level);
+
+EXPORT llvm_dsp_factory* createCDSPFactoryFromSignals(const char* name_app, Signal* signals,
+                                                      int argc, const char* argv[],
+                                                      const char* target,
+                                                      char* error_msg,
+                                                      int opt_level = -1);
+    
+EXPORT llvm_dsp_factory* createCDSPFactoryFromBoxes(const char* name_app,
+                                                    Tree box,
+                                                    int argc, const char* argv[],
+                                                    const char* target,
+                                                    char* error_msg,
+                                                    int opt_level = -1);
 
 EXPORT llvm_dsp_factory* readCDSPFactoryFromBitcode(const char* bit_code, const char* target, char* error_msg,
                                                     int opt_level);

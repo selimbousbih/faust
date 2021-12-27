@@ -9,10 +9,12 @@
 
 . faustpath
 . faustoptflags
+. usage.sh
 
-CXXFLAGS=$MYGCCFLAGS
+CXXFLAGS+=" $MYGCCFLAGS"  # So that additional CXXFLAGS can be used
 
 ARCHFILE=$FAUSTARCH/sndfile.cpp
+FILE_MODE=""
 
 #-------------------------------------------------------------------
 # Set Faust include path
@@ -25,12 +27,16 @@ do
     p=$1
 
     if [ $p = "-help" ] || [ $p = "-h" ]; then
-        echo "faust2sndfile <foo.dsp>"
+        usage faust2sndfile "[Faust options] <file.dsp>"
+        require libsndfile
+        echo "Process files with Faust DSP"
+        option "Faust options"
+        exit
     fi
     
     if [ ${p:0:1} = "-" ]; then
         OPTIONS="$OPTIONS $p"
-    elif [[ -f "$p" ]]; then
+    elif [[ -f "$p" ]] && [ ${p: -4} == ".dsp" ]; then
         FILES="$FILES $p"
     else
         OPTIONS="$OPTIONS $p"
@@ -47,25 +53,30 @@ done
 for f in $FILES; do
 
 	SRCDIR=$(dirname "$p")
-	LINPUTS=$(faust -uim "$f" | grep FAUST_INPUTS)
+	LINPUTS=$(faust $OPTIONS -uim "$f" | grep FAUST_INPUTS)
 	NINPUTS=${LINPUTS//[^0-9]/}
 	if [ $NINPUTS -gt 0 ]; then
-		echo "Will process an input file to produce an output file"
-		echo "With the compiled program 'foo', you can add [-c samples] for the number of frames to append beyond the input file"
-		ARCHFILE=$FAUSTARCH/sndfile.cpp
+		echo "Will process an input file to produce an output file. With the compiled program 'foo' you can add:"
+		echo "[-bs <num>] to setup the rendering buffer size in frames (default: 64)"
+		echo "[-c samples] for the number of frames to append beyond the input file (default: 0)"
+		echo "[-ct <filename>] to use the <filename> control messages file"
+		echo "[-rc 1] to use the foo.rc file"
+		FILE_MODE="INPUT_OUTPUT_FILE"
 	else
-		echo "Will generate an output file"
-		echo "With the compiled program 'foo' you can add:"
-		echo "[-bd 16|24|32] to setup the the output file bit-depth (default: 16)"
+		echo "Will generate an output file. With the compiled program 'foo' you can add:"
+		echo "[-bs <num>] to setup the rendering buffer size in frames (default: 64)"
+		echo "[-bd 16|24|32] to setup the output file bit-depth (default: 16)"
 		echo "[-sr <num>] to setup the output file sample rate (default: 44100)"
-		echo "[-s <num>] to setup the output file length in frames (default: SR*5)"
-		ARCHFILE=$FAUSTARCH/synthfile.cpp
+		echo "[-s <num>] to setup the output file length in frames, when -ct is not used (default: SR*5)"
+		echo "[-ct <filename>] to use the <filename> control messages file"
+		echo "[-rc 1] to use the foo.rc file"
+		FILE_MODE="OUTPUT_FILE"
 	fi
 
     # compile Faust DSP then create the binary
     faust -i -a $ARCHFILE $OPTIONS "$f" -o "$f.cpp" || exit
     (
-        $CXX $CXXFLAGS "$f.cpp" `pkg-config --cflags --static --libs sndfile` -o "${f%.dsp}"
+        $CXX $CXXFLAGS -DFILE_MODE=$FILE_MODE "$f.cpp" `pkg-config --cflags --static --libs sndfile` -o "${f%.dsp}"
     ) > /dev/null || exit
 
     # remove c++ file

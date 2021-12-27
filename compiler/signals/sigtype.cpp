@@ -38,7 +38,7 @@ bool SimpleType::isMaximal() const  ///< true when type is maximal (and therefor
 
 //------------------------------------------------------------------------------------
 //
-//		Surcharges de l'operateur d'impression <<
+//		Overloading << printing operator
 //
 //------------------------------------------------------------------------------------
 
@@ -64,7 +64,7 @@ ostream& operator<<(ostream& dst, const TupletType& t)
 
 //------------------------------------------------------------------------------------
 //
-//		Definition des methodes d'impression
+//		Print method definition
 //
 //------------------------------------------------------------------------------------
 
@@ -88,7 +88,7 @@ ostream& TableType::print(ostream& dst) const
 }
 
 /**
- *  true when type is maximal (and therefore can't change depending of hypothesis)
+ *  True when type is maximal (and therefore can't change depending of hypothesis)
  */
 bool TableType::isMaximal() const
 {
@@ -111,7 +111,7 @@ ostream& TupletType::print(ostream& dst) const
 }
 
 /**
- *  true when type is maximal (and therefore can't change depending of hypothesis)
+ *  True when type is maximal (and therefore can't change depending of hypothesis)
  */
 bool TupletType::isMaximal() const
 {
@@ -123,7 +123,7 @@ bool TupletType::isMaximal() const
 
 //------------------------------------------------------------------------------------
 //
-//		Construction des types
+//		Types constructions
 // 		t := p, table(t), t|t, t*t
 //
 //------------------------------------------------------------------------------------
@@ -171,7 +171,8 @@ bool operator==(const Type& t1, const Type& t2)
                (st1->computability() == st2->computability()) && (st1->vectorability() == st2->vectorability()) &&
                (st1->boolean() == st2->boolean()) && (st1->getInterval().lo == st2->getInterval().lo) &&
                (st1->getInterval().hi == st2->getInterval().hi) &&
-               (st1->getInterval().valid == st2->getInterval().valid);
+               (st1->getInterval().valid == st2->getInterval().valid) && st1->getRes().valid == st2->getRes().valid &&
+               st1->getRes().index == st2->getRes().index;
     if ((tt1 = isTableType(t1)) && (tt2 = isTableType(t2))) return tt1->content() == tt2->content();
     if ((nt1 = isTupletType(t1)) && (nt2 = isTupletType(t2))) {
         int a1 = nt1->arity();
@@ -232,11 +233,11 @@ TupletType* isTupletType(AudioType* t)
 }
 
 //--------------------------------------------------
-// verification de type
+// Type checking
 
 Type checkInt(Type t)
 {
-    // verifie que t est entier
+    // check that t is an integer
     SimpleType* st = isSimpleType(t);
     if (st == 0 || st->nature() > kInt) {
         stringstream error;
@@ -248,7 +249,7 @@ Type checkInt(Type t)
 
 Type checkKonst(Type t)
 {
-    // verifie que t est constant
+    // check that t is a constant
     if (t->variability() > kKonst) {
         stringstream error;
         error << "ERROR : checkKonst failed for type " << t << endl;
@@ -259,7 +260,7 @@ Type checkKonst(Type t)
 
 Type checkInit(Type t)
 {
-    // verifie que t est connu a l'initialisation
+    // check that t is a known at init time
     if (t->computability() > kInit) {
         stringstream error;
         error << "ERROR : checkInit failed for type " << t << endl;
@@ -275,7 +276,7 @@ Type checkIntParam(Type t)
 
 Type checkWRTbl(Type tbl, Type wr)
 {
-    // verifie que wr est compatible avec le contenu de tbl
+    // check that wr is compatible with tbl content
     if (wr->nature() > tbl->nature()) {
         stringstream error;
         error << "ERROR : checkWRTbl failed, the content of " << tbl << " is incompatible with " << wr << endl;
@@ -299,12 +300,6 @@ int checkDelayInterval(Type t)
         error << "ERROR : invalid delay parameter range: " << i << ". The range must be between 0 and MAX_INT" << endl;
         throw faustexception(error.str());
     }
-}
-
-// Donne le nom du type C correspondant a la nature d'un signal
-string old_cType(Type t)
-{
-    return (t->nature() == kInt) ? "int" : "float";
 }
 
 /*****************************************************************************
@@ -366,12 +361,18 @@ static Tree codeSimpleType(SimpleType* st)
     elems.push_back(tree(st->getInterval().lo));
     elems.push_back(tree(st->getInterval().hi));
 
+    elems.push_back(tree(st->getRes().valid));
+    elems.push_back(tree(st->getRes().index));
     return CTree::make(gGlobal->SIMPLETYPE, elems);
 }
 
-AudioType* makeSimpleType(int n, int v, int c, int vec, int b, const interval& i)
+AudioType* makeSimpleType(int n, int v, int c, int vec, int b, const interval& i){
+    return makeSimpleType(n, v, c, vec, b, i, gGlobal->RES);
+}
+
+AudioType* makeSimpleType(int n, int v, int c, int vec, int b, const interval& i, const res& lsb)
 {
-    SimpleType prototype(n, v, c, vec, b, i);
+    SimpleType prototype(n, v, c, vec, b, i, lsb);
     Tree       code = codeAudioType(&prototype);
 
     AudioType* t;
@@ -379,7 +380,7 @@ AudioType* makeSimpleType(int n, int v, int c, int vec, int b, const interval& i
         return t;
     } else {
         gGlobal->gAllocationCount++;
-        t = new SimpleType(n, v, c, vec, b, i);
+        t = new SimpleType(n, v, c, vec, b, i, lsb);
         gGlobal->gMemoizedTypes->set(code, t);
         t->setCode(code);
         return t;
@@ -389,7 +390,6 @@ AudioType* makeSimpleType(int n, int v, int c, int vec, int b, const interval& i
 /**
  * Code a table type as a tree in order to benefit of memoization
  */
-
 static Tree codeTableType(TableType* tt)
 {
     return tree(gGlobal->TABLETYPE, codeAudioType(tt->content()));
@@ -405,7 +405,7 @@ AudioType* makeTableType(const Type& ct)
         return tt;
     } else {
         gGlobal->gAllocationCount++;
-        tt = new TableType(ct);
+        tt = new TableType(prototype);
         gGlobal->gMemoizedTypes->set(code, tt);
         tt->setCode(code);
         return tt;
@@ -422,7 +422,7 @@ AudioType* makeTableType(const Type& ct, int n, int v, int c, int vec, int b, co
         return tt;
     } else {
         gGlobal->gAllocationCount++;
-        tt = new TableType(ct);
+        tt = new TableType(prototype);
         gGlobal->gMemoizedTypes->set(code, tt);
         tt->setCode(code);
         return tt;
@@ -431,15 +431,14 @@ AudioType* makeTableType(const Type& ct, int n, int v, int c, int vec, int b, co
 
 AudioType* makeTableType(const Type& ct, int n, int v, int c, int vec)
 {
-    TableType prototype(ct, n, v, c, vec);
-    Tree      code = codeAudioType(&prototype);
-
+    TableType  prototype(ct, n, v, c, vec);
+    Tree       code = codeAudioType(&prototype);
     AudioType* tt;
     if (gGlobal->gMemoizedTypes->get(code, tt)) {
         return tt;
     } else {
         gGlobal->gAllocationCount++;
-        tt = new TableType(ct);
+        tt = new TableType(prototype);
         gGlobal->gMemoizedTypes->set(code, tt);
         tt->setCode(code);
         return tt;
@@ -449,7 +448,6 @@ AudioType* makeTableType(const Type& ct, int n, int v, int c, int vec)
 /**
  * Code a tuplet type as a tree in order to benefit of memoization
  */
-
 static Tree codeTupletType(TupletType* nt)
 {
     vector<Tree> elems;

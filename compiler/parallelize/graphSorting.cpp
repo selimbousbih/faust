@@ -19,15 +19,16 @@
  ************************************************************************
  ************************************************************************/
 
-#include "graphSorting.hh"
 #include <set>
+
+#include "graphSorting.hh"
 
 #ifdef WIN32
 #pragma warning(disable : 4800)
 #endif
 
 /**
- * Set the order of a loop and place it to appropriate set
+ * Set the order of a loop and place it to appropriate set.
  */
 static void setOrder(Loop* l, int order, lgraph& V)
 {
@@ -41,7 +42,7 @@ static void setOrder(Loop* l, int order, lgraph& V)
 }
 
 /**
- * Set the order of T1's loops and collect there sons into T2
+ * Set the order of T1's loops and collect there sons into T2.
  */
 static void setLevel(int order, const lset& T1, lset& T2, lgraph& V)
 {
@@ -66,7 +67,7 @@ static void resetOrder(Loop* l, set<Loop*>& visited)
 
 /**
  * Topological sort of an acyclic graph of loops. The loops
- * are collect in an lgraph : a vector of sets of loops
+ * are collect in an lgraph : a vector of sets of loops.
  */
 void sortGraph(Loop* root, lgraph& V)
 {

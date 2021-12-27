@@ -5,7 +5,7 @@
  each section for license and copyright information.
  *************************************************************************/
 
-/*******************BEGIN ARCHITECTURE SECTION (part 1/2)****************/
+/******************* BEGIN bench.cpp ****************/
 
 /************************************************************************
  FAUST Architecture File
@@ -194,7 +194,7 @@ void bench(const char* name)
     // allocate output channels (not initialized)
     for (int i = 0; i < numOutChan; i++) outChannel[i] = (float*)calloc(VSIZE, sizeof(float));
 
-    // init the dsp with a resoneable sampling rate)
+    // init the dsp with a reasonable sampling rate
     DSP.init(48000);
     double* timing = (double*) calloc(COUNT, sizeof(double));
 
@@ -237,4 +237,4 @@ int main(int argc, char* argv[])
   	return 0;
 }
 
-/********************END ARCHITECTURE SECTION (part 2/2)****************/
+/******************** END bench.cpp ****************/

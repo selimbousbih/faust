@@ -5,8 +5,7 @@
  each section for license and copyright information.
  *************************************************************************/
 
-/*******************BEGIN ARCHITECTURE SECTION (part 1/2)****************/
-
+/******************* BEGIN dummy.cpp ****************/
 /************************************************************************
  FAUST Architecture File
  Copyright (C) 2003-2019 GRAME, Centre National de Creation Musicale
@@ -111,7 +110,6 @@ int main(int argc, char* argv[])
     bool midi_sync = false;
     int nvoices = 0;
     bool control = true;
-    mydsp_poly* dsp_poly = NULL;
     
     mydsp* tmp_dsp = new mydsp();
     MidiMeta::analyse(tmp_dsp, midi_sync, nvoices);
@@ -121,7 +119,7 @@ int main(int argc, char* argv[])
     snprintf(rcfilename, 256, "%s/.%src", home, name);
     
     if (isopt(argv, "-h")) {
-        std::cout << "prog [--frequency <val>] [--buffer <val>] [--nvoices <val>] [--group <0/1>]\n";
+        cout << "prog [--frequency <val>] [--buffer <val>] [--nvoices <val>] [--group <0/1>]\n";
         exit(1);
     }
     
@@ -131,16 +129,16 @@ int main(int argc, char* argv[])
     int group = lopt(argv, "--group", 1);
     
     cout << "Started with " << nvoices << " voices\n";
-    dsp_poly = new mydsp_poly(new mydsp(), nvoices, control, group);
+    DSP = new mydsp_poly(new mydsp(), nvoices, control, group);
     
 #if MIDICTRL
     if (midi_sync) {
-        DSP = new timed_dsp(new dsp_sequencer(dsp_poly, new effect()));
+        DSP = new timed_dsp(new dsp_sequencer(DSP, new effect()));
     } else {
-        DSP = new dsp_sequencer(dsp_poly, new effect());
+        DSP = new dsp_sequencer(DSP, new effect());
     }
 #else
-    DSP = new dsp_sequencer(dsp_poly, new effect());
+    DSP = new dsp_sequencer(DSP, new effect());
 #endif
     
 #else
@@ -150,16 +148,12 @@ int main(int argc, char* argv[])
     
     if (nvoices > 0) {
         cout << "Started with " << nvoices << " voices\n";
-        dsp_poly = new mydsp_poly(new mydsp(), nvoices, control, group);
+        DSP = new mydsp_poly(new mydsp(), nvoices, control, group);
         
     #if MIDICTRL
         if (midi_sync) {
-            DSP = new timed_dsp(dsp_poly);
-        } else {
-            DSP = dsp_poly;
+            DSP = new timed_dsp(DSP);
         }
-    #else
-        DSP = dsp_poly;
     #endif
     } else {
     #if MIDICTRL
@@ -172,10 +166,9 @@ int main(int argc, char* argv[])
         DSP = new mydsp();
     #endif
     }
-    
 #endif
     
-    if (DSP == 0) {
+    if (!DSP) {
         cerr << "Unable to allocate Faust DSP object" << endl;
         exit(1);
     }
@@ -200,13 +193,13 @@ int main(int argc, char* argv[])
     
 #ifdef MIDICTRL
     rt_midi midi_handler(name);
-    midi_handler.addMidiIn(dsp_poly);
     MidiUI midiinterface(&midi_handler);
     DSP->buildUserInterface(&midiinterface);
 #endif
     
     finterface.recallState(rcfilename);
     
+    mydsp_poly* dsp_poly = dynamic_cast<mydsp_poly*>(DSP);
     if (dsp_poly) {
         cout << "keyOn 60 67 72 75" << endl;
         dsp_poly->keyOn(0, 60, 127);
@@ -227,7 +220,6 @@ int main(int argc, char* argv[])
     }
     
     // Rendering in now finished...
-    
     if (dsp_poly) {
         cout << "keyOn 60 67 72 75" << endl;
         dsp_poly->keyOn(0, 60, 127);
@@ -248,7 +240,6 @@ int main(int argc, char* argv[])
     }
     
     // Rendering in now finished...
-    
     if (dsp_poly) {
         cout << "keyOn 60 67 72 75" << endl;
         dsp_poly->keyOn(0, 60, 127);
@@ -285,8 +276,7 @@ int main(int argc, char* argv[])
     finterface.saveState(rcfilename);
     
     delete DSP;
-    
     return 0;
 }
 
-/********************END ARCHITECTURE SECTION (part 2/2)****************/
+/******************** END dummy.cpp ****************/

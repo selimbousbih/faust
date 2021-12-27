@@ -18,6 +18,7 @@
 #   Several options are available, see architecture/unity/README.md for more info.
 
 . faustpath
+. usage.sh
 
 #-----------------------------------------------------------------
 # Dispatch command arguments
@@ -39,17 +40,20 @@ do
     p=$1
     
     if [ $p = "-help" ] || [ $p = "-h" ]; then
-        echo "faust2unity [-w32] .. [-android] [-nvoices <num>] [-source] [-unpacked] [additional Faust options (-vec -vs 8...)] <file1.dsp> [<file2.dsp>] .."
+        usage faust2unity "[options] [Faust options] <file.dsp>"
+        platform Android, Linux, MacOSX, iOS, Windows
+        require Unity
         echo "Generates a unity package (compressed .unitypackage folder) with all available architecture libraries for faust unity plugin and the C# files required. Use arguments to generate specific architectures"
-        echo "Use -w32 to produce a Windows 32 bits library"
-        echo "Use -w64 to produce a Windows 64 bits library"
-        echo "Use -osx to produce a macOS library"
-        echo "Use -ios to produce an iOS library"
-        echo "Use -android to produce Android libraries (armeabi-v7a and x86)."
-        echo "Use -linux to produce a Linux library"
-        echo "Use '-nvoices <num>' to produce a polyphonic self-contained DSP with <num> voices, ready to be used with MIDI"
-        echo "Use -source to produce the source files (uncompressed folder)"
-        echo "Use -unpacked to produce an unpacked folder with files organized like the Unity Asset hierarchy. Use this options to add specific files in the unity package (in the Assets folder, then use \`encoderunitypackage <folder>\` to compress and pack it. "
+        option
+        option -w32 "generates a Windows 32 bits library"
+        option -w64 "generates a Windows 64 bits library"
+        option -osx "generates a macOS library"
+        option -ios "generates an iOS library"
+        option -android "generates Android libraries (armeabi-v7a and x86)."
+        option -linux "generates a Linux library"
+        option "-nvoices <num>"
+        option -source "generates the source files (uncompressed folder)"
+        option -unpacked "generates an unpacked folder with files organized like the Unity Asset hierarchy. Use this options to add specific files in the unity package (in the Assets folder, then use 'encoderunitypackage <folder>' to compress and pack it."
         echo "See architecture/unity/README.md for more info."
         exit
     fi
@@ -83,7 +87,7 @@ do
         UNPCK="1"
     elif [ ${p:0:1} = "-" ]; then
         OPTIONS="$OPTIONS $p"
-    elif [[ -f "$p" ]]; then
+    elif [[ -f "$p" ]] && [ ${p: -4} == ".dsp" ]; then
         FILES="$FILES $p"
     else
         OPTIONS="$OPTIONS $p"
@@ -126,7 +130,7 @@ for p in $FILES; do
     rm params.txt
 
     # compiles faust to c++ and json (adds JSON to C# string)
-    faust -json "$SRCDIR/$f" -o /dev/null;
+    faust -uim -json "$SRCDIR/$f" -o /dev/null;
     tr -d '\n' < $f.json > $NAME.json
     sed 's/\"/\\\\"/g;s/\//\\\//g' $NAME.json > $f.json
     JSON=$(<$f.json)
@@ -212,7 +216,7 @@ for p in $FILES; do
 
     elif [ "$SRC" = "1" ]; then
         # add .dsp and .cpp files to sources folder
-        faust -i -a $FAUSTARCH/unity/unityplugin.cpp $f -o $NAME.cpp
+        faust -uim -i -a $FAUSTARCH/unity/unityplugin.cpp $f -o $NAME.cpp
         mv "$NAME.cpp" "$FNAME/$NAME.cpp"
         cp "$f" "$FNAME/$f"
         SNAME=$FNAME\_sources

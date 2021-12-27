@@ -1,8 +1,7 @@
 /************************** BEGIN dsp-optimizer.h **************************/
-
 /************************************************************************
     FAUST Architecture File
-    Copyright (C) 2016 GRAME, Centre National de Creation Musicale
+    Copyright (C) 2016-2020 GRAME, Centre National de Creation Musicale
     ---------------------------------------------------------------------
     This Architecture section is free software; you can redistribute it 
     and/or modify it under the terms of the GNU General Public License 
@@ -27,8 +26,7 @@
 #ifndef __dsp_optimizer__
 #define __dsp_optimizer__
 
-#include <iostream>
-#include <sstream>
+#include <stdio.h>
 #include <sys/types.h>
 #include <pwd.h>
 #include <unistd.h>
@@ -40,9 +38,12 @@
 /*
     A class to find optimal Faust compiler parameters for a given DSP.
 */
-template <typename SAMPLE_TYPE>
-class dsp_optimizer {
+template <typename REAL>
+class dsp_optimizer_real {
 
+    typedef std::vector<std::string> TOption;
+    typedef std::vector<TOption> TOptionTable;
+    
     private:
     
         int fBufferSize;     // size of a vector in samples
@@ -57,29 +58,35 @@ class dsp_optimizer {
         int fRun;
         int fCount;
         bool fTrace;
+        bool fControl;
         bool fNeedExp10;
+        int fDownSampling;
+        int fUpSampling;
+        int fFilter;
     
         std::string fFilename;
         std::string fInput;
         std::string fTarget;
         std::string fError;
     
-        std::vector<std::vector <std::string> > fOptionsTable;
+        TOptionTable fOptionsTable;
     
         double bench(int run)
         {
             // First call with fCount = -1 will be used to estimate fCount by giving the wanted measure duration
             if (fCount == -1) {
-                measure_dsp mes(fDSP, fBufferSize, 5., fTrace);
+                measure_dsp_real<REAL> mes(fDSP, fBufferSize, 5., fTrace, fControl, fDownSampling, fUpSampling, fFilter);
                 mes.measure();
                 // fCount is kept from the first duration measure
                 fCount = mes.getCount();
                 return mes.getStats();
             } else {
-                measure_dsp mes(fDSP, fBufferSize, fCount, fTrace);
+                measure_dsp_real<REAL> mes(fDSP, fBufferSize, fCount, fTrace, fControl, fDownSampling, fUpSampling, fFilter);
                 for (int i = 0; i < run; i++) {
                     mes.measure();
-                    if (fTrace) std::cout << mes.getStats() << " " << "(DSP CPU % : " << (mes.getCPULoad() * 100) << ")" << std::endl;
+                    if (fTrace) {
+                        fprintf(stdout, "%f MBytes/sec (DSP CPU %% : %f at %d Hz)\n", mes.getStats(), (mes.getCPULoad() * 100), int(BENCH_SAMPLE_RATE));
+                    }
                     FAUSTBENCH_LOG<double>(mes.getStats());
                 }
                 return mes.getStats();
@@ -90,131 +97,118 @@ class dsp_optimizer {
         {
             // Scalar mode
             std::vector <std::string> t0;
-            if (typeid(SAMPLE_TYPE).name() == typeid(double).name()) { t0.push_back("-double"); }
             t0.push_back("-scal");
             fOptionsTable.push_back(t0);
             
             // Scalar mode with exp10
             std::vector <std::string> t0_exp10;
-            if (typeid(SAMPLE_TYPE).name() == typeid(double).name()) { t0_exp10.push_back("-double"); }
             t0_exp10.push_back("-scal");
             t0_exp10.push_back("-exp10");
             fOptionsTable.push_back(t0_exp10);
-       
-            SAMPLE_TYPE var;
-            
+          
             // vec -lv 0
             for (int size = 4; size <= fBufferSize; size *= 2) {
-                std::stringstream num;
-                num << size;
                 std::vector <std::string> t1;
-                if (typeid(SAMPLE_TYPE).name() == typeid(double).name()) { t1.push_back("-double"); }
                 t1.push_back("-vec");
                 t1.push_back("-lv");
                 t1.push_back("0");
                 t1.push_back("-vs");
-                t1.push_back(num.str());
+                t1.push_back(std::to_string(size));
                 fOptionsTable.push_back(t1);
             }
             
-            // vec -lv 0
+            // vec -lv 0 -fun
             for (int size = 4; size <= fBufferSize; size *= 2) {
-                std::stringstream num;
-                num << size;
                 std::vector <std::string> t1;
-                if (typeid(SAMPLE_TYPE).name() == typeid(double).name()) { t1.push_back("-double"); }
                 t1.push_back("-vec");
                 t1.push_back("-fun");
                 t1.push_back("-lv");
                 t1.push_back("0");
                 t1.push_back("-vs");
-                t1.push_back(num.str());
+                t1.push_back(std::to_string(size));
                 fOptionsTable.push_back(t1);
             }
-            
+        
+            /*
             // vec -lv 0 -g
             for (int size = 4; size <= fBufferSize; size *= 2) {
-                std::stringstream num;
-                num << size;
                 std::vector <std::string> t1;
-                if (typeid(SAMPLE_TYPE).name() == typeid(double).name()) { t1.push_back("-double"); }
                 t1.push_back("-vec");
                 t1.push_back("-lv");
                 t1.push_back("0");
                 t1.push_back("-vs");
-                t1.push_back(num.str());
+                t1.push_back(std::to_string(size));
                 t1.push_back("-g");
                 fOptionsTable.push_back(t1);
             }
             
             // vec -lv 0 -dfs
             for (int size = 4; size <= fBufferSize; size *= 2) {
-                std::stringstream num;
-                num << size;
                 std::vector <std::string> t1;
-                if (typeid(SAMPLE_TYPE).name() == typeid(double).name()) { t1.push_back("-double"); }
                 t1.push_back("-vec");
                 t1.push_back("-lv");
                 t1.push_back("0");
                 t1.push_back("-vs");
-                t1.push_back(num.str());
+                t1.push_back(std::to_string(size));
                 t1.push_back("-dfs");
                 fOptionsTable.push_back(t1);
             }
-      
+            */
+            
             // vec -lv 1
             for (int size = 4; size <= fBufferSize; size *= 2) {
-                std::stringstream num;
-                num << size;
                 std::vector <std::string> t1;
-                if (typeid(SAMPLE_TYPE).name() == typeid(double).name()) { t1.push_back("-double"); }
                 t1.push_back("-vec");
                 t1.push_back("-lv");
                 t1.push_back("1");
                 t1.push_back("-vs");
-                t1.push_back(num.str());
+                t1.push_back(std::to_string(size));
+                fOptionsTable.push_back(t1);
+            }
+             
+            // vec -lv 1 -fun
+            for (int size = 4; size <= fBufferSize; size *= 2) {
+                std::vector <std::string> t1;
+                t1.push_back("-vec");
+                t1.push_back("-fun");
+                t1.push_back("-lv");
+                t1.push_back("1");
+                t1.push_back("-vs");
+                t1.push_back(std::to_string(size));
                 fOptionsTable.push_back(t1);
             }
             
+            /*
             // vec -lv 1 -g
             for (int size = 4; size <= fBufferSize; size *= 2) {
-                std::stringstream num;
-                num << size;
                 std::vector <std::string> t1;
-                if (typeid(SAMPLE_TYPE).name() == typeid(double).name()) { t1.push_back("-double"); }
                 t1.push_back("-vec");
                 t1.push_back("-lv");
                 t1.push_back("1");
                 t1.push_back("-vs");
-                t1.push_back(num.str());
+                t1.push_back(std::to_string(size));
                 t1.push_back("-g");
                 fOptionsTable.push_back(t1);
             }
          
             // vec -lv 1 -dfs
             for (int size = 4; size <= fBufferSize; size *= 2) {
-                std::stringstream num;
-                num << size;
                 std::vector <std::string> t1;
-                if (typeid(SAMPLE_TYPE).name() == typeid(double).name()) { t1.push_back("-double"); }
                 t1.push_back("-vec");
                 t1.push_back("-lv");
                 t1.push_back("1");
                 t1.push_back("-vs");
-                t1.push_back(num.str());
+                t1.push_back(std::to_string(size));
                 t1.push_back("-dfs");
                 fOptionsTable.push_back(t1);
             }
             
-            /*
             // sch
             for (int size = 4; size <= fBufferSize; size *= 2) {
-                 std::stringstream num;
-                 num << size;
                  std::vector <std::string> t1;
                  t1.push_back("-sch");
                  t1.push_back("-vs");
-                 t1.push_back(num.str());
+                 t1.push_back(std::to_string(size));
                  fOptionsTable.push_back(t1);
              }
              */
@@ -223,9 +217,9 @@ class dsp_optimizer {
         void printItem(const std::vector <std::string>& item)
         {
             for (int i = 0; i < item.size(); i++) {
-                std::cout << " " << item[i];
+                fprintf(stdout, " %s", item[i].c_str());
             }
-            std::cout << " : ";
+            fprintf(stdout, " : ");
         }
     
         std::vector <std::string> addArgvItems(const std::vector <std::string>& item, int argc, const char* argv[])
@@ -237,14 +231,14 @@ class dsp_optimizer {
             return res_item;
         }
         
-        bool computeOne(const std::vector<std::string>& item, int run, double& res)
+        bool computeOne(const TOption& item, int run, double& res)
         {
             int argc = 0;
             const char* argv[64];
             for (int i = 0; i < item.size(); i++) {
                 argv[argc++] = item[i].c_str();
             }
-            argv[argc] = 0;  // NULL terminated argv
+            argv[argc] = nullptr;  // NULL terminated argv
             
             if (fInput == "") {
                 fFactory = createDSPFactoryFromFile(fFilename.c_str(), argc, argv, fTarget, fError, fOptLevel);
@@ -253,13 +247,13 @@ class dsp_optimizer {
             }
             
             if (!fFactory) {
-                std::cerr << "Cannot create factory : " << fError;
+                fprintf(stderr, "Cannot create factory : %s\n", fError.c_str());
                 return false;
             }
             
             fDSP = fFactory->createDSPInstance();
             if (!fDSP) {
-                std::cerr << "Cannot create instance..." << std::endl;
+                fprintf(stderr, "Cannot create instance...\n");
                 return false;
             }
             
@@ -275,7 +269,7 @@ class dsp_optimizer {
             return true;
         }
     
-        std::pair<double, std::vector<std::string> > findOptimizedParametersAux(const std::vector<std::vector <std::string> >& options)
+        std::pair<double, TOption> findOptimizedParametersAux(const TOptionTable& options)
         {
             std::vector<std::pair<int, double > > table_res;
             double res = 0.;
@@ -284,7 +278,7 @@ class dsp_optimizer {
                 if (computeOne(addArgvItems(options[i], fArgc, fArgv), fRun, res)) {
                     table_res.push_back(std::make_pair(i, res));
                 } else {
-                    std::cerr << "computeOne error..." << std::endl;
+                    fprintf(stderr, "computeOne error...\n");
                 }
             }
             
@@ -294,12 +288,19 @@ class dsp_optimizer {
 
         static bool compareFun(std::pair<int, double> i, std::pair<int, double> j) { return (i.second > j.second); }
     
-        bool init(const std::string& filename, const std::string input,
-                  int argc, const char* argv[],
+        bool init(const std::string& filename,
+                  const std::string& input,
+                  int argc,
+                  const char* argv[],
                   const std::string& target,
-                  int buffer_size, int run,
+                  int buffer_size,
+                  int run,
                   int opt_level_max,
-                  bool trace)
+                  bool trace,
+                  bool control,
+                  int ds,
+                  int us,
+                  int filter)
         {
             fFilename = filename;
             fInput = input;
@@ -311,20 +312,24 @@ class dsp_optimizer {
             fArgv = argv;
             fCount = -1;
             fTrace = trace;
+            fControl = control;
             fNeedExp10 = false;
+            fDownSampling = ds;
+            fUpSampling = us;
+            fFilter = filter;
             
             init();
             
-            if (fTrace) std::cout << "Estimate timing parameters" << std::endl;
+            if (fTrace) fprintf(stdout, "Estimate timing parameters\n");
             double res1 = 0.;
             if (!computeOne(addArgvItems(fOptionsTable[0], fArgc, fArgv), 1, res1)) {
-                std::cerr << "computeOne error..." << std::endl;
+                fprintf(stderr, "computeOne error...\n");
                 return false;
             }
-            if (fTrace) std::cout << "Testing -exp10 need" << std::endl;
+            if (fTrace) fprintf(stdout, "Testing -exp10 need\n");
             double res2 = 0.;
             if (!computeOne(addArgvItems(fOptionsTable[1], fArgc, fArgv), 1, res2)) {
-                std::cerr << "computeOne error..." << std::endl;
+                fprintf(stderr, "computeOne error...\n");
                 return false;
             }
             fNeedExp10 = (res2 > (res1 * 1.05)); // If more than 5% faster
@@ -343,46 +348,32 @@ class dsp_optimizer {
          * @param buffer_size - the buffer size in samples
          * @param run - the number of time each test must be run
          * @param opt_level - LLVM IR to IR optimization level (from -1 to 4, -1 means 'maximum possible value'
+         * @param trace - whether to log the trace
+         * @param control - whether to activate random changes of all control values at each cycle
+         * @param ds - downsampling factor
+         * @param us - upsampling factor
+         * @param filter - filter type
          * since the maximum value may change with new LLVM versions)
          */
-        dsp_optimizer(const char* filename,
-                      int argc,
-                      const char* argv[],
-                      const std::string& target,
-                      int buffer_size,
-                      int run = 1,
-                      int opt_level = -1,
-                      bool trace = true)
+        dsp_optimizer_real(const char* filename,
+                           int argc,
+                           const char* argv[],
+                           const std::string& target,
+                           int buffer_size,
+                           int run = 1,
+                           int opt_level = -1,
+                           bool trace = true,
+                           bool control = false,
+                           int ds = 0,
+                           int us = 0,
+                           int filter = 0)
         {
-            if (!init(filename, "", argc, argv, target, buffer_size, run, opt_level, trace)) {
+            if (!init(filename, "", argc, argv, target, buffer_size, run, opt_level, trace, control, ds, us, filter)) {
                 throw std::bad_alloc();
             }
         }
     
-        /**
-         * Constructor.
-         *
-         * @param input - the Faust program as a string
-         * @param argc - the number of parameters in argv array
-         * @param argv - the array of parameters
-         * @param target - the LLVM machine target (using empty string will take current machine settings)
-         * @param buffer_size - the buffer size in sampels
-         * @param opt_level - LLVM IR to IR optimization level (from -1 to 4, -1 means 'maximum possible value'
-         * since the maximum value may change with new LLVM versions)
-         */
-        dsp_optimizer(const std::string& input,
-                      int argc,
-                      const char* argv[],
-                      const std::string& target,
-                      int buffer_size,
-                      int opt_level = -1)
-        {
-            if (!init("", input, argc, argv, target, buffer_size, opt_level)) {
-                throw std::bad_alloc();
-            }
-        }
-    
-        virtual ~dsp_optimizer()
+        virtual ~dsp_optimizer_real()
         {}
     
         /**
@@ -390,30 +381,60 @@ class dsp_optimizer {
          *
          * @return the best result (in Megabytes/seconds), and compilation parameters in a vector.
          */
-        std::pair<double, std::vector<std::string> > findOptimizedParameters()
+        std::pair<double, TOption> findOptimizedParameters()
         {
-            if (fTrace) std::cout << "Discover best parameters option" << std::endl;
-            std::pair<double, std::vector<std::string> > best1 = findOptimizedParametersAux(fOptionsTable);
+            if (fTrace) fprintf(stdout, "Discover best parameters option\n");
+            std::pair<double, TOption> best1 = findOptimizedParametersAux(fOptionsTable);
             
-            if (fTrace) std::cout << "Refined with -mcd" << std::endl;
-            std::vector<std::vector <std::string> > options_table;
+            if (fTrace) fprintf(stdout, "Refined with -mcd\n");
+            TOptionTable options_table;
             for (int size = 2; size <= 256; size *= 2) {
-                std::vector<std::string> best2 = best1.second;
-                std::stringstream num;
-                num << size;
+                TOption best2 = best1.second;
                 best2.push_back("-mcd");
-                best2.push_back(num.str());
+                best2.push_back(std::to_string(size));
                 options_table.push_back(best2);
             }
             
             if (fNeedExp10) {
-                if (fTrace) std::cout << "Use -exp10" << std::endl;
-                std::vector <std::string> t0_exp10;
+                if (fTrace) fprintf(stdout, "Use -exp10\n");
+                TOption t0_exp10;
                 t0_exp10.push_back("-exp10");
                 options_table.push_back(t0_exp10);
             }
             
-            return findOptimizedParametersAux(options_table);
+            std::pair<double, TOption > best3 = findOptimizedParametersAux(options_table);
+           
+            if (best3.second[0] == "-vec") {
+                if (fTrace) fprintf(stdout, "Check with -g or -dfs\n");
+                // Current best
+                TOptionTable options_table1;
+                {
+                    TOption best2 = best3.second;
+                    options_table1.push_back(best2);
+                }
+                // Add -g
+                {
+                    TOption best2 = best3.second;
+                    best2.push_back("-g");
+                    options_table1.push_back(best2);
+                }
+                // Add -dfs
+                {
+                    TOption best2 = best3.second;
+                    best2.push_back("-dfs");
+                    options_table1.push_back(best2);
+                }
+                // Add -g and -dfs
+                {
+                    TOption best2 = best3.second;
+                    best2.push_back("-g");
+                    best2.push_back("-dfs");
+                    options_table1.push_back(best2);
+                }
+                return findOptimizedParametersAux(options_table1);
+            } else {
+                return best3;
+            }
         }
     
         /**
@@ -425,5 +446,31 @@ class dsp_optimizer {
     
 };
 
+class dsp_optimizer : public dsp_optimizer_real<FAUSTFLOAT> {
+
+    public:
+    
+        dsp_optimizer(const char* filename,
+                       int argc,
+                       const char* argv[],
+                       const std::string& target,
+                       int buffer_size,
+                       int run = 1,
+                       int opt_level = -1,
+                       bool trace = true,
+                       bool control = false,
+                       int ds = 0,
+                       int us = 0,
+                       int filter = 0)
+        :dsp_optimizer_real<FAUSTFLOAT>(filename, argc, argv,
+                                        target, buffer_size,
+                                        run, opt_level,
+                                        trace, control,
+                                        ds, us, filter)
+        {}
+    
+};
+    
 #endif
-/**************************  END  dsp-optimizer.h **************************/
+
+/************************** END dsp-optimizer.h **************************/

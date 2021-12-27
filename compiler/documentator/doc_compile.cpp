@@ -193,9 +193,9 @@ string DocCompiler::generateCode(Tree sig, int priority)
         return generateOutput(sig, docT(i + 1), CS(x, priority));
     }
 
-    else if (isSigFixDelay(sig, x, y)) {
-        printGCCall(sig, "generateFixDelay");
-        return generateFixDelay(sig, x, y, priority);
+    else if (isSigDelay(sig, x, y)) {
+        printGCCall(sig, "generateDelay");
+        return generateDelay(sig, x, y, priority);
     } else if (isSigPrefix(sig, x, y)) {
         printGCCall(sig, "generatePrefix");
         return generatePrefix(sig, x, y, priority);
@@ -234,9 +234,6 @@ string DocCompiler::generateCode(Tree sig, int priority)
     else if (isSigSelect2(sig, sel, x, y)) {
         printGCCall(sig, "generateSelect2");
         return generateSelect2(sig, sel, x, y, priority);
-    } else if (isSigSelect3(sig, sel, x, y, z)) {
-        printGCCall(sig, "generateSelect3");
-        return generateSelect3(sig, sel, x, y, z, priority);
     }
 
     else if (isProj(sig, &i, x)) {
@@ -281,8 +278,8 @@ string DocCompiler::generateCode(Tree sig, int priority)
         printGCCall(sig, "generateAttach");
         return generateAttach(sig, x, y, priority);
     } else if (isSigEnable(sig, x, y)) {
-        printGCCall(sig, "generateEnable");
-        return generateEnable(sig, x, y, priority);
+        printGCCall(sig, "generateControl");
+        return generateControl(sig, x, y, priority);
     }
 
     else {
@@ -444,7 +441,7 @@ static bool associative(int opcode)
     return (opcode == kAdd) || (opcode == kMul) || (opcode == kAND) || (opcode == kOR) || (opcode == kXOR);
 }
 
-string DocCompiler::generateEnable(Tree sig, Tree arg1, Tree arg2, int priority)
+string DocCompiler::generateControl(Tree sig, Tree arg1, Tree arg2, int priority)
 {
     return generateBinOp(sig, kMul, arg1, arg2, priority);
 }
@@ -1008,7 +1005,7 @@ string DocCompiler::generateIota(Tree sig, Tree n)
     return subst(" t \\bmod{$0} ", docT(size));
 }
 
-// a revoir en utilisant la lecture de table et en partageant la construction de la paire de valeurs
+// to be reviewed using table reading and sharing the construction of the value pair
 
 /**
  * Generate a select2 code
@@ -1025,33 +1022,6 @@ string DocCompiler::generateSelect2(Tree sig, Tree sel, Tree s1, Tree s2, int pr
     ltqSelDef += "\\left\\{\\begin{array}{ll}\n";
     ltqSelDef += subst("$0 & \\mbox{if \\,} $1 = 0\\\\\n", exps1, expsel);
     ltqSelDef += subst("$0 & \\mbox{if \\,} $1 = 1\n", exps2, expsel);
-    ltqSelDef += "\\end{array}\\right.";
-
-    fLateq->addSelectSigFormula(ltqSelDef);
-    gGlobal->gDocNoticeFlagMap["selectionsigs"] = true;
-
-    // return generateCacheCode(sig, subst("$0(t)", var));
-    setVectorNameProperty(sig, var);
-    return subst("$0(t)", var);
-}
-
-/**
- * Generate a select3 code
- */
-string DocCompiler::generateSelect3(Tree sig, Tree sel, Tree s1, Tree s2, Tree s3, int priority)
-{
-    string var    = getFreshID("q");
-    string expsel = CS(sel, 0);
-    string exps1  = CS(s1, 0);
-    string exps2  = CS(s2, 0);
-    string exps3  = CS(s3, 0);
-
-    string ltqSelDef;
-    ltqSelDef += subst("$0(t) = \n", var);
-    ltqSelDef += "\\left\\{\\begin{array}{ll}\n";
-    ltqSelDef += subst("$0 & \\mbox{if \\,} $1 = 0\\\\\n", generateVariableStore(s1, exps1), expsel);
-    ltqSelDef += subst("$0 & \\mbox{if \\,} $1 = 1\\\\\n", generateVariableStore(s2, exps2), expsel);
-    ltqSelDef += subst("$0 & \\mbox{if \\,} $1 = 2\n", generateVariableStore(s3, exps3), expsel);
     ltqSelDef += "\\end{array}\\right.";
 
     fLateq->addSelectSigFormula(ltqSelDef);
@@ -1145,7 +1115,7 @@ bool DocCompiler::getVectorNameProperty(Tree sig, string& vecname)
  * @todo Priorités à revoir pour le parenthésage (associativité de - et /),
  * avec gBinOpLateqTable dans binop.cpp.
  */
-string DocCompiler::generateFixDelay(Tree sig, Tree exp, Tree delay, int priority)
+string DocCompiler::generateDelay(Tree sig, Tree exp, Tree delay, int priority)
 {
     int    d;
     string vecname;
@@ -1158,10 +1128,10 @@ string DocCompiler::generateFixDelay(Tree sig, Tree exp, Tree delay, int priorit
     }
 
     if (isSigInt(delay, &d) && (d == 0)) {
-        // cerr << "@ generateFixDelay : d = " << d << endl;
+        // cerr << "@ generateDelay : d = " << d << endl;
         return subst("$0(t)", vecname);
     } else {
-        // cerr << "@ generateFixDelay : d = " << d << endl;
+        // cerr << "@ generateDelay : d = " << d << endl;
         return subst("$0(t\\!-\\!$1)", vecname, CS(delay, 7));
     }
 }

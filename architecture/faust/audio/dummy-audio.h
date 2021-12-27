@@ -43,17 +43,23 @@
 
 #define BUFFER_TO_RENDER 10
 
-class dummyaudio : public audio {
+struct dummyaudio_base : public audio {
+    
+    virtual void render() = 0;
+};
+
+template <typename REAL>
+class dummyaudio_real : public dummyaudio_base {
     
     private:
         
         dsp* fDSP;
         
-        long fSampleRate;
-        long fBufferSize;
+        int fSampleRate;
+        int fBufferSize;
         
-        FAUSTFLOAT** fInChannel;
-        FAUSTFLOAT** fOutChannel;
+        REAL** fInChannel;
+        REAL** fOutChannel;
         
         int fNumInputs;
         int fNumOutputs;
@@ -64,26 +70,34 @@ class dummyaudio : public audio {
         int fCount;
         int fSample;
         bool fManager;
+        bool fExit;
+    
+        void runAux()
+        {
+            try {
+                process();
+            } catch (...) {
+                if (fExit) exit(EXIT_FAILURE);
+            }
+        }
         
     #ifdef USE_PTHREAD
         pthread_t fAudioThread;
         static void* run(void* ptr)
         {
-            dummyaudio* audio = (dummyaudio*)ptr;
-            audio->process();
-            return 0;
+            static_cast<dummyaudio_real*>(ptr)->runAux();
         }
     #else
-        static void run(dummyaudio* audio)
+        std::thread* fAudioThread = nullptr;
+        static void run(dummyaudio_real* audio)
         {
-            audio->process();
+            audio->runAux();
         }
-        std::thread* fAudioThread = 0;
     #endif
         
         void process()
         {
-            while (fRunning && (--fRender > 0)) {
+            while (fRunning && (fRender-- > 0)) {
                 if (fSample > 0) { std::cout << "Render one buffer\n"; }
                 render();
             }
@@ -92,23 +106,29 @@ class dummyaudio : public audio {
         
     public:
         
-        dummyaudio(int sr, int bs, int count = BUFFER_TO_RENDER, int sample = -1, bool manager = false)
+        dummyaudio_real(int sr, int bs,
+                        int count = BUFFER_TO_RENDER,
+                        int sample = -1,
+                        bool manager = false,
+                        bool exit = false)
         :fSampleRate(sr), fBufferSize(bs),
         fInChannel(nullptr), fOutChannel(nullptr),
         fNumInputs(-1), fNumOutputs(-1),
         fRender(0), fCount(count),
-        fSample(sample), fManager(manager)
+        fSample(sample), fManager(manager),
+        fExit(exit)
         {}
         
-        dummyaudio(int count = BUFFER_TO_RENDER)
+        dummyaudio_real(int count = BUFFER_TO_RENDER)
         :fSampleRate(48000), fBufferSize(512),
         fInChannel(nullptr), fOutChannel(nullptr),
         fNumInputs(-1), fNumOutputs(-1),
         fRender(0), fCount(count),
-        fSample(512), fManager(false)
+        fSample(512), fManager(false),
+        fExit(false)
         {}
         
-        virtual ~dummyaudio()
+        virtual ~dummyaudio_real()
         {
             for (int i = 0; i < fNumInputs; i++) {
                 delete[] fInChannel[i];
@@ -128,16 +148,16 @@ class dummyaudio : public audio {
             fNumInputs = fDSP->getNumInputs();
             fNumOutputs = fDSP->getNumOutputs();
             
-            fInChannel = new FAUSTFLOAT*[fDSP->getNumInputs()];
-            fOutChannel = new FAUSTFLOAT*[fDSP->getNumOutputs()];
+            fInChannel = new REAL*[fNumInputs];
+            fOutChannel = new REAL*[fNumOutputs];
             
-            for (int i = 0; i < fDSP->getNumInputs(); i++) {
-                fInChannel[i] = new FAUSTFLOAT[fBufferSize];
-                memset(fInChannel[i], 0, sizeof(FAUSTFLOAT) * fBufferSize);
+            for (int i = 0; i < fNumInputs; i++) {
+                fInChannel[i] = new REAL[fBufferSize];
+                memset(fInChannel[i], 0, sizeof(REAL) * fBufferSize);
             }
-            for (int i = 0; i < fDSP->getNumOutputs(); i++) {
-                fOutChannel[i] = new FAUSTFLOAT[fBufferSize];
-                memset(fOutChannel[i], 0, sizeof(FAUSTFLOAT) * fBufferSize);
+            for (int i = 0; i < fNumOutputs; i++) {
+                fOutChannel[i] = new REAL[fBufferSize];
+                memset(fOutChannel[i], 0, sizeof(REAL) * fBufferSize);
             }
             
             if (fManager) {
@@ -160,7 +180,7 @@ class dummyaudio : public audio {
                     fRunning = false;
                 }
             #else
-                fAudioThread = new std::thread (dummyaudio::run, this);
+                fAudioThread = new std::thread(dummyaudio_real::run, this);
             #endif
                 return fRunning;
             } else {
@@ -185,13 +205,15 @@ class dummyaudio : public audio {
         
         void render()
         {
-            fDSP->compute(fBufferSize, fInChannel, fOutChannel);
-            if (fDSP->getNumInputs() > 0) {
+            AVOIDDENORMALS;
+            
+            fDSP->compute(fBufferSize, reinterpret_cast<FAUSTFLOAT**>(fInChannel), reinterpret_cast<FAUSTFLOAT**>(fOutChannel));
+            if (fNumInputs > 0) {
                 for (int frame = 0; frame < fSample; frame++) {
                     std::cout << std::fixed << std::setprecision(6) << "sample in " << fInChannel[0][frame] << std::endl;
                 }
             }
-            if (fDSP->getNumOutputs() > 0) {
+            if (fNumOutputs > 0) {
                 for (int frame = 0; frame < fSample; frame++) {
                     std::cout << std::fixed << std::setprecision(6) << "sample out " << fOutChannel[0][frame] << std::endl;
                 }
@@ -201,8 +223,23 @@ class dummyaudio : public audio {
         virtual int getBufferSize() { return fBufferSize; }
         virtual int getSampleRate() { return fSampleRate; }
         
-        virtual int getNumInputs() { return fDSP->getNumInputs(); }
-        virtual int getNumOutputs() { return fDSP->getNumOutputs(); }
+        virtual int getNumInputs() { return fNumInputs; }
+        virtual int getNumOutputs() { return fNumOutputs; }
+    
+};
+
+struct dummyaudio : public dummyaudio_real<FAUSTFLOAT> {
+    
+    dummyaudio(int sr, int bs,
+               int count = BUFFER_TO_RENDER,
+               int sample = -1,
+               bool manager = false,
+               bool exit = false)
+    : dummyaudio_real(sr, bs, count, sample, manager, exit)
+    {}
+    
+    dummyaudio(int count = BUFFER_TO_RENDER) : dummyaudio_real(count)
+    {}
     
 };
 

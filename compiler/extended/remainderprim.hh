@@ -34,13 +34,18 @@ class RemainderPrim : public xtended {
 
     virtual bool needCache() { return true; }
 
-    virtual ::Type infereSigType(const vector< ::Type>& args)
+    virtual ::Type infereSigType(const vector<::Type>& args)
     {
         faustassert(args.size() == arity());
+    
+        interval i = args[0]->getInterval();
+        interval j = args[1]->getInterval();
+        if (j.valid && gGlobal->gMathExceptions && j.haszero()) {
+            cerr << "WARNING : potential division by zero in remainder(" << i << ", " << j << ")" << endl;
+        }
+    
         return castInterval(floatCast(args[0] | args[1]), interval());  // temporary rule !!!
     }
-
-    virtual void sigVisit(Tree sig, sigvisitor* visitor) {}
 
     virtual int infereSigOrder(const vector<int>& args)
     {
@@ -52,10 +57,19 @@ class RemainderPrim : public xtended {
     {
         num n, m;
         faustassert(args.size() == arity());
-        if (isNum(args[0], n) && isNum(args[1], m)) {
+        if (isZero(args[1])) {
+            stringstream error;
+            error << "ERROR : remainder by 0 in remainder(" << ppsig(args[0]) << ", " << ppsig(args[1]) << ")" << endl;
+            throw faustexception(error.str());
+        } else if (isNum(args[0], n) && isNum(args[1], m)) {
             return tree(remainder(double(n), double(m)));
         } else {
-            return tree(symbol(), args[0], args[1]);
+            if (gGlobal->gMathApprox) {
+                // res = x - (y * T(int(0.5f + x / y)));
+                return sigBinOp(kSub, args[0], sigBinOp(kMul, args[1], sigFloatCast(sigIntCast(sigBinOp(kAdd, sigReal(0.5), sigBinOp(kDiv, args[0], args[1]))))));
+            } else {
+                return tree(symbol(), args[0], args[1]);
+            }
         }
     }
 
@@ -73,7 +87,7 @@ class RemainderPrim : public xtended {
         return container->pushFunction(subst("remainder$0", isuffix()), result_type, arg_types, casted_args);
     }
 
-    virtual string old_generateCode(Klass* klass, const vector<string>& args, const vector<Type>& types)
+    virtual string generateCode(Klass* klass, const vector<string>& args, const vector<::Type>& types)
     {
         faustassert(args.size() == arity());
         faustassert(types.size() == arity());
@@ -81,7 +95,7 @@ class RemainderPrim : public xtended {
         return subst("remainder$2($0,$1)", args[0], args[1], isuffix());
     }
 
-    virtual string generateLateq(Lateq* lateq, const vector<string>& args, const vector< ::Type>& types)
+    virtual string generateLateq(Lateq* lateq, const vector<string>& args, const vector<::Type>& types)
     {
         faustassert(args.size() == arity());
         faustassert(types.size() == arity());

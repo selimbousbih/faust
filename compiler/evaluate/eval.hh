@@ -32,18 +32,19 @@
  **/
 
 #include "boxes.hh"
-#include "environment.hh"
-#include "sourcereader.hh"
 
 /**
  * Eval the definition of 'process'.
  *
  * Eval the definition of 'process' in the environment passed as argument
  * @param eqlist the global environment (a list of definitions)
- * @return the 'process' block diagram in normal form that is
+ * @return the 'process' block diagram in normal form
  **/
 
 Tree evalprocess(Tree eqlist);
+
+/* Eval a documentation expression. */
+
 Tree evaldocexpr(Tree docexpr, Tree eqlist);
 
 /**
@@ -55,7 +56,7 @@ Tree evaldocexpr(Tree docexpr, Tree eqlist);
  */
 Tree pushValueDef(Tree id, Tree def, Tree lenv);
 
-/* numeric simplification of pattern arguments */
+/* Numeric simplification of pattern arguments */
 Tree simplifyPattern(Tree pattern);
 
 #endif

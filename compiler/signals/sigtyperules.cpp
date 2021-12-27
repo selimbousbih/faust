@@ -41,7 +41,8 @@
 
 static void setSigType(Tree sig, Type t);
 static Type getSigType(Tree sig);
-static Type initialRecType(Tree t);
+static TupletType* initialRecType(Tree t);
+static TupletType* maximalRecType(Tree t);
 
 static Type T(Tree term, Tree env);
 
@@ -59,18 +60,72 @@ static Type infereDocWriteTblType(Type size, Type init, Type widx, Type wsig);
 static Type infereDocAccessTblType(Type tbl, Type ridx);
 static Type infereWaveformType(Tree lv, Tree env);
 
+TupletType derefRecCert(Type t);
+
 static interval arithmetic(int opcode, const interval& x, const interval& y);
 
 // Uncomment to activate type inferrence tracing
-//#define TRACE(x) x
+// #define TRACE(x) x
+
 #define TRACE(x) \
     {            \
-        ;        \
+          ;      \
     }
 
 /**
  * The empty type environment (also property key for closed term type)
  */
+
+/**
+ * Do one step of type inference on the recursive signal groups of a signal
+ * The types of the recursive signals are updated to vtype and then vtype is updated to the next step.
+ *
+ * @param vrec array of all the recursive signal groups
+ * @param vdef definitions of all the recursive signal groups (vector of _lists_)
+ * @param vdefSizes number of signals in each recursive signal groups
+ * @param vtype types of the recursive signals
+ * @param inter if set to false, the interval of the new type is the union of the old one and the computed one, otherwise it is the intersection
+ */
+
+void updateRecTypes(vector<Tree>& vrec, const vector<Tree>& vdef, const vector<int>& vdefSizes,
+                    vector<Type>& vtype, const bool inter)
+{
+    Type         newType;
+    vector<Type> newTuplet;
+    TupletType newRecType;
+    TupletType oldRecType;
+    interval newI;
+    interval oldI;
+
+    const int n = vdef.size();
+
+    CTree::startNewVisit();
+    
+    // init recursive types
+    for (int i = 0; i < n; i++) {
+        setSigType(vrec[i], vtype[i]);
+        // cerr << i << "-" << *getSigType(vrec[i]) << endl;
+        vrec[i]->setVisited();
+    }
+
+    // cerr << "compute recursive types" << endl;
+    for (int i = 0; i < n; i++) {
+        newType = T(vdef[i], gGlobal->NULLTYPEENV);
+        newTuplet.clear();
+        oldRecType = derefRecCert(getSigType(vrec[i]));
+        newRecType = derefRecCert(newType);
+
+        for (int j = 0; j < vdefSizes[i]; j++) {
+            newTuplet.push_back(newRecType[j]);
+            newI = newRecType[j]->getInterval();
+            oldI = oldRecType[j]->getInterval();
+            
+            newI = inter ? intersection(newI, oldI) : reunion(newI, oldI);
+            newTuplet[j] = newTuplet[j]->promoteInterval(newI);
+        }
+        vtype[i] = new TupletType(newTuplet);
+    }
+}
 
 /**
  * Fully annotate every subtree of term with type information.
@@ -84,8 +139,27 @@ void typeAnnotation(Tree sig, bool causality)
     Tree sl             = symlist(sig);
     int  n              = len(sl);
 
-    vector<Tree> vrec, vdef;
-    vector<Type> vtype;
+    int size;
+    bool finished = false;
+
+    vector<Tree> vrec;       ///< array of all the recursive signal groups
+    vector<Tree> vdef;       ///< definitions of all the recursive signal groups (vector of _lists_)
+    vector<int>  vdefSizes;  ///< number of signals for each group
+    vector<Type> vtype;      ///< type of the recursive signals
+    vector<Type> vtypeUp;    ///< an upperbound of the recursive signals type
+    vector<TupletType> vUp;  ///< the unfolded version of the variable above
+
+    vector<vector<int>> vAgeMin;  ///< age of the minimum of every subsignal of the recursive signal
+    vector<vector<int>> vAgeMax;  ///< age of the maximum of every subsignal of the recursive signal
+
+    // work variables used in widening loop
+    
+    Type newType;
+    vector<Type> newTuplet;
+    TupletType newRecType;
+    TupletType oldRecType;
+    interval newI;
+    interval oldI;
 
     // cerr << "Symlist " << *sl << endl;
     for (Tree l = sl; isList(l); l = tl(l)) {
@@ -94,44 +168,85 @@ void typeAnnotation(Tree sig, bool causality)
         if (!isRec(hd(l), id, body)) {
             continue;
         }
-
         vrec.push_back(hd(l));
         vdef.push_back(body);
+
+        size = len(body);
+        vdefSizes.push_back(size);
+        vAgeMin.push_back(vector<int>(size, 0));
+        vAgeMax.push_back(vector<int>(size, 0));
     }
 
     // init recursive types
     for (int i = 0; i < n; i++) {
+        vtypeUp.push_back(maximalRecType(vdef[i]));
         vtype.push_back(initialRecType(vdef[i]));
     }
 
     faustassert(int(vrec.size()) == n);
     faustassert(int(vdef.size()) == n);
     faustassert(int(vtype.size()) == n);
+    faustassert((int)vAgeMin.size() == n);
+    faustassert((int)vAgeMax.size() == n);
 
-    // find least fixpoint
-    for (bool finished = false; !finished;) {
-        // init recursive types
-        CTree::startNewVisit();
-        for (int i = 0; i < n; i++) {
-            setSigType(vrec[i], vtype[i]);
-            vrec[i]->setVisited();
-        }
+    // cerr << "compute upper bounds for recursive types" << endl;
 
-        // compute recursive types
-        for (int i = 0; i < n; i++) {
-            vtype[i] = T(vdef[i], gGlobal->NULLTYPEENV);
-        }
-
+    for (int k=0; k < gGlobal->gNarrowingLimit; k++) {
+        updateRecTypes(vrec, vdef, vdefSizes, vtypeUp, true);
+    }
+    
+    for (const auto& ty : vtypeUp) {
+        vUp.push_back(derefRecCert(ty));
+    }
+    
+    // cerr << "find an upperbound of the least fixpoint" << endl;
+    
+    while (!finished) {
+        updateRecTypes(vrec, vdef, vdefSizes, vtype, false);
+        
         // check finished
         finished = true;
         for (int i = 0; i < n; i++) {
+            newTuplet.clear();
             // cerr << i << "-" << *vrec[i] << ":" << *getSigType(vrec[i]) << " => " << *vtype[i] << endl;
-            finished = finished && (getSigType(vrec[i]) == vtype[i]);
+            if (vtype[i] != getSigType(vrec[i])) {
+                finished = false;
+                newRecType = derefRecCert(vtype[i]);
+                oldRecType = derefRecCert(getSigType(vrec[i]));
+                for (int j = 0; j < vdefSizes[i]; j++) {
+                    newTuplet.push_back(newRecType[j]);
+                    newI = newRecType[j]->getInterval();
+                    oldI = oldRecType[j]->getInterval();
+
+                    TRACE(cerr << gGlobal->TABBER << "inspecting " << newTuplet[j] << endl;)
+                    if (newI.lo != oldI.lo) {
+                        faustassert(newI.lo < oldI.lo);
+                        vAgeMin[i][j]++;
+                        if (vAgeMin[i][j] > gGlobal->gWideningLimit) {
+                            TRACE(cerr << gGlobal->TABBER << "low widening of " << newTuplet[j] << endl;)
+                            newI.lo = vUp[i][j]->getInterval().lo;
+                        }
+                    }
+
+                    if (newI.hi != oldI.hi) {
+                        faustassert(newI.hi > oldI.hi);
+                        vAgeMax[i][j]++;
+                        if (vAgeMax[i][j] > gGlobal->gWideningLimit) {
+                            TRACE(cerr << gGlobal->TABBER << "up widening of " << newTuplet[j] << endl;)
+                            newI.hi = vUp[i][j]->getInterval().hi;
+                        }
+                    }
+                    
+                    newTuplet[j] = newTuplet[j]->promoteInterval(newI);
+                    TRACE(cerr << gGlobal->TABBER << "widening ended : " << newTuplet[j] << endl;)
+                }
+                vtype[i] = new TupletType(newTuplet);
+            }
         }
     }
-
     // type full term
     T(sig, gGlobal->NULLTYPEENV);
+    TRACE(cerr << "type success : " << endl << "BYE" << endl;)
 }
 
 void annotationStatistics()
@@ -148,6 +263,7 @@ void annotationStatistics()
  * @param sig the signal we want to know the type
  * @return the type of the signal
  */
+
 ::Type getCertifiedSigType(Tree sig)
 {
     Type ty = getSigType(sig);
@@ -179,11 +295,26 @@ static void setSigType(Tree sig, Type t)
 static Type getSigType(Tree sig)
 {
     AudioType* ty = (AudioType*)sig->getType();
-    if (ty == 0)
+    if (ty == 0) {
         TRACE(cerr << gGlobal->TABBER << "GET FIX TYPE OF " << *sig << " HAS NO TYPE YET" << endl;)
-    else
+    } else {
         TRACE(cerr << gGlobal->TABBER << "GET FIX TYPE OF " << *sig << " IS TYPE " << *ty << endl;)
+    }
     return ty;
+}
+
+/**
+ * dereference a Type to AudioType and promote its type to TupletType
+ * if the AudioType is not a TupletType, then fails
+ * @param t the type to promote
+ * @return the *t as a TupletType
+ */
+
+::TupletType derefRecCert(Type t)
+{
+    TupletType* p = isTupletType(t);
+    faustassert(p);
+    return *p;
 }
 
 /**************************************************************************
@@ -286,26 +417,26 @@ static Type infereSigType(Tree sig, Tree env)
         return castInterval(sampCast(t1 | t2), reunion(t1->getInterval(), t2->getInterval()));
     }
 
-    else if (isSigFixDelay(sig, s1, s2)) {
+    else if (isSigDelay(sig, s1, s2)) {
         Type     t1 = T(s1, env);
         Type     t2 = T(s2, env);
-        interval i  = t2->getInterval();
+        interval i1  = t2->getInterval();
 
         //        cerr << "for sig fix delay : s1 = "
         //				<< t1 << ':' << ppsig(s1) << ", s2 = "
         //                << t2 << ':' << ppsig(s2) << endl;
         if (gGlobal->gCausality) {
-            if (!i.valid) {
+            if (!(i1.valid) || !(i1.isbounded())) {
                 stringstream error;
                 error << "ERROR : can't compute the min and max values of : " << ppsig(s2) << endl
                       << "        used in delay expression : " << ppsig(sig) << endl
                       << "        (probably a recursive signal)" << endl;
                 throw faustexception(error.str());
-            } else if (i.lo < 0) {
+            } else if (i1.lo < 0) {
                 stringstream error;
                 error << "ERROR : possible negative values of : " << ppsig(s2) << endl
                       << "        used in delay expression : " << ppsig(sig) << endl
-                      << "        " << i << endl;
+                      << "        " << i1 << endl;
                 throw faustexception(error.str());
             }
         }
@@ -474,10 +605,6 @@ static Type infereSigType(Tree sig, Tree env)
                               st1->boolean() | st2->boolean(), reunion(st1->getInterval(), st2->getInterval()));
     }
 
-    else if (isSigSelect3(sig, sel, s1, s2, s3)) {
-        return T(sel, env) | T(s1, env) | T(s2, env) | T(s3, env);
-    }
-
     else if (isNil(sig)) {
         Type t = new TupletType(); /*sig->setType(t);*/
         return t;
@@ -485,6 +612,33 @@ static Type infereSigType(Tree sig, Tree env)
 
     else if (isList(sig)) {
         return T(hd(sig), env) * T(tl(sig), env);
+    }
+
+    else if (isSigAssertBounds(sig, min, max, cur)){
+        Type     t1 = T(min, env);
+        Type     t2 = T(max, env);
+        Type     t3 = T(cur, env);
+        interval i3 = t3->getInterval();
+        interval iEnd;
+        constSig2double(min);
+        if (i3.valid) {
+            iEnd = interval(std::max(i3.lo, constSig2double(min)), std::min(i3.hi, constSig2double(max)));
+        } else {
+            iEnd = interval(constSig2double(min), constSig2double(max));
+        }
+        return t3->promoteInterval(iEnd);
+    }
+
+    else if (isSigLowest(sig, s1)) {
+        interval i1 = T(s1, env)->getInterval();
+        return makeSimpleType(kReal, kKonst, kComp, kVect, kNum, interval(i1.lo));
+	// change this part   ^^^^^ once there are interval bounds depending on signal type
+    }
+
+    else if (isSigHighest(sig, s1)) {
+        interval i1 = T(s1, env)->getInterval();
+        return makeSimpleType(kReal, kKonst, kComp, kVect, kNum, interval(i1.hi));
+	// change this part   ^^^^^ once there are interval bounds depending on signal type
     }
 
     // unrecognized signal here
@@ -560,8 +714,7 @@ static Type infereReadTableType(Type tbl, Type ri)
         error << "ERROR inferring read table type, wrong write index type : " << ri << endl;
         throw faustexception(error.str());
     }
-    Type temp = makeSimpleType(tbl->nature(), ri->variability(), kInit | ri->computability(), ri->vectorability(),
-                               tbl->boolean(), tbl->getInterval());
+    Type temp = makeSimpleType(tbl->nature(), ri->variability(), kInit | ri->computability(), ri->vectorability(), tbl->boolean(), tbl->getInterval());
 
     return temp;
 }
@@ -577,12 +730,11 @@ static Type infereDocWriteTblType(Type size, Type init, Type widx, Type wsig)
 {
     checkKonst(checkInt(checkInit(size)));
 
-    Type temp = init->promoteVariability(kSamp)  // difficult to tell, therefore kSamp to be safe
+    Type temp = init->promoteVariability(kSamp)        // difficult to tell, therefore kSamp to be safe
                     ->promoteComputability(widx->computability() | wsig->computability())
                     ->promoteVectorability(kScal)      // difficult to tell, therefore kScal to be safe
                     ->promoteNature(wsig->nature())    // nature of the initial and written signal
-                    ->promoteBoolean(wsig->boolean())  // booleanity of the initial and written signal
-        ;
+                    ->promoteBoolean(wsig->boolean()); // booleanity of the initial and written signal
     return temp;
 }
 
@@ -598,16 +750,21 @@ static Type infereDocAccessTblType(Type tbl, Type ridx)
  * Compute an initial type solution for a recursive block
  * E1,E2,...En -> TREC,TREC,...TREC
  */
-static Type initialRecType(Tree t)
+static TupletType* initialRecType(Tree t)
 {
     faustassert(isList(t));
+    return new TupletType(vector<Type>(len(t), gGlobal->TREC));
+}
 
-    vector<Type> v;
-    while (isList(t)) {
-        v.push_back(gGlobal->TREC);
-        t = tl(t);
-    };
-    return new TupletType(v);
+/**
+ * Compute a maximal type solution for a recursive block
+ * useful for widening approx
+ * E1,E2,...En -> TRECMAX,TRECMAX,...TRECMAX
+ */
+static TupletType* maximalRecType(Tree t)
+{
+    faustassert(isList(t));
+    return new TupletType(vector<Type>(len(t), gGlobal->TRECMAX));
 }
 
 /**
@@ -625,10 +782,10 @@ static Type infereRecType(Tree sig, Tree body, Tree env)
  */
 static Type infereFFType(Tree ff, Tree ls, Tree env)
 {
-    // une primitive externe ne peut pas se calculer au plus tot qu'a
-    // l'initialisation. Sa variabilite depend de celle de ses arguments
-    // sauf si elle n'en pas, auquel cas on considere que c'est comme
-    // rand() c'est a dire que le resultat varie a chaque appel.
+    // An external primitive can't be computed earlier than at initialization.
+    // Its variability depends on the variability of its arguments unless it has no arguments,
+    // in which case it is considered as rand(), i.e. the result varies at each call.
+    
     if (ffarity(ff) == 0) {
         // case of functions like rand()
         return makeSimpleType(ffrestype(ff), kSamp, kInit, kVect, kNum, interval());
@@ -641,8 +798,6 @@ static Type infereFFType(Tree ff, Tree ls, Tree env)
             ls = tl(ls);
         }
         // but the result type is defined by the function
-
-        // return t;
         return makeSimpleType(ffrestype(ff), t->variability(), t->computability(), t->vectorability(), t->boolean(),
                               interval());
     }
@@ -653,9 +808,8 @@ static Type infereFFType(Tree ff, Tree ls, Tree env)
  */
 static Type infereFConstType(Tree type)
 {
-    // une constante externe ne peut pas se calculer au plus tot qu'a
-    // l'initialisation. Elle est constante, auquel cas on considere que c'est comme
-    // rand() c'est a dire que le resultat varie a chaque appel.
+    // An external constant cannot be calculated at the earliest possible time the initialization.
+    // It is constant, in which case it is considered a rand() i.e. the result varies at each call.
     return makeSimpleType(tree2int(type), kKonst, kInit, kVect, kNum, interval());
 }
 
@@ -664,8 +818,8 @@ static Type infereFConstType(Tree type)
  */
 static Type infereFVarType(Tree type)
 {
-    // une variable externe ne peut pas se calculer au plus tot qu'a
-    // l'execution. Elle varie par blocs comme les éléments d'interface utilisateur.
+    // An external variable cannot be calculated as soon as it is executed.
+    // It varies by blocks like the user interface elements.
     return makeSimpleType(tree2int(type), kBlock, kExec, kVect, kNum, interval());
 }
 
@@ -744,7 +898,7 @@ static interval arithmetic(int opcode, const interval& x, const interval& y)
             return x % y;
         case kLsh:
             return x << y;
-        case kRsh:
+        case kARsh:
             return x >> y;
         case kGT:
             return x > y;
@@ -771,4 +925,20 @@ static interval arithmetic(int opcode, const interval& x, const interval& y)
     }
 
     return interval();
+}
+
+double constSig2double(Tree sig)
+{
+    Type ty = getSigType(sig);
+    if (ty->variability() != kKonst) {
+        throw faustexception("ERROR : constSig2double, the parameter must be a constant value"
+			     " known at compile time\n");
+    }
+    interval bds = ty->getInterval();
+    if (bds.lo != bds.hi) {
+        throw faustexception(
+            "ERROR : constSig2double, constant value with non-singleton interval, don't know what"
+            " to do, please report");
+    }
+    return bds.lo;
 }

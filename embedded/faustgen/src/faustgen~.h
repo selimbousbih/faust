@@ -1,6 +1,6 @@
 /************************************************************************
  FAUST Architecture File
- Copyright (C) 2012-2018 GRAME, Centre National de Creation Musicale
+ Copyright (C) 2012-2021 GRAME, Centre National de Creation Musicale
  ---------------------------------------------------------------------
  This Architecture section is free software; you can redistribute it
  and/or modify it under the terms of the GNU General Public License
@@ -37,6 +37,7 @@
 #include <string>
 #include <set>
 #include <vector>
+#include <mutex>
 #include <map>
 
 #include "faust/dsp/llvm-dsp.h"
@@ -44,6 +45,7 @@
 #include "faust/gui/MidiUI.h"
 #include "faust/gui/SoundUI.h"
 #include "faust/gui/OSCUI.h"
+#include "faust/gui/SaveUI.h"
 
 #include "maxcpp5.h"
 
@@ -51,13 +53,15 @@
 #include <libgen.h>
 #endif
 
+// Here to be able to use 'post'
 #include "faust/gui/mspUI.h"
+
 #include "jpatcher_api.h"
 #include "jgraphics.h"
 #include "ext_drag.h"
 
 #define DEFAULT_SOURCE_CODE "import(\"stdfaust.lib\");\nprocess=_,_;"
-#define FAUSTGEN_VERSION "1.39"
+#define FAUSTGEN_VERSION "1.53"
 #define FAUST_PDF_DOCUMENTATION "faust-quick-reference.pdf"
 #define FAUST_PDF_LIBRARY "library.pdf"
 
@@ -77,7 +81,7 @@
 #define LLVM_OPTIMIZATION -1  // means 'maximum'
 #define DEFAULT_CODE "process = 0,0;"
 
-const char* TEXT_APPL_LIST[] = {"Atom", "Smultron", "TextWrangler", "TextExit", "" };
+const char* TEXT_APPL_LIST[] = {"Visual\\ Studio\\ Code", "Atom", "Smultron", "TextWrangler", "TextExit", "" };
 
 //===================
 // Faust DSP Factory
@@ -94,36 +98,36 @@ class faustgen_factory {
         
     private:
         
-        set<faustgen*> fInstances;      // set of all DSP
-        llvm_dsp_factory* fDSPfactory;  // pointer to the LLVM Faust factory
-        midi_handler fMidiHandler;      // generic MIDI handler
-        SoundUI* fSoundUI;              // generic Soundfile interface
+        set<faustgen*> fInstances;      // Set of all DSP
+        llvm_dsp_factory* fDSPfactory;  // Pointer to the LLVM Faust factory
+        SoundUI* fSoundUI;              // Generic Soundfile interface
         
-        long fSourceCodeSize;           // length of source code string
-        char** fSourceCode;             // source code string
+        long fSourceCodeSize;           // Length of source code string
+        char** fSourceCode;             // Source code string
         
-        long fBitCodeSize;              // length of the bitcode string
-        char** fBitCode;                // bitcode string
+        long fBitCodeSize;              // Length of the bitcode string
+        char** fBitCode;                // Bitcode string
         
-        set<string> fLibraryPath;       // path towards the Faust libraries
-        string fDrawPath;               // path where to put SVG files
+        set<string> fLibraryPath;       // Path towards the Faust libraries
+        string fDrawPath;               // Path where to put SVG files
         
-        vector<string> fOptions;        // options set in the 'compileoptions' message
+        vector<string> fOptions;        // Options set in the 'compileoptions' message
         
         int fFaustNumber;               // faustgen object's number inside the patcher
         
-        string fName;                   // name of the DSP group
+        string fName;                   // Name of the DSP group
         string fJSON;                   // JSON
         
-        t_systhread_mutex fDSPMutex;    // mutex to protect RT audio thread when recompiling DSP
-        
+        recursive_mutex fAudioMutex;    // Mutex to protect RT audio thread when recompiling DSP
+        recursive_mutex fUIMutex;       // Mutex to protect UI thread when recompiling DSP
+    
         vector<string> fCompileOptions; // Faust compiler options
         
-        int fOptLevel;                  // the LLVM optimization level
+        int fOptLevel;                  // LLVM optimization level
         bool fPolyphonic;               // Whether the created DSP is polyphonic
         
-        short fDefaultPath;             // default path to be saved in factory constructor (using path_getdefault)
-        // and explicitely set in 'read' and 'write' (using path_setdefault)
+        short fDefaultPath;             // Default path to be saved in factory constructor (using path_getdefault)
+                                        // and explicitly set in 'read' and 'write' (using path_setdefault)
         
         int m_siginlets;
         int m_sigoutlets;
@@ -140,7 +144,6 @@ class faustgen_factory {
     public:
         
         faustgen_factory(const string& name);
-        
         ~faustgen_factory();
         
         llvm_dsp_factory* create_factory_from_bitcode();
@@ -192,12 +195,17 @@ class faustgen_factory {
                 delete this;
             }
         }
-        
-        bool try_lock() { return systhread_mutex_trylock(fDSPMutex) == MAX_ERR_NONE; }
-        bool lock() { return systhread_mutex_lock(fDSPMutex) == MAX_ERR_NONE; }
-        void unlock() { systhread_mutex_unlock(fDSPMutex); }
-        
-        static int gFaustCounter;       // global variable to count the number of faustgen objects inside the patcher
+    
+        // Mutex between the audio thread and the DSP creation thread
+        bool try_lock_audio() { return fAudioMutex.try_lock(); }
+        void lock_audio() { fAudioMutex.lock(); }
+        void unlock_audio() { fAudioMutex.unlock(); }
+    
+        // Mutex between the UI thread and the DSP creation thread
+        void lock_ui() { fUIMutex.lock(); }
+        void unlock_ui() { fUIMutex.unlock(); }
+    
+        static int gFaustCounter; // Global variable to count the number of faustgen objects inside the patcher
         
         static map<string, faustgen_factory*> gFactoryMap;
 };
@@ -213,16 +221,18 @@ class faustgen : public MspCpp5<faustgen> {
     private:
         
         faustgen_factory* fDSPfactory;
-        map<string, vector<t_object*> > fOutputTable;
-        
+        map<string, vector<t_object*> > fOutputTable;  // Output UI items (like bargraph) in the patcher to be notified
+    
+        max_midi  fMidiHandler;         // Generic MIDI handler
         mspUI* fDSPUI;                  // Control UI
         MidiUI* fMidiUI;                // Midi UI
         OSCUI* fOSCUI;                  // OSC UI
-        
+        SaveUI* fSavedUI;               // Save/load current value, reset to init value
+    
         ::dsp* fDSP;                    // LLVM Faust dsp
-        t_object* fEditor;              // text editor object
+        t_object* fEditor;              // Text editor object
         bool fMute;                     // DSP mute state
-        static t_jrgba gDefaultColor;   // color of the object to be used when restoring default color
+        static t_jrgba gDefaultColor;   // Color of the object to be used when restoring default color
         
         // Display DSP text source
         void display_dsp_source();
@@ -252,10 +262,7 @@ class faustgen : public MspCpp5<faustgen> {
         void init_controllers();
         
         t_dictionary* json_reader(const char* jsontext);
-        
-        void add_midihandler();
-        void remove_midihandler();
-        
+    
     public:
         
         faustgen()
@@ -284,8 +291,14 @@ class faustgen : public MspCpp5<faustgen> {
         void write(long inlet, t_symbol* s);
         
         void polyphony(long inlet, t_symbol* s, long argc, t_atom* argv);
+        void init(long inlet, t_symbol* s, long argc, t_atom* argv);
+        void dump(long inlet, t_symbol* s, long argc, t_atom* argv);
+    
         void midievent(long inlet, t_symbol* s, long argc, t_atom* argv);
         void osc(long inlet, t_symbol* s, long argc, t_atom* argv);
+    
+        void dump_inputs();
+        void dump_outputs();
         
         void librarypath(long inlet, t_symbol* s);
         
@@ -299,13 +312,16 @@ class faustgen : public MspCpp5<faustgen> {
         
         // Called when the user double-clicks on the faustgen object inside the Max patcher
         void dblclick(long inlet);
+    
+        void assist(void* b, long msg, long a, char* dst);
         
         // Called when closing the text editor, calls for the creation of a new Faust module with the updated sourcecode
         void edclose(long inlet, char** text, long size);
         
         // Process the signal data with the Faust module
         void perform(int vs, t_sample** inputs, long numins, t_sample** outputs, long numouts);
-        
+    
+        // Callback given to setupIO
         void init(double samplerate);
     
 };

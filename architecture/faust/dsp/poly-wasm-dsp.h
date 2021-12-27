@@ -41,7 +41,6 @@ std::string pathToContent(const string& str) { return ""; }
 /**
  *  wasm backend based Polyphonic DSP factory class.
  */
-
 struct wasm_dsp_poly_factory : public dsp_poly_factory {
     
     wasm_dsp_poly_factory(const std::string& name_app,
@@ -101,7 +100,7 @@ struct wasm_dsp_poly_factory : public dsp_poly_factory {
  * @param argc - the number of parameters in argv array
  * @param argv - the array of parameters (Warning : aux files generation options will be filtered (-svg, ...) --> use generateAuxFiles)
  * @param error_msg - the error string to be filled
- * @param internal_memory - whether to use an internallay allocated memory block for wasm module
+ * @param internal_memory - whether to use an internally allocated memory block for wasm module
  *
  * @return a Polyphonic DSP factory on success, otherwise a null pointer.
  */
@@ -125,7 +124,7 @@ static wasm_dsp_poly_factory* createWasmPolyDSPFactoryFromString(const std::stri
  * @param argc - the number of parameters in argv array
  * @param argv - the array of parameters (Warning : aux files generation options will be filtered (-svg, ...) --> use generateAuxFiles)
  * @param error_msg - the error string to be filled
- * @param internal_memory - whether to use an internallay allocated memory block for wasm module
+ * @param internal_memory - whether to use an internally allocated memory block for wasm module
  *
  * @return a Polyphonic DSP factory on success, otherwise a null pointer.
  */
@@ -172,7 +171,7 @@ static dsp_poly_factory* readWasmPolyDSPFactoryFromMachineFile(const std::string
     if (process_factory) {
         return new dsp_poly_factory(process_factory, effect_factory);
     } else {
-        wasm_dsp_factory* process_factory = readWasmDSPFactoryFromMachineFile(machine_code_path, error_msg);
+        process_factory = readWasmDSPFactoryFromMachineFile(machine_code_path, error_msg);
         return (process_factory) ? new dsp_poly_factory(process_factory, NULL) : NULL;
     }
 }
@@ -255,4 +254,4 @@ EMSCRIPTEN_BINDINGS(CLASS_dsp_poly)
 #endif
 
 #endif // __poly_wasm_dsp__
-/**************************  END  poly-wasm-dsp.h **************************/
+/************************** END poly-wasm-dsp.h **************************/

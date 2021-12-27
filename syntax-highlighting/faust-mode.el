@@ -8,7 +8,7 @@
 ;; Maintainer: Yassin Philip <xaccrocheur@gmail.com>
 ;; Maintainer: Juan A. Romero <rukano@gmail.com>
 ;; Keywords: languages, faust
-;; Version: 0.2
+;; Version: 0.3
 ;; URL: https://github.com/rukano/emacs-faust-mode
 ;; License: GPLv3
 ;; MELPA: yes
@@ -53,7 +53,7 @@
 ;; ### Faust
 
 ;; Oh, and of course install [the latest
-;; Faust](http://faust.grame.fr/download/) and ensure it's in the
+;; Faust](https://faust.grame.fr/downloads/) and ensure it's in the
 ;; PATH.
 
 ;; ### Faustine
@@ -71,7 +71,7 @@
   '("process" "with" "letrec" "case" "seq" "par" "sum" "prod" "include" "import" "component" "library" "environment" "declare" "define" "undef" "error" "pragma" "ident" "if" "def" "else" "elif" "endif" "line" "warning"))
 
 (defconst faust-keywords-functions
-  '("mem" "prefix" "int" "float" "rdtable" "rwtable" "select2" "select3" "ffunction" "fconstant" "fvariable" "attach" "acos" "asin" "atan" "atan2" "cos" "sin" "tan" "exp" "log" "log10" "pow" "sqrt" "abs" "min" "max" "fmod" "remainder" "floor" "ceil" "rint" "xor"))
+  '("mem" "prefix" "int" "float" "rdtable" "rwtable" "select2" "select3" "ffunction" "fconstant" "fvariable" "route" "waveform" "soundfile" "attach" "acos" "asin" "atan" "atan2" "cos" "sin" "tan" "exp" "log" "log10" "pow" "sqrt" "abs" "min" "max" "fmod" "remainder" "floor" "ceil" "rint" "xor"))
 
 (defconst faust-keywords-ui
   '("button" "checkbox" "vslider" "hslider" "nentry" "vgroup" "hgroup" "tgroup" "vbargraph" "hbargraph"))
@@ -181,7 +181,7 @@
 (defvar faust-regexp-keywords-ui (regexp-opt faust-keywords-ui 'words))
 (defvar faust-regexp-keywords-lib (regexp-opt faust-keywords-lib 'words))
 
-(defconst faust-regexp-faust-operator (rx (any ",'@:*/%^-+|&~>=<!")))
+(defconst faust-regexp-faust-operator (rx (any ?- ",'@:*/%^+|&~>=<!")))
 
 (defconst faust-regexp-faust-delimiters (rx (any "{}()[];")))
 

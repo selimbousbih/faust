@@ -32,10 +32,9 @@
 
 class MapUI;
 
-//-------------------------------------------------
-// MIDI input/output handling using RtMidi library
-//-------------------------------------------------
-
+/**
+ *  MIDI input/output handling using RtMidi library: http://www.music.mcgill.ca/~gary/rtmidi/
+ */
 class rt_midi : public midi_handler {
 
     private:
@@ -130,7 +129,7 @@ class rt_midi : public midi_handler {
         
         void sendMessage(std::vector<unsigned char>& message)
         {
-            for (auto& it : fOutput) {
+            for (const auto& it : fOutput) {
                 it->sendMessage(&message);
             }
         }
@@ -175,24 +174,25 @@ class rt_midi : public midi_handler {
         
         void stopMidi()
         {
-            for (auto& it1 : fInput) {
+            for (const auto& it1 : fInput) {
                 delete it1;
             }
             fInput.clear();
-            for (auto& it2 : fOutput) {
+            for (const auto& it2 : fOutput) {
                 delete it2;
             }
             fOutput.clear();
         }
     
         // To be used in polling mode
-        int getMessages(std::vector<MIDIMessage>* messages)
+        int recvMessages(std::vector<MIDIMessage>* messages)
         {
             int count = 0;
             double first_time_stamp = 0.;
-            for (auto& it : fInput) {
+            for (const auto& it : fInput) {
                 std::vector<unsigned char> message;
                 double time_stamp = (uint32_t)it->getMessage(&message);
+                // Small messages
                 if (message.size() > 0) {
                     if (count == 0) first_time_stamp = time_stamp;
                     MIDIMessage& mes = messages->at(count++);
@@ -205,6 +205,18 @@ class rt_midi : public midi_handler {
             return count;
         }
     
+        void sendMessages(std::vector<MIDIMessage>* messages, int count)
+        {
+            for (int i = 0; i < count; ++i) {
+                MIDIMessage mes1 = (*messages)[i];
+                std::vector<unsigned char> mes2;
+                mes2.push_back(mes1.byte0);
+                mes2.push_back(mes1.byte1);
+                mes2.push_back(mes1.byte2);
+                sendMessage(mes2);
+            }
+        }
+    
         // MIDI output API
         MapUI* keyOn(int channel, int pitch, int velocity)
         {
@@ -213,7 +225,7 @@ class rt_midi : public midi_handler {
             message.push_back(pitch);
             message.push_back(velocity);
             sendMessage(message);
-            return 0;
+            return nullptr;
         }
         
         void keyOff(int channel, int pitch, int velocity) 

@@ -3,15 +3,15 @@
 #####################################################################
 #                                                                   #
 #               Compiles Faust programs to JACK-GTK                 #
-#               (c) Grame, 2009-2018                                #
+#               (c) Grame, 2009-2019                                #
 #                                                                   #
 #####################################################################
 
 . faustpath
 . faustoptflags
+. usage.sh
 
-CXX=g++
-CXXFLAGS="$MYGCCFLAGS -I/opt/local/include"
+CXXFLAGS+=" $MYGCCFLAGS -I/opt/local/include" # So that additional CXXFLAGS can be used
 
 ARCHFILE=$FAUSTARCH/jack-gtk.cpp
 
@@ -21,12 +21,18 @@ NVOICES=-1
 SOUNDFILE="0"
 SOUNDFILEDEFS=""
 SOUNDFILELIBS=""
+PRESETDIR="auto"
+PRESETDEFS=""
+
+if [[ $(uname -s) != Darwin ]]; then
+	LFLAGS+="-no-pie"
+fi
 
 #-------------------------------------------------------------------
 # Check Darwin specifics
 #
 if [[ $(uname) == Darwin ]]; then
-    ARCHLIB+=" -framework CoreMIDI -framework CoreFoundation"
+    ARCHLIB+=" -framework CoreMIDI -framework CoreFoundation -framework CoreAudio"
 else
     ARCHLIB+=" `pkg-config --cflags --libs alsa`"
 fi
@@ -37,29 +43,23 @@ do
     p=$1
 
     if [ $p = "-help" ] || [ $p = "-h" ]; then
-        echo "faust2jack [-httpd] [-soundfile] [-resample] [-nvoices <num>] [-effect auto|<effect.dsp>] [-midi] [-osc] [additional Faust options (-vec -vs 8...)] <file.dsp>"
-        echo "Use '-httpd' to activate HTTP control"
-        echo "Use '-soundfile' when compiling DSP using 'soundfile' primitive, to add needed resources"
-        echo "Use '-resample' to resample soundfiles to the audio driver sample rate"
-        echo "Use '-nvoices <num>' to produce a polyphonic self-contained DSP with <num> voices, ready to be used with MIDI or OSC"
-        echo "Use '-effect <effect.dsp>' to produce a polyphonic DSP connected to a global output effect, ready to be used with MIDI or OSC"
-        echo "Use '-effect auto' to produce a polyphonic DSP connected to a global output effect defined as 'effect' in <file.dsp>, ready to be used with MIDI or OSC"
-        echo "Use '-midi' to activate MIDI control"
-        echo "Use '-osc' to activate OSC control"
+        usage faust2jack "[options] [Faust options] <file.dsp>"
+        platform Linux
+        require Jack
+        echo "Compiles Faust programs to JACK-GTK"
+        option
+        options -httpd -osc -midi -soundfile
+        option -resample "to resample soundfiles to the audio driver sample rate."
+        option "-nvoices <num>"
+        option "-effect <effect.dsp>"
+        option "-effect auto"
+        option "-preset <directory>" "add a preset manager on top of GUI and save the preset files in the given directory"
+        option "-preset auto" "add a preset manager on top of GUI and save the preset files in a system temporary directory"
+        option "Faust options"
         exit
     fi
 
-    if [ "$p" = -omp ]; then
-        if [[ $CXX == "icpc" ]]; then
-            OMP="-openmp"
-        else
-            OMP="-fopenmp"
-        fi
-    fi
-  
-    if [ "$p" = -icc ]; then
-    	ignore=" "
-    elif [ $p = "-nvoices" ]; then
+	if [ $p = "-nvoices" ]; then
         POLYDEFS="-DPOLY"
         shift
         NVOICES=$1
@@ -84,6 +84,10 @@ do
         OSCDEFS="-DOSCCTRL -lOSCFaust"
     elif [ $p = "-httpd" ]; then
         HTTPDEFS="-DHTTPCTRL -lHTTPDFaust -lmicrohttpd"
+    elif [ "$p" = "-preset" ]; then
+        PRESETDEFS="-DPRESETUI"
+        shift
+        PRESETDIR=$1
 	elif [ $p = "-ocv" ]; then
         OCVDEFS="-DOCVCTRL -lpthread"
         OCVLIBS="opencv"
@@ -93,7 +97,7 @@ do
         PROCARCH="-m64"
     elif [ ${p:0:1} = "-" ]; then
 	    OPTIONS="$OPTIONS $p"
-	elif [[ -f "$p" ]]; then
+	elif [[ -f "$p" ]] && [ ${p: -4} == ".dsp" ]; then
 	    FILES="$FILES $p"
 	else
 	    OPTIONS="$OPTIONS $p"        
@@ -104,7 +108,7 @@ shift
 done
 
 #-------------------------------------------------------------------
-# compile the *.dsp files using JACK-GTK on linux
+# compile the *.dsp files using JACK-GTK
 #
 for f in $FILES; do
 
@@ -119,24 +123,37 @@ for f in $FILES; do
             adaptor(F,G) = adapt(outputs(F),inputs(G));
             process = adaptor(library("$f").process, library("$f").effect) : library("$f").effect;
 EndOfCode
-            faust -i -json -a $ARCHFILE $OPTIONS "$f" -o "$f.cpp"|| exit
+            faust -i -json -a $ARCHFILE $OPTIONS "$f" -o "${f%.dsp}_tmp.cpp" || exit
             faust -i -cn effect -a minimal-effect.cpp effect.dsp -o effect.h || exit
             rm effect.dsp
         else
-            faust -i -json -a $ARCHFILE $OPTIONS "$f" -o "$f.cpp" || exit
+            faust -i -json -a $ARCHFILE $OPTIONS "$f" -o "${f%.dsp}_tmp.cpp" || exit
             faust -i -cn effect -a minimal-effect.cpp "$EFFECT" -o "effect.h" || exit
         fi
     else
-        faust -i -a $ARCHFILE $OPTIONS "$f" -o "$f.cpp" || exit
+        faust -i -a $ARCHFILE $OPTIONS "$f" -o "${f%.dsp}_tmp.cpp"|| exit
     fi
+    
+    # add preset management
+    if [ $PRESETDIR = "auto" ]; then
+        echo "#define PRESETDIR \"/var/tmp/\"" > "preset.cpp"
+    else
+        echo "#define PRESETDIR \"$PRESETDIR\"" > "preset.cpp"
+    fi
+
+    cat "preset.cpp" "${f%.dsp}_tmp.cpp" > "${f%.dsp}.cpp"
+    rm "preset.cpp" "${f%.dsp}_tmp.cpp"
 
 	# compile c++ to binary
 	(
-		$CXX $CXXFLAGS $FAUSTTOOLSFLAGS $OMP "$f.cpp" `pkg-config --cflags --libs jack $OCVLIBS gtk+-2.0` $SOUNDFILELIBS $SAMPLERATELIBS $PROCARCH $OSCDEFS $HTTPDEFS $OCVDEFS $MIDIDEFS $POLYDEFS $SOUNDFILEDEFS $SAMPLERATEDEFS $ARCHLIB -o "${f%.dsp}"
+		$CXX $CXXFLAGS $FAUSTTOOLSFLAGS "${f%.dsp}.cpp" `pkg-config --cflags --libs jack $OCVLIBS gtk+-2.0` $SOUNDFILELIBS $SAMPLERATELIBS $PROCARCH $OSCDEFS $HTTPDEFS $OCVDEFS $MIDIDEFS $POLYDEFS $SOUNDFILEDEFS $SAMPLERATEDEFS $PRESETDEFS $ARCHLIB $LFLAGS -o "${f%.dsp}"
+		if [[ $(uname) == Darwin ]]; then
+		    codesign --sign - --deep --force "${f%.dsp}"
+		fi
 	) > /dev/null || exit
 
-    # remove tempory stuff
-	rm -f "$f.cpp" effect.h "$f.json"
+    # remove tempory files
+	rm -f "${f%.dsp}.cpp" effect.h "$f.json"
 
 	# collect binary file name for FaustWorks
 	BINARIES="$BINARIES${f%.dsp};"

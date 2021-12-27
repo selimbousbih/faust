@@ -11,6 +11,7 @@
 
 . faustpath
 . faustoptflags
+. usage.sh
 
 ARCHFILE=$FAUSTARCH/netjack-console.cpp
 
@@ -21,7 +22,7 @@ OSCDEFS=""
 #-------------------------------------------------------------------
 # Default compilation flags for gcc and icc :
 #
-CXXFLAGS="-O3 -march=armv6zk -mcpu=arm1176jzf-s -mtune=arm1176jzf-s -mfpu=vfp -mfloat-abi=hard -ffast-math -ftree-vectorize"
+CXXFLAGS+="-O3 -march=armv6zk -mcpu=arm1176jzf-s -mtune=arm1176jzf-s -mfpu=vfp -mfloat-abi=hard -ffast-math -ftree-vectorize"
 #-------------------------------------------------------------------
 # Kernel Sources Dir
 
@@ -48,13 +49,23 @@ INCLUDES_DIR="-I$LINUX_KERNEL_INSTALL_DIR/include/"
 #
 
 for p in $@; do
+    if [ $p = "-help" ] || [ $p = "-h" ]; then
+        usage faust2rpialsaconsole "[options] [Faust options] <file.dsp>"
+        platform RaspberryPi
+        require NetJack
+		echo "Compiles Faust programs to RaspberryPi - netjack-console architecture"
+		option
+		options -osc -httpd
+        option "Faust options"
+    	exit
+    fi
     if [ $p = "-osc" ]; then
 	 	OSCDEFS="-DOSCCTRL -L$LINUX_KERNEL_INSTALL_DIR/lib/ -lOSCFaust -loscpack"
     elif [ $p = "-httpd" ]; then
 	 	HTTPDEFS="-DHTTPCTRL -L$LINUX_KERNEL_INSTALL_DIR/lib/ -lHTTPDFaust -lmicrohttpd"
     elif [ ${p:0:1} = "-" ]; then
 	    OPTIONS="$OPTIONS $p"
-	elif [[ -f "$p" ]]; then
+	elif [[ -f "$p" ]] && [ ${p: -4} == ".dsp" ]; then
 	    FILES="$FILES $p"
 	else
 	    OPTIONS="$OPTIONS $p"

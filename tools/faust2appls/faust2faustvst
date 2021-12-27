@@ -4,6 +4,7 @@
 
 . faustpath
 . faustoptflags
+. usage.sh
 
 # Check for some common locations of the VST SDK files. This falls back to
 # /usr/local/src/vstsdk if none of these are found. In that case, or if make
@@ -44,7 +45,7 @@ sdkpaths="/usr/src/VST* /usr/src/vst* /usr/include/VST* /usr/include/vst* /opt/l
 # directory. You can also specify this explicitly by setting the FAUSTARCH
 # environment variable accordingly.
 
-# the part below is obsolete
+# The part below is obsolete
 # architecture location is now defined by faustpath and stored in a variable named FAUSTARCH
 #[ -z "$FAUSTLIB" ] && FAUSTLIB=$(dirname "$((ls -f /usr/share/faust/faustvstqt.h /usr/local/share/faust/faustvstqt.h /opt/local/share/faust/faustvstqt.h "$PWD/faustvstqt.h" 2>/dev/null)|tail -1)")
 #[ -z "$FAUSTLIB" ] && FAUSTLIB="$PWD"
@@ -75,33 +76,32 @@ fi
 for ((i=1;i<$#+1;i++)); do
     p=${!i}
     if [ $p = "-help" ] || [ $p = "-h" ]; then
-	cat <<EOF
-faust2faustvst [options ...] <file.dsp>
-
-Options:
--gui: build the plugin GUI
--httpd: activate HTTP control (add -qrcode to activate QR code generation)
--keep: retain the build directory
--nometa: ignore metadata (author information etc.) from the Faust source
--nomidicc: plugin doesn't process MIDI control data
--notuning: disable the tuning control (instruments only)
--novoicectrls: no extra polyphony/tuning controls on GUI (instruments only)
--nvoices N: number of synth voices (instruments only; arg must be an integer)
--osc: activate OSC control
--qt4, -qt5: select the GUI toolkit (requires Qt4/5; implies -gui)
--style S: select the stylesheet (arg must be Default, Blue, Grey or Salmon)
-
+    	usage faust2faustvst "[options ...] <file.dsp>"
+		require VST SDK
+		echo  "Compiles Faust programs to VST plugins"
+		option
+		options -osc -httpd
+		option -gui "build the plugin GUI."
+		option -keep "retain the build directory."
+		option -nometa "ignore metadata (author information etc.) from the Faust source"
+		option -nomidicc "plugin doesn't process MIDI control data."
+		option -notuning "disable the tuning control (instruments only)."
+		option -novoicectrls "no extra polyphony/tuning controls on GUI (instruments only)"
+		option "-nvoices N" "number of synth voices (instruments only; arg must be an integer)"
+		option "-qt4, -qt5" "select the GUI toolkit (requires Qt4/5; implies -gui)."
+		option "-style S" "  select the stylesheet (arg must be Default, Blue, Grey or Salmon)."
+		cat <<EOF
 Environment variables:
-FAUSTINC: specify the location of the Faust include directory
-  Default: $FAUSTINC
-FAUSTARCH: specify the location of the Faust VST library files
-  Default: $FAUSTARCH
-QMAKE: specify the location of the qmake binary
-  Default: $QMAKE
-SDK: specify the location of the VST SDK
-  Default: $SDK
-SDKSRC: specify the location of the VST SDK sources
-  Default: $SDKSRC
+  FAUSTINC: specify the location of the Faust include directory
+    Default: $FAUSTINC
+  FAUSTARCH: specify the location of the Faust VST library files
+    Default: $FAUSTARCH
+  QMAKE: specify the location of the qmake binary
+    Default: $QMAKE
+  SDK: specify the location of the VST SDK
+    Default: $SDK
+  SDKSRC: specify the location of the VST SDK sources
+    Default: $SDKSRC
 EOF
 	exit 0
     elif [ $p = "-omp" ]; then
@@ -153,7 +153,7 @@ EOF
 	STYLE=${!i}
     elif [ ${p:0:1} = "-" ]; then
 	OPTIONS="$OPTIONS $p"
-    elif [[ -f "$p" ]]; then
+    elif [[ -f "$p" ]] && [ ${p: -4} == ".dsp" ]; then
 	FILES="$FILES $p"
     else
 	OPTIONS="$OPTIONS $p"
@@ -228,7 +228,7 @@ if [ -n "$plugin_gui" ]; then
 # XXXTODO: OSX support
 (
     cd "$tmpdir"
-    $QMAKE -project -t lib -o ${clsname}.pro "CONFIG += gui plugin no_plugin_name_prefix warn_off" "QT += widgets printsupport network $QTEXTRA" "INCLUDEPATH+=$ABSDIR" "INCLUDEPATH+=$CURDIR" "INCLUDEPATH+=$FAUSTARCH" "INCLUDEPATH+=$FAUSTINC" "QMAKE_CXXFLAGS=$CPPFLAGS" $STYLE_CXXFLAGS "LIBS+=$ARCHLIB $OSCLIBS $HTTPLIBS" "SOURCES+=$SDKSRC/$main $SDKSRC/$afx $SDKSRC/$afxx" "HEADERS+=$FAUSTARCH/faustvstqt.h $FAUSTINC/faust/gui/QTUI.h" $RESOURCES "$OSCDEFS" "$HTTPDEFS" "$QRDEFS"
+    $QMAKE -project -t lib -o ${clsname}.pro "CONFIG += gui plugin no_plugin_name_prefix warn_off" "QT += widgets printsupport network $QTEXTRA" "INCLUDEPATH+=$ABSDIR" "INCLUDEPATH+=$CURDIR" "INCLUDEPATH+=$FAUSTARCH" "INCLUDEPATH+=$FAUSTINC" "QMAKE_CXXFLAGS=-std=c++11 $CPPFLAGS" $STYLE_CXXFLAGS "LIBS+=$ARCHLIB $OSCLIBS $HTTPLIBS" "SOURCES+=$SDKSRC/$main $SDKSRC/$afx $SDKSRC/$afxx" "HEADERS+=$FAUSTARCH/faustvstqt.h $FAUSTINC/faust/gui/QTUI.h" $RESOURCES "$OSCDEFS" "$HTTPDEFS" "$QRDEFS"
     $QMAKE *.pro
     make
 ) > /dev/null || exit 1

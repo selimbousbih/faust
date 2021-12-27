@@ -10,9 +10,9 @@
 . faustpath
 . faustoptflags
 
-ARCHFILE=$FAUSTARCH/dummy-mem.cpp
+CXXFLAGS+=" $MYGCCFLAGS"  # So that additional CXXFLAGS can be used
 
-CXXFLAGS=$MYGCCFLAGS
+ARCHFILE=$FAUSTARCH/dummy-mem.cpp
 
 OSCDEFS=""
 NVOICES=-1
@@ -51,7 +51,7 @@ do
         MIDIDEFS="-DMIDICTRL"
     elif [ ${p:0:1} = "-" ]; then
 	    OPTIONS="$OPTIONS $p"
-	elif [[ -f "$p" ]]; then
+	elif [[ -f "$p" ]] && [ ${p: -4} == ".dsp" ]; then
 	    FILES="$FILES $p"
 	else
 	    OPTIONS="$OPTIONS $p"        
@@ -72,6 +72,9 @@ for f in $FILES; do
 	# compile c++ to binary
 	(
 		$CXX $CXXFLAGS "$f.cpp" $OSCDEFS $HTTPDEFS $POLYDEFS $MIDIDEFS $ARCHLIB -o "${f%.dsp}"
+		if [[ $(uname) == Darwin ]]; then
+		    codesign --sign - --deep --force "${f%.dsp}"
+		fi
 	) > /dev/null || exit
 	rm "$f.cpp"
 

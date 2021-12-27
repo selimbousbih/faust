@@ -5,7 +5,7 @@
  each section for license and copyright information.
  *************************************************************************/
 
-/*******************BEGIN ARCHITECTURE SECTION (part 1/2)****************/
+/******************* BEGIN cvsplot.cpp ****************/
 
 /************************************************************************
  FAUST Architecture File
@@ -47,6 +47,7 @@
 #include "faust/audio/channels.h"
 #include "faust/dsp/dsp.h"
 #include "faust/gui/console.h"
+#include "faust/gui/DecoratorUI.h"
 #include "faust/misc.h"
 
 #ifdef SOUNDFILE
@@ -54,6 +55,49 @@
 #endif
 
 using namespace std;
+
+// A class to display Bargraph values
+struct DisplayUI : public GenericUI {
+    
+    map<string, FAUSTFLOAT*> fTable;
+    
+    // -- passive widgets
+    virtual void addHorizontalBargraph(const char* label, FAUSTFLOAT* zone, FAUSTFLOAT min, FAUSTFLOAT max)
+    {
+        fTable[label] = zone;
+    }
+    virtual void addVerticalBargraph(const char* label, FAUSTFLOAT* zone, FAUSTFLOAT min, FAUSTFLOAT max)
+    {
+        fTable[label] = zone;
+    }
+    
+    void displayHeaders()
+    {
+        int c = 0;
+        if (fTable.size() > 0)
+            printf(",\t");
+        for (const auto& it : fTable) {
+            if (c > 0)
+                printf(",\t");
+            printf("bargraph %d", c + 1);
+            c++;
+        }
+    }
+    
+    void display()
+    {
+        int c = 0;
+        if (fTable.size() > 0)
+            printf(",\t");
+        for (const auto& it : fTable) {
+            if (c > 0)
+                printf(",\t");
+            cout << *it.second;
+            c++;
+        }
+    }
+    
+};
 
 /******************************************************************************
  *******************************************************************************
@@ -77,80 +121,102 @@ using namespace std;
 
 mydsp DSP;
 
+std::list<GUI*> GUI::fGuiList;
+ztimedmap GUI::gTimedZoneMap;
+
 #define kFrames 512
 
 int main(int argc, char* argv[])
 {
-    FAUSTFLOAT nb_samples;
-    FAUSTFLOAT sample_rate;
+    FAUSTFLOAT nb_samples, sample_rate, buffer_size, start_at_sample;
     
     CMDUI* interface = new CMDUI(argc, argv);
     DSP.buildUserInterface(interface);
     interface->addOption("-n", &nb_samples, 4096.0, 0.0, 100000000.0);
-    interface->addOption("-sr", &sample_rate, 44100.0, 0.0, 192000.0);
+    interface->addOption("-r", &sample_rate, 44100.0, 0.0, 192000.0);
+    interface->addOption("-bs", &buffer_size, kFrames, 0.0, kFrames * 16);
+    interface->addOption("-s", &start_at_sample, 0, 0.0, 100000000.0);
     
-    if (DSP.getNumInputs() > 0)
-    {
-        fprintf(stderr, "no inputs allowed\n");
+    if (DSP.getNumInputs() > 0) {
+        cerr << "no inputs allowed " << endl;
         exit(1);
     }
     
-    // modify the UI values according to the command line options
-    interface->process_init();
+    // SR has to be read before DSP init
+    interface->process_one_init("-r");
     
-    // init DSP with SR
+    // init signal processor and the user interface values
     DSP.init(sample_rate);
+    
+    // modify the UI values according to the command line options, after init
+    interface->process_init();
     
 #ifdef SOUNDFILE
     SoundUI soundinterface;
     DSP.buildUserInterface(&soundinterface);
 #endif
+
+    DisplayUI disp;
+    DSP.buildUserInterface(&disp);
     
     // init signal processor and the user interface values
     int nouts = DSP.getNumOutputs();
-    channels chan(kFrames, nouts);
+    channels chan(max(kFrames, int(buffer_size)), nouts);
+    
+    // skip <start> samples
+    int start = int(start_at_sample);
+    while (start > kFrames) {
+        DSP.compute(kFrames, nullptr, chan.buffers());
+        start -= kFrames;
+    }
+    if (start > 0) {
+        DSP.compute(start, nullptr, chan.buffers());
+    }
+    // end skip
     
     // print channel headers
-    for (int c = 0; c < nouts; c++)
-    {
+    for (int c = 0; c < nouts; c++) {
         if (c > 0)
             printf(",\t");
         printf("channel %d", c + 1);
     }
+    disp.displayHeaders();
     cout << endl;
     
     int nbsamples = int(nb_samples);
     cout << setprecision(numeric_limits<FAUSTFLOAT>::max_digits10);
     
-    while (nbsamples > kFrames)
-    {
-        DSP.compute(kFrames, 0, chan.buffers());
-        for (int i = 0; i < kFrames; i++)
-        {
-            for (int c = 0; c < nouts; c++)
-            {
+    // print by buffer
+    while (nbsamples > buffer_size) {
+        DSP.compute(buffer_size, 0, chan.buffers());
+        for (int i = 0; i < buffer_size; i++) {
+            for (int c = 0; c < nouts; c++) {
                 if (c > 0)
                     printf(",\t");
                 cout << chan.buffers()[c][i];
             }
+            disp.display();
             cout << endl;
         }
-        nbsamples -= kFrames;
+        nbsamples -= buffer_size;
     }
     
-    DSP.compute(nbsamples, 0, chan.buffers());
-    for (int i = 0; i < nbsamples; i++)
-    {
-        for (int c = 0; c < nouts; c++)
-        {
-            if (c > 0)
-                printf(",\t");
-            cout << chan.buffers()[c][i];
+    // print remaining frames
+    if (nbsamples) {
+        DSP.compute(nbsamples, 0, chan.buffers());
+        for (int i = 0; i < nbsamples; i++) {
+            for (int c = 0; c < nouts; c++) {
+                if (c > 0)
+                    printf(",\t");
+                cout << chan.buffers()[c][i];
+            }
+            disp.display();
+            cout << endl;
         }
-        cout << endl;
     }
+    
     return 0;
 }
 
-/********************END ARCHITECTURE SECTION (part 2/2)****************/
+/******************** END cvsplot.cpp ****************/
 

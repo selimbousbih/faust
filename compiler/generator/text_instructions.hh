@@ -33,6 +33,19 @@
 #include "instructions.hh"
 #include "type_manager.hh"
 
+// To check all control fields in the DSP structure
+inline bool isControl(const string& name)
+{
+    return startWith(name, "fButton")
+        || startWith(name, "fCheckbox")
+        || startWith(name, "fVslider")
+        || startWith(name, "fHslider")
+        || startWith(name, "fEntry")
+        || startWith(name, "fVbargraph")
+        || startWith(name, "fHbargraph")
+        || name == "fSampleRate";
+}
+
 class TextInstVisitor : public InstVisitor {
    protected:
     int                fTab;
@@ -48,14 +61,20 @@ class TextInstVisitor : public InstVisitor {
             tab(fTab, *fOut);
         }
     }
-
+    
+    // To be adapted in subclasses
+    virtual void visitCond(ValueInst* cond)
+    {
+        cond->accept(this);
+    }
+  
    public:
     using InstVisitor::visit;
 
     TextInstVisitor(std::ostream* out, const std::string& object_access, int tab = 0)
         : fTab(tab), fOut(out), fFinishLine(true), fObjectAccess(object_access)
     {
-        fTypeManager = new CStringTypeManager(FLOATMACRO, "*");
+        fTypeManager = new CStringTypeManager(xfloat(), "*");
     }
 
     TextInstVisitor(std::ostream* out, const std::string& object_access, const std::string& float_macro_name,
@@ -109,7 +128,7 @@ class TextInstVisitor : public InstVisitor {
     virtual void visit(NamedAddress* named) { *fOut << named->fName; }
 
     /*
-     Indexed adresses can actually be values in an array or fields in a struct type
+     Indexed address can actually be values in an array or fields in a struct type
      */
     virtual void visit(IndexedAddress* indexed)
     {
@@ -217,13 +236,10 @@ class TextInstVisitor : public InstVisitor {
     virtual void generateFunDefArgs(DeclareFunInst* inst)
     {
         *fOut << "(";
-        
-        list<NamedTyped*>::const_iterator it;
-        
         size_t size = inst->fType->fArgsTypes.size(), i = 0;
-        for (it = inst->fType->fArgsTypes.begin(); it != inst->fType->fArgsTypes.end(); it++, i++) {
-            *fOut << fTypeManager->generateType((*it));
-            if (i < size - 1) *fOut << ", ";
+        for (const auto& it : inst->fType->fArgsTypes) {
+            *fOut << fTypeManager->generateType(it);
+            if (i++ < size - 1) *fOut << ", ";
         }
     }
 
@@ -238,7 +254,7 @@ class TextInstVisitor : public InstVisitor {
             tab(fTab, *fOut);
             inst->fCode->accept(this);
             fTab--;
-            tab(fTab, *fOut);
+            back(1, *fOut);
             *fOut << "}";
             tab(fTab, *fOut);
         }
@@ -266,7 +282,7 @@ class TextInstVisitor : public InstVisitor {
     virtual void visit(Select2Inst* inst)
     {
         *fOut << "(";
-        inst->fCond->accept(this);
+        visitCond(inst->fCond);
         *fOut << " ? ";
         inst->fThen->accept(this);
         *fOut << " : ";
@@ -276,21 +292,21 @@ class TextInstVisitor : public InstVisitor {
 
     virtual void visit(IfInst* inst)
     {
-        *fOut << "if ";
-        inst->fCond->accept(this);
-        *fOut << " {";
+        *fOut << "if (";
+        visitCond(inst->fCond);
+        *fOut << ") {";
         fTab++;
         tab(fTab, *fOut);
         inst->fThen->accept(this);
         fTab--;
-        tab(fTab, *fOut);
+        back(1, *fOut);
         if (inst->fElse->fCode.size() > 0) {
             *fOut << "} else {";
             fTab++;
             tab(fTab, *fOut);
             inst->fElse->accept(this);
             fTab--;
-            tab(fTab, *fOut);
+            back(1, *fOut);
             *fOut << "}";
         } else {
             *fOut << "}";
@@ -316,7 +332,7 @@ class TextInstVisitor : public InstVisitor {
         tab(fTab, *fOut);
         inst->fCode->accept(this);
         fTab--;
-        tab(fTab, *fOut);
+        back(1, *fOut);
         *fOut << "}";
         tab(fTab, *fOut);
     }
@@ -324,13 +340,13 @@ class TextInstVisitor : public InstVisitor {
     virtual void visit(WhileLoopInst* inst)
     {
         *fOut << "while (";
-        inst->fCond->accept(this);
+        visitCond(inst->fCond);
         *fOut << ") {";
         fTab++;
         tab(fTab, *fOut);
         inst->fCode->accept(this);
         fTab--;
-        tab(fTab, *fOut);
+        back(1, *fOut);
         *fOut << "}";
         tab(fTab, *fOut);
     }
@@ -343,7 +359,7 @@ class TextInstVisitor : public InstVisitor {
             tab(fTab, *fOut);
         }
         RetInst* ret_inst = nullptr;
-        for (auto& it : inst->fCode) {
+        for (const auto& it : inst->fCode) {
             // Special case for "return" as last instruction
             if ((it == *inst->fCode.rbegin()) && (ret_inst = dynamic_cast<RetInst*>(it))) {
                 visitAux(ret_inst, false);
@@ -353,7 +369,7 @@ class TextInstVisitor : public InstVisitor {
         }
         if (inst->fIndent) {
             fTab--;
-            tab(fTab, *fOut);
+            back(1, *fOut);
             *fOut << "}";
             tab(fTab, *fOut);
         }
@@ -385,12 +401,13 @@ class TextInstVisitor : public InstVisitor {
             tab(fTab, *fOut);
         }
         fTab--;
-        tab(fTab, *fOut);
+        back(1, *fOut);
         *fOut << "}";
         tab(fTab, *fOut);
     }
 
     StringTypeManager* getTypeManager() { return fTypeManager; }
+    
 };
 
 // Mathematical functions are declared as variables, they have to be generated before any other function (like

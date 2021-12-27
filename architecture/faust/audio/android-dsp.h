@@ -39,7 +39,7 @@
 #define NUM_OUTPUTS 2
 #define CPU_TABLE_SIZE 16
 
-static const char *res_str(SLresult result)
+static const char* res_str(SLresult result)
 {
     switch(result)
     {
@@ -127,7 +127,7 @@ class androidaudio : public audio {
         unsigned int fBufferSize;
     
         int64_t fCPUTable[CPU_TABLE_SIZE];
-        int fCPUTableIndex;
+        int64_t fCPUTableIndex;
     
         float** fInputs;
         float** fOutputs;
@@ -215,13 +215,36 @@ class androidaudio : public audio {
                 __android_log_print(ANDROID_LOG_ERROR, "Faust", "outputCallback Enqueue error = %s", res_str(result));
             }
         }
-          
+    
+        void destroy()
+        {
+            if (fInputBufferQueue) {
+                (*fInputBufferQueue)->Destroy(fInputBufferQueue);
+                fInputBufferQueue = NULL;
+            }
+            
+            if (fOutputBufferQueue) {
+                (*fOutputBufferQueue)->Destroy(fOutputBufferQueue);
+                fOutputBufferQueue = NULL;
+            }
+            
+            if (fOutputMix) {
+                (*fOutputMix)->Destroy(fOutputMix);
+                fOutputMix = NULL;
+            }
+            
+            if (fOpenSLEngine) {
+                (*fOpenSLEngine)->Destroy(fOpenSLEngine);
+                fOpenSLEngine = NULL;
+            }
+        }
+    
     public:
     
         androidaudio(long srate, long bsize)
-        : fDSP(0), fSampleRate(srate),
+        : fDSP(NULL), fSampleRate(srate),
         fBufferSize(bsize), fCPUTableIndex(0), fNumInChans(0), fNumOutChans(0),
-        fOpenSLEngine(0), fOutputMix(0), fInputBufferQueue(0), fOutputBufferQueue(0),
+        fOpenSLEngine(NULL), fOutputMix(NULL), fInputBufferQueue(NULL), fOutputBufferQueue(NULL),
         fOpenSLInputs(bsize * 4, NUM_INPUTS), fOpenSLOutputs(bsize * 4, NUM_OUTPUTS)
         {
             __android_log_print(ANDROID_LOG_ERROR, "Faust", "Constructor");
@@ -244,26 +267,7 @@ class androidaudio : public audio {
         virtual ~androidaudio()
         {
             __android_log_print(ANDROID_LOG_ERROR, "Faust", "Destructor");
-            
-            if (fInputBufferQueue) {
-                (*fInputBufferQueue)->Destroy(fInputBufferQueue);
-                fInputBufferQueue = NULL;
-            }
-            
-            if (fOutputBufferQueue) {
-                (*fOutputBufferQueue)->Destroy(fOutputBufferQueue);
-                fOutputBufferQueue = NULL;
-            }
-            
-            if (fOutputMix) {
-                (*fOutputMix)->Destroy(fOutputMix);
-                fOutputMix = NULL;
-            }
-             
-            if (fOpenSLEngine) {
-                (*fOpenSLEngine)->Destroy(fOpenSLEngine);
-                fOpenSLEngine = NULL;
-            }
+            destroy();
             
             for (int i = 0; i < NUM_INPUTS; i++) {
                 delete [] fInputs[i];
@@ -274,16 +278,6 @@ class androidaudio : public audio {
                 delete [] fOutputs[i];
             }
             delete [] fOutputs;
-        }
-    
-        // DSP CPU load in percentage of the buffer size duration
-        float getCPULoad()
-        {
-            float sum = 0.f;
-            for (int i = 0; i < CPU_TABLE_SIZE; i++) {
-                sum += fCPUTable[i];
-            }
-            return (sum/float(CPU_TABLE_SIZE))/(10000.f*float(fBufferSize)/float(fSampleRate));
         }
     
         virtual bool init(const char* name, dsp* DSP)
@@ -340,6 +334,8 @@ class androidaudio : public audio {
                 default:
                     return false;
             }
+            
+            destroy();
           
 			if (fInputBufferQueue) {
 				(*fInputBufferQueue)->Destroy(fInputBufferQueue);
@@ -591,7 +587,17 @@ class androidaudio : public audio {
             return fNumOutChans;
         }
     
+        // Returns the average proportion of available CPU being spent inside the audio callbacks (between 0 and 1.0).
+        float getCPULoad()
+        {
+            float sum = 0.f;
+            for (int i = 0; i < CPU_TABLE_SIZE; i++) {
+                sum += fCPUTable[i];
+            }
+            return (sum/float(CPU_TABLE_SIZE))/(1000000.f*float(fBufferSize)/float(fSampleRate));
+        }
+    
 };
 
-#endif 
+#endif
 /**************************  END  android-dsp.h **************************/

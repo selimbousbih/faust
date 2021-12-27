@@ -33,13 +33,16 @@ class AcosPrim : public xtended {
 
     virtual bool needCache() { return true; }
 
-    virtual ::Type infereSigType(const vector< ::Type>& args)
+    virtual ::Type infereSigType(const vector<::Type>& args)
     {
         faustassert(args.size() == 1);
+        Type     t = args[0];
+        interval i = t->getInterval();
+        if (i.valid && gGlobal->gMathExceptions && (i.lo < -1 || i.hi > 1)) {
+            cerr << "WARNING : potential out of domain in acos(" << i << ")" << endl;
+        }
         return floatCast(args[0]);
     }
-
-    virtual void sigVisit(Tree sig, sigvisitor* visitor) {}
 
     virtual int infereSigOrder(const vector<int>& args) { return args[0]; }
 
@@ -47,14 +50,20 @@ class AcosPrim : public xtended {
     {
         num n;
         if (isNum(args[0], n)) {
-            return tree(acos(double(n)));
+            if ((double(n) < -1) || (double(n) > 1)) {
+                stringstream error;
+                error << "ERROR : out of domain  in acos(" << ppsig(args[0]) << ")" << endl;
+                throw faustexception(error.str());
+            } else {
+                return tree(acos(double(n)));
+            }
         } else {
             return tree(symbol(), args[0]);
         }
     }
 
     virtual ValueInst* generateCode(CodeContainer* container, const list<ValueInst*>& args, ::Type result,
-                                    vector< ::Type> const& types)
+                                    vector<::Type> const& types)
     {
         faustassert(args.size() == arity());
         faustassert(types.size() == arity());
@@ -67,7 +76,7 @@ class AcosPrim : public xtended {
         return container->pushFunction(subst("acos$0", isuffix()), result_type, arg_types, casted_args);
     }
 
-    virtual string old_generateCode(Klass* klass, const vector<string>& args, const vector<Type>& types)
+    virtual string generateCode(Klass* klass, const vector<string>& args, const vector<::Type>& types)
     {
         faustassert(args.size() == arity());
         faustassert(types.size() == arity());
@@ -75,7 +84,7 @@ class AcosPrim : public xtended {
         return subst("acos$1($0)", args[0], isuffix());
     }
 
-    virtual string generateLateq(Lateq* lateq, const vector<string>& args, const vector< ::Type>& types)
+    virtual string generateLateq(Lateq* lateq, const vector<string>& args, const vector<::Type>& types)
     {
         faustassert(args.size() == arity());
         faustassert(types.size() == arity());

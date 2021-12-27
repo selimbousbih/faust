@@ -185,9 +185,7 @@ struct dsp_factory_table : public std::map<T, std::list<dsp*> > {
 
     bool getFactory(const std::string& sha_key, factory_iterator& res)
     {
-        factory_iterator it;
-
-        for (it = this->begin(); it != this->end(); it++) {
+        for (factory_iterator it = this->begin(); it != this->end(); it++) {
             if ((*it).first->getSHAKey() == sha_key) {
                 res = it;
                 return true;
@@ -262,9 +260,8 @@ struct dsp_factory_table : public std::map<T, std::list<dsp*> > {
             std::list<dsp*> dsp_list = (*it).second;
             if (factory->refs() == 2) {  // Function argument + the one in table...
                 // Possibly delete remaining DSP
-                std::list<dsp*>::iterator it;
-                for (it = dsp_list.begin(); it != dsp_list.end(); it++) {
-                    delete (*it);
+                for (const auto& it1 : dsp_list) {
+                    delete it1;
                 }
                 // Last use, remove from the global table, pointer will be deleted
                 this->erase(factory);
@@ -293,6 +290,15 @@ struct dsp_factory_table : public std::map<T, std::list<dsp*> > {
         this->clear();
     }
 };
+
+// Compute SHA1 key from name_app, dsp_content and compialtions arguments, and returns the dsp_content
+std::string sha1FromDSP(const std::string& name_app, const std::string& dsp_content, int argc, const char* argv[], std::string& sha_key);
+
+class CTree;
+typedef CTree* Tree;
+typedef std::vector<Tree> tvec;
+
+tvec boxesToSignalsAux(Tree box);
 
 #ifdef __cplusplus
 extern "C" {

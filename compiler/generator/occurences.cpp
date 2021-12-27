@@ -21,6 +21,7 @@
 
 #include <stdlib.h>
 #include <iostream>
+#include <algorithm>
 
 #include "exception.hh"
 #include "global.hh"
@@ -40,7 +41,7 @@ static int xVariability(int v, int r)
     // faustassert(v < 3);				// kKonst=0, kBlock=1, kSamp=2
     // faustassert(r==0 | v==2);
     if (r > 1) r = 1;
-    return (int)min(3, v + r);
+    return std::min<int>(3, v + r);
 }
 
 //-------------------------------------------------
@@ -51,7 +52,6 @@ Occurences::Occurences(int v, int r) : fXVariability(xVariability(v, r))
 {
     for (int i = 0; i < 4; i++) fOccurences[i] = 0;
     fMultiOcc    = false;
-    fMaxDelay    = 0;
     fOutDelayOcc = false;
     fMinDelay    = 0;
     fMaxDelay    = 0;
@@ -113,12 +113,7 @@ void OccMarkup::mark(Tree root)
 
 Occurences* OccMarkup::retrieve(Tree t)
 {
-    Occurences* p = getOcc(t);
-    if (p == 0) {
-        // cerr << "No Occurences info attached to : " << *t << endl;
-        // exit(1);
-    }
-    return p;
+    return getOcc(t);
 }
 
 //------------------------------------------------------------------------------
@@ -140,8 +135,8 @@ void OccMarkup::incOcc(Tree env, int v, int r, int d, Tree t)
         setOcc(t, occ);
 
         // We mark the subtrees of t
-        Tree c, x, y, z;
-        if (isSigFixDelay(t, x, y)) {
+        Tree x, y;
+        if (isSigDelay(t, x, y)) {
             Type g2 = getCertifiedSigType(y);
             int  d2 = checkDelayInterval(g2);
             faustassert(d2 >= 0);
@@ -150,15 +145,6 @@ void OccMarkup::incOcc(Tree env, int v, int r, int d, Tree t)
         } else if (isSigPrefix(t, y, x)) {
             incOcc(env, v0, r0, 1, x);
             incOcc(env, v0, r0, 0, y);
-        } else if (isSigSelect3(t, c, y, x, z)) {
-            // make a special case for select3 implemented with real if
-            // because the c expression will be used twice in the C++
-            // translation
-            incOcc(env, v0, r0, 0, c);
-            incOcc(env, v0, r0, 0, c);
-            incOcc(env, v0, r0, 0, x);
-            incOcc(env, v0, r0, 0, y);
-            incOcc(env, v0, r0, 0, z);
         } else {
             vector<Tree> br;
             int          n = getSubSignals(t, br);
@@ -194,10 +180,10 @@ void OccMarkup::setOcc(Tree t, Occurences* occ)
  * @param t signal we want to know the position
  * @return the position in the recursive environment
  */
-static int position (Tree env, Tree t, int p)
+static int position(Tree env, Tree t, int p)
 {
     if (isNil(env)) return 0;	// was not in the environment
     if (hd(env) == t) return p;
-    else return position (tl(env), t, p+1);
+    else return position(tl(env), t, p+1);
 }
 #endif

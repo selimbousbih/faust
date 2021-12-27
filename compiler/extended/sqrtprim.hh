@@ -33,28 +33,35 @@ class SqrtPrim : public xtended {
 
     virtual bool needCache() { return true; }
 
-    virtual ::Type infereSigType(const vector< ::Type>& args)
+    virtual ::Type infereSigType(const vector<::Type>& args)
     {
         faustassert(args.size() == 1);
         Type     t = args[0];
         interval i = t->getInterval();
-        if (i.valid && i.lo >= 0) {
-            return castInterval(floatCast(t), interval(sqrt(i.lo), sqrt(i.hi)));
-        } else {
-            return castInterval(floatCast(t), interval());
+        if (i.valid) {
+            if (i.lo >= 0) {
+                return castInterval(floatCast(t), interval(sqrt(i.lo), sqrt(i.hi)));
+            } else if (gGlobal->gMathExceptions) {
+                cerr << "WARNING : potential out of domain in sqrt(" << i << ")" << endl;
+            }
         }
+        return castInterval(floatCast(t), interval());
     }
-
-    virtual void sigVisit(Tree sig, sigvisitor* visitor) {}
 
     virtual int infereSigOrder(const vector<int>& args) { return args[0]; }
 
     virtual Tree computeSigOutput(const vector<Tree>& args)
     {
-        // verifier les simplifications
+        // check simplifications
         num n;
         if (isNum(args[0], n)) {
-            return tree(sqrt(double(n)));
+            if (double(n) < 0) {
+                stringstream error;
+                error << "ERROR : out of domain sqrt(" << ppsig(args[0]) << ")" << endl;
+                throw faustexception(error.str());
+            } else {
+                return tree(sqrt(double(n)));
+            }
         } else {
             return tree(symbol(), args[0]);
         }
@@ -74,7 +81,7 @@ class SqrtPrim : public xtended {
         return container->pushFunction(subst("sqrt$0", isuffix()), result_type, arg_types, casted_args);
     }
 
-    virtual string old_generateCode(Klass* klass, const vector<string>& args, const vector<Type>& types)
+    virtual string generateCode(Klass* klass, const vector<string>& args, const vector<::Type>& types)
     {
         faustassert(args.size() == arity());
         faustassert(types.size() == arity());
@@ -82,7 +89,7 @@ class SqrtPrim : public xtended {
         return subst("sqrt$1($0)", args[0], isuffix());
     }
 
-    virtual string generateLateq(Lateq* lateq, const vector<string>& args, const vector< ::Type>& types)
+    virtual string generateLateq(Lateq* lateq, const vector<string>& args, const vector<::Type>& types)
     {
         faustassert(args.size() == arity());
         faustassert(types.size() == arity());

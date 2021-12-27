@@ -202,12 +202,10 @@ static list<string> xmlOfMetadata(const map<string, set<string>>& metadata, int 
 
     line.reserve(128);
 
-    map<string, set<string>>::const_iterator it1;
-    set<string>::const_iterator              it2;
-    for (it1 = metadata.begin(); it1 != metadata.end(); ++it1) {
-        const string& key = it1->first;
-        for (it2 = it1->second.begin(); it2 != it1->second.end(); ++it2) {
-            const string& value = *it2;
+    for (const auto& it1 : metadata) {
+        const string& key = it1.first;
+        for (const auto& it2 : it1.second) {
+            const string& value = it2;
             line.assign(level, '\t');
             line += "<meta key=\"";
             line += xmlize(key);
@@ -223,9 +221,7 @@ static list<string> xmlOfMetadata(const map<string, set<string>>& metadata, int 
 
 void Description::print(int n, ostream& fout)
 {
-    list<string>::iterator s;
-    list<int>::iterator    t;
-    list<string>           metaDataLines = xmlOfMetadata(fMetadata, 0);
+    list<string> metaDataLines = xmlOfMetadata(fMetadata, 0);
 
     tab(n, fout);
     fout << "<faust>";
@@ -247,9 +243,9 @@ void Description::print(int n, ostream& fout)
     tab(n + 1, fout);
     fout << "<outputs>" << fOutputs << "</outputs>";
 
-    for (s = metaDataLines.begin(); s != metaDataLines.end(); s++) {
+    for (const auto& s : metaDataLines) {
         tab(n + 1, fout);
-        fout << *s;
+        fout << s;
     }
 
     tab(n + 1, fout);
@@ -260,9 +256,9 @@ void Description::print(int n, ostream& fout)
     fout << "<activewidgets>";
     tab(n + 3, fout);
     fout << "<count>" << fActiveWidgetCount << "</count>";
-    for (s = fActiveLines.begin(); s != fActiveLines.end(); s++) {
+    for (const auto& s : fActiveLines) {
         tab(n + 3, fout);
-        fout << *s;
+        fout << s;
     }
     tab(n + 2, fout);
     fout << "</activewidgets>";
@@ -274,9 +270,9 @@ void Description::print(int n, ostream& fout)
     fout << "<passivewidgets>";
     tab(n + 3, fout);
     fout << "<count>" << fPassiveWidgetCount << "</count>";
-    for (s = fPassiveLines.begin(); s != fPassiveLines.end(); s++) {
+    for (const auto& s : fPassiveLines) {
         tab(n + 3, fout);
-        fout << *s;
+        fout << s;
     }
     tab(n + 2, fout);
     fout << "</passivewidgets>";
@@ -286,6 +282,8 @@ void Description::print(int n, ostream& fout)
     // widget layout
     tab(n + 2, fout);
     fout << "<layout>";
+    list<int>::iterator t;
+    list<string>::iterator s;
     for (t = fLayoutTabs.begin(), s = fLayoutLines.begin(); s != fLayoutLines.end(); t++, s++) {
         tab(n + 3 + *t, fout);
         fout << *s;
@@ -402,7 +400,7 @@ int Description::addWidget(Tree label, Tree varname, Tree sig)
     } else if (isSigSoundfile(sig, path)) {
         fWidgetID++;
         fActiveWidgetCount++;
-        addActiveLine(subst("<widget type=\"nentry\" id=\"$0\">", T(fWidgetID)));
+        addActiveLine(subst("<widget type=\"soundfile\" id=\"$0\">", T(fWidgetID)));
         addActiveLine(subst("\t<label>$0</label>", checkNullLabel(sig, xmlize(tree2str(label)), true)));
         addActiveLine(subst("\t<varname>$0</varname>", tree2str(varname)));
         addActiveMetadata(label);
@@ -444,12 +442,11 @@ void Description::addActiveMetadata(Tree label)
     map<string, set<string>>     metadata;
     string                       shortLabel;
     list<string>                 lines;
-    list<string>::const_iterator it;
-
+  
     extractMetadata(tree2str(label), shortLabel, metadata);
     lines = xmlOfMetadata(metadata, 1);
 
-    for (it = lines.begin(); it != lines.end(); ++it) fActiveLines.push_back(*it);
+    for (const auto& it : lines) fActiveLines.push_back(it);
 }
 
 void Description::addPassiveMetadata(Tree label)
@@ -457,10 +454,9 @@ void Description::addPassiveMetadata(Tree label)
     map<string, set<string>>     metadata;
     string                       shortLabel;
     list<string>                 lines;
-    list<string>::const_iterator it;
-
+  
     extractMetadata(tree2str(label), shortLabel, metadata);
     lines = xmlOfMetadata(metadata, 1);
 
-    for (it = lines.begin(); it != lines.end(); ++it) fPassiveLines.push_back(*it);
+    for (const auto& it : lines) fPassiveLines.push_back(it);
 }

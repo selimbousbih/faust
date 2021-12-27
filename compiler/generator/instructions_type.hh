@@ -23,6 +23,7 @@
 #define _INSTRUCTIONS_TYPE_H
 
 #include <string>
+
 #include "garbageable.hh"
 
 // ============================
@@ -31,8 +32,6 @@
 
 struct Printable : public virtual Garbageable {
     static std::ostream* fOut;
-
-    int fTab;
 
     Printable() {}
     virtual ~Printable() {}
@@ -77,6 +76,11 @@ struct Typed : public Printable {
         kQuad_ptr_ptr,
         kQuad_vec,
         kQuad_vec_ptr,
+        kFixedPoint,
+        kFixedPoint_ptr,
+        kFixedPoint_ptr_ptr,
+        kFixedPoint_vec,
+        kFixedPoint_vec_ptr,
         kVoid,
         kVoid_ptr,
         kVoid_ptr_ptr,
@@ -121,6 +125,12 @@ struct Typed : public Printable {
                 return kQuad_ptr_ptr;
             case kQuad_vec:
                 return kQuad_vec_ptr;
+            case kFixedPoint:
+                return kFixedPoint_ptr;
+            case kFixedPoint_ptr:
+                return kFixedPoint_ptr_ptr;
+            case kFixedPoint_vec:
+                return kFixedPoint_vec_ptr;
             case kBool:
                 return kBool_ptr;
             case kBool_vec:
@@ -151,6 +161,8 @@ struct Typed : public Printable {
                 return kDouble_vec;
             case kQuad:
                 return kQuad_vec;
+            case kFixedPoint:
+                return kFixedPoint_vec;
             case kBool:
                 return kBool_vec;
             default:
@@ -191,6 +203,12 @@ struct Typed : public Printable {
                 return kQuad_ptr;
             case kQuad_vec_ptr:
                 return kQuad_vec;
+            case kFixedPoint_ptr:
+                return kFixedPoint;
+            case kFixedPoint_ptr_ptr:
+                return kFixedPoint_ptr;
+            case kFixedPoint_vec_ptr:
+                return kFixedPoint_vec;
             case kBool_ptr:
                 return kBool;
             case kBool_vec_ptr:
@@ -221,6 +239,8 @@ struct Typed : public Printable {
                 return kDouble;
             case kQuad_vec:
                 return kQuad;
+            case kFixedPoint_vec:
+                return kFixedPoint;
             case kBool_vec:
                 return kBool;
             default:
@@ -235,9 +255,9 @@ struct Typed : public Printable {
 
     static void init();
 
-    virtual VarType getType() = 0;
+    virtual VarType getType() const = 0;
 
-    virtual int getSize() = 0;
+    virtual int getSizeBytes() const = 0;
 
     virtual void accept(InstVisitor* visitor) = 0;
 

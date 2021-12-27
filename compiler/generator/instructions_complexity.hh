@@ -46,9 +46,9 @@ class InstComplexityVisitor : public DispatchVisitor {
     int fCast;
     int fSelect;
     int fLoop;
-    int fFunCall;
-
-    map<string, bool> gFunctionSymbolTable;
+  
+    map<string, int> gFunctionSymbolTable;
+    map<string, int> gBinopSymbolTable;
 
    public:
     using DispatchVisitor::visit;
@@ -62,40 +62,9 @@ class InstComplexityVisitor : public DispatchVisitor {
           fDeclare(0),
           fCast(0),
           fSelect(0),
-          fLoop(0),
-          fFunCall(0)
-    {
-        // Mark all math.h functions as generated...
-        gFunctionSymbolTable["abs"] = true;
-
-        gFunctionSymbolTable["max_i"] = true;
-        gFunctionSymbolTable["min_i"] = true;
-
-        gFunctionSymbolTable["max_f"] = true;
-        gFunctionSymbolTable["min_f"] = true;
-
-        // Float version
-        gFunctionSymbolTable["absf"]       = true;
-        gFunctionSymbolTable["fabsf"]      = true;
-        gFunctionSymbolTable["acosf"]      = true;
-        gFunctionSymbolTable["asinf"]      = true;
-        gFunctionSymbolTable["atanf"]      = true;
-        gFunctionSymbolTable["atan2f"]     = true;
-        gFunctionSymbolTable["ceilf"]      = true;
-        gFunctionSymbolTable["cosf"]       = true;
-        gFunctionSymbolTable["expf"]       = true;
-        gFunctionSymbolTable["exp10f"]     = true;
-        gFunctionSymbolTable["floorf"]     = true;
-        gFunctionSymbolTable["fmodf"]      = true;
-        gFunctionSymbolTable["logf"]       = true;
-        gFunctionSymbolTable["log10f"]     = true;
-        gFunctionSymbolTable["powf"]       = true;
-        gFunctionSymbolTable["remainderf"] = true;
-        gFunctionSymbolTable["roundf"]     = true;
-        gFunctionSymbolTable["sinf"]       = true;
-        gFunctionSymbolTable["sqrtf"]      = true;
-        gFunctionSymbolTable["tanf"]       = true;
-    }
+          fLoop(0)
+    {}
+    
     virtual ~InstComplexityVisitor() {}
 
     virtual void visit(Printable* inst) {}
@@ -121,6 +90,15 @@ class InstComplexityVisitor : public DispatchVisitor {
     virtual void visit(BinopInst* inst)
     {
         fBinop++;
+        TypingVisitor typing1;
+        inst->fInst1->accept(&typing1);
+        TypingVisitor typing2;
+        inst->fInst2->accept(&typing2);
+        if (isRealType(typing1.fCurType) || isRealType(typing1.fCurType)) {
+            gBinopSymbolTable["Real(" + string(gBinOpTable[inst->fOpcode]->fName) + ")"]++;
+        } else {
+            gBinopSymbolTable["Int(" + string(gBinOpTable[inst->fOpcode]->fName) + ")"]++;
+        }
         DispatchVisitor::visit(inst);
     }
     virtual void visit(CastInst* inst)
@@ -128,14 +106,17 @@ class InstComplexityVisitor : public DispatchVisitor {
         fCast++;
         DispatchVisitor::visit(inst);
     }
+    virtual void visit(Select2Inst* inst)
+    {
+        fSelect++;
+        DispatchVisitor::visit(inst);
+    }
 
     // Needs a cost table for a set of standard functions?
     virtual void visit(FunCallInst* inst)
     {
-        fFunCall++;
-        if (gFunctionSymbolTable.find(inst->fName) != gFunctionSymbolTable.end()) {
-            fMathop++;
-        }
+        gFunctionSymbolTable[inst->fName]++;
+        fMathop++;
         DispatchVisitor::visit(inst);
     }
 
@@ -184,10 +165,29 @@ class InstComplexityVisitor : public DispatchVisitor {
     void dump(ostream* dst)
     {
         *dst << "Instructions complexity : ";
-        *dst << "Load = " << fLoad << " Store = " << fStore << " Binop = " << fBinop;
-        *dst << " Mathop = " << fMathop << " Numbers = " << fNumbers << " Declare = " << fDeclare;
-        *dst << " Cast = " << fCast << " Select = " << fSelect << " Loop = " << fLoop << " FunCall = " << fFunCall
-             << "\n";
+        *dst << "Load = " << fLoad << " Store = " << fStore;
+        *dst << " Binop = " << fBinop;
+        if (fBinop > 0) {
+            *dst << " [ ";
+            for (const auto& it : gBinopSymbolTable) {
+                if (it.second > 0) {
+                    *dst << "{ " << it.first << " = " << it.second << " } ";
+                }
+            }
+            *dst << "]";
+        }
+        *dst << " Mathop = " << fMathop;
+        if (fMathop > 0) {
+            *dst << " [ ";
+            for (const auto& it : gFunctionSymbolTable) {
+                if (it.second > 0) {
+                    *dst << "{ " << it.first << " = " << it.second << " } ";
+                }
+            }
+            *dst << "]";
+        }
+        *dst << " Numbers = " << fNumbers << " Declare = " << fDeclare;
+        *dst << " Cast = " << fCast << " Select = " << fSelect << " Loop = " << fLoop << "\n";
     }
 
     void operator+(const InstComplexityVisitor& visitor)
@@ -195,6 +195,7 @@ class InstComplexityVisitor : public DispatchVisitor {
         fLoad += visitor.fLoad;
         fStore += visitor.fStore;
         fBinop += visitor.fBinop;
+        fMathop += visitor.fMathop;
         fNumbers += visitor.fNumbers;
         fDeclare += visitor.fDeclare;
         fCast += visitor.fCast;

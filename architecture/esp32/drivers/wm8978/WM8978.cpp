@@ -27,19 +27,20 @@ uint8_t WM8978::init(void)
 {
     initI2C();
     uint8_t res;
-    res = writeReg(0,0);// WM8978
+    res = writeReg(0,0);// WM8978 reset
     if(res) return 1;
-    writeReg(1,0X1B);   // R1, MICEN (MIC), BIASEN, VMIDSEL[1:0]
-    writeReg(2,0X1B0);  // R2, ROUT1, LOUT1, BOOSTENR, BOOSTENL
-    writeReg(3,0X6C);   // R3, LOUT2, ROUT2, RMIX, LMIX
-    writeReg(6,0);      // R6, MCLK
+    writeReg(1,0X9B);   // R1, OUT4MIXEN, MICEN (MIC), BIASEN, VMIDSEL[1:0] 
+    writeReg(2,0X1B0);  // R2, ROUT1, LOUT1, BOOSTENR, BOOSTENL 
+    writeReg(3,0X16C);  // R3, OUT4EN, LOUT2EN, ROUT2EN, RMIXEN, LMIXEN 
+    writeReg(6,0);      // R6, MCLK 
     writeReg(43,1<<4);  // R43, INVROUT2
     writeReg(47,1<<8);  // R47, PGABOOSTL, MIC
     writeReg(48,1<<8);  // R48, PGABOOSTR, MIC
     writeReg(49,1<<1);  // R49, TSDEN
-    writeReg(10,1<<3);  // R10, SOFTMUTE
-    writeReg(14,1<<3);  // R14, ADC
+    writeReg(10,1<<3);  // R10, DACOSR
+    writeReg(14,1<<3);  // R14, ADCOSR
     return 0;
+    
 }
 
 // Initialize i2c for the ESP32
@@ -96,7 +97,7 @@ void WM8978::addaCfg(uint8_t dacen,uint8_t adcen)
 {
     uint16_t regval;
     regval = readReg(3);        // R3
-    if(dacen)regval |= 3<<0;    // R3 DACR & DACL
+    if(dacen)regval |= 3<<0;    // R3 DACR & DACL  
     else regval &= ~(3<<0);     // R3 DACR & DACL
     writeReg(3,regval);         // R3
     regval=readReg(2);          // R2
@@ -150,7 +151,7 @@ void WM8978::micGain(uint8_t gain)
 {
     gain &= 0X3F;
     writeReg(45,gain);      // R45,PGA
-    writeReg(46,gain|1<<8);	// R46, PGA
+    writeReg(46,gain|1<<8);    // R46, PGA
 }
 
 // WM8978 L2/R2 (Line In) (L2/R2-->ADC)
@@ -188,7 +189,7 @@ void WM8978::i2sCfg(uint8_t fmt,uint8_t len)
 {
     fmt &= 0X03;
     len &= 0X03;
-    writeReg(4,(fmt<<3)|(len<<5));	// R4, WM8978
+    writeReg(4,(fmt<<3)|(len<<5));    // R4, WM8978
 }
 
 // Headphone Output Volume
@@ -307,7 +308,7 @@ void WM8978::eq5Set(uint8_t cfreq,uint8_t gain)
 }
 
 void WM8978::alcSet(uint8_t enable, uint8_t maxgain, uint8_t mingain)
-{ 
+{
     uint16_t regval;
     
     if(maxgain>7) maxgain=7;
@@ -315,13 +316,13 @@ void WM8978::alcSet(uint8_t enable, uint8_t maxgain, uint8_t mingain)
     
     regval=readReg(32);
     if(enable)
-    regval |= (3<<7);
+        regval |= (3<<7);
     regval |= (maxgain<<3)|(mingain<<0);
     writeReg(32,regval);
 }
 
 void WM8978::noiseSet(uint8_t enable,uint8_t gain)
-{ 
+{
     uint16_t regval;
     
     if(gain>7) gain=7;
@@ -330,5 +331,73 @@ void WM8978::noiseSet(uint8_t enable,uint8_t gain)
     regval = (enable<<3);
     regval |= gain;
     writeReg(35,regval);    // R18, EQ1
+}
+
+
+/**********************************************************
+Additional functions written for PICO DSP development board
+https://github.com/ohmic-net/pico_dsp 
+**********************************************************/
+
+// Sleep mode for power saving 
+// 1 to enable device standby mode 
+void WM8978::sleep(uint8_t enable)
+{ 
+    uint16_t regval;
+    regval = (enable<<6);
+    writeReg(2,regval);   // R2, sleep
+}
+
+// Resume / wake up from sleep 
+void WM8978::resume(void)
+{ 
+    uint16_t regval;
+    regval = ~(1<<6);
+    writeReg(2,regval);
+}
+
+// OUT4 (Mono Output) enable
+void WM8978::monoOut(uint8_t enable)
+{ 
+    uint16_t regval;
+    regval = (enable<<3);
+    writeReg(57,regval);//LDAC2OUT4
+}
+
+// Speaker boost 
+void WM8978::spkBoost(uint8_t enable)
+{
+    uint16_t regval;
+    regval = (enable<<2);
+    writeReg(49,regval);
+}
+
+// Set Sample Rate
+// srate: 0~5 , 48kHz, 32kHz, 24kHz, 16kHz, 12kHz, 8kHz
+void WM8978::sampleRate(uint8_t srate)
+{
+    uint16_t regval = 0;            // 48kHz, default
+    if(srate==1) regval = 0x2;
+    if(srate==2) regval = 0x4;
+    if(srate==3) regval = 0x6;
+    if(srate==4) regval = 0x8;
+    if(srate==5) regval = 0xA;
+    writeReg(7,regval);             // R7, Additional Ctrl
+}
+
+// Loopback, ADC data output is fed directly into DAC data input
+void WM8978::loopback(uint8_t enable)
+{
+    uint16_t regval;
+    regval = enable;
+    writeReg(5,regval);
+}
+
+// DAC Automute (after 1024 consective zeros)
+void WM8978::aMute(uint8_t enable)
+{
+    uint16_t regval;
+    regval = enable<<2;
+    writeReg(10,regval);
 }
 

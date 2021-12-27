@@ -1,25 +1,25 @@
 /************************************************************************
-    FAUST Architecture File
-    Copyright (C) 2016 GRAME, Centre National de Creation Musicale
-    ---------------------------------------------------------------------
-    This Architecture section is free software; you can redistribute it
-    and/or modify it under the terms of the GNU General Public License
-    as published by the Free Software Foundation; either version 3 of
-    the License, or (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; If not, see <http://www.gnu.org/licenses/>.
-
-    EXCEPTION : As a special exception, you may create a larger work
-    that contains this FAUST architecture section and distribute
-    that work under terms of your choice, so long as this FAUST
-    architecture section is not modified.
-
+ FAUST Architecture File
+ Copyright (C) 2016 GRAME, Centre National de Creation Musicale
+ ---------------------------------------------------------------------
+ This Architecture section is free software; you can redistribute it
+ and/or modify it under the terms of the GNU General Public License
+ as published by the Free Software Foundation; either version 3 of
+ the License, or (at your option) any later version.
+ 
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+ 
+ You should have received a copy of the GNU General Public License
+ along with this program; If not, see <http://www.gnu.org/licenses/>.
+ 
+ EXCEPTION : As a special exception, you may create a larger work
+ that contains this FAUST architecture section and distribute
+ that work under terms of your choice, so long as this FAUST
+ architecture section is not modified.
+ 
  ************************************************************************/
 
 #include <libgen.h>
@@ -28,10 +28,11 @@
 #include <sstream>
 #include <vector>
 #include <algorithm>
- #include <unistd.h>
+#include <unistd.h>
 
 #include "faust/audio/dummy-audio.h"
 #include "faust/dsp/interpreter-dsp.h"
+#include "faust/dsp/dsp-bench.h"
 #include "faust/gui/meta.h"
 #include "faust/gui/DecoratorUI.h"
 #include "faust/gui/MapUI.h"
@@ -57,7 +58,7 @@ struct CheckControlUI : public MapUI {
                  FAUSTFLOAT min,
                  FAUSTFLOAT max,
                  FAUSTFLOAT step)
-            :fInit(init), fMin(min), fMax(max), fStep(step)
+        :fInit(init), fMin(min), fMax(max), fStep(step)
         {}
     };
     
@@ -95,7 +96,7 @@ struct CheckControlUI : public MapUI {
         *zone = init;
         fControlZone.push_back(make_pair(zone, ZoneDesc(init, min, max, step)));
     }
-
+    
 };
 
 list<GUI*> GUI::fGuiList;
@@ -105,7 +106,6 @@ int main(int argc, char* argv[])
 {
     char name[256];
     char filename[256];
-    char* home = getenv("HOME");
     
     snprintf(name, 255, "%s", basename(argv[0]));
     snprintf(filename, 255, "%s", basename(argv[argc-1]));
@@ -118,20 +118,22 @@ int main(int argc, char* argv[])
     
     if (isopt(argv, "-h") || isopt(argv, "-help") || trace_mode < 0 || trace_mode > 7) {
         cout << "interp-tracer [-trace <1-7>] [-control] [-output] [-noui] [-timeout <num>] [additional Faust options (-ftz xx)] foo.dsp" << endl;
-        cout << "-control to activate min/max control check\n";
+        cout << "-control to activate min/max control check then setting all controllers (inside their range) in a random way\n";
         cout << "-output to display output samples\n";
         cout << "-noui to start the application without UI\n";
         cout << "-timeout <num> when used in -noui mode, to stop the application after a given timeout in seconds (default = 10s)\n";
         cout << "-trace 1 to collect FP_SUBNORMAL only\n";
         cout << "-trace 2 to collect FP_SUBNORMAL, FP_INFINITE and FP_NAN\n";
-        cout << "-trace 3 to collect FP_SUBNORMAL, FP_INFINITE, FP_NAN, INTEGER_OVERFLOW and DIV_BY_ZERO\n";
-        cout << "-trace 4 to collect FP_SUBNORMAL, FP_INFINITE, FP_NAN, INTEGER_OVERFLOW, DIV_BY_ZERO and LOAD/STORE errors, fails at first FP_INFINITE, FP_NAN or LOAD/STORE errors\n";
-        cout << "-trace 5 to collect FP_SUBNORMAL, FP_INFINITE, FP_NAN, INTEGER_OVERFLOW, DIV_BY_ZERO and LOAD/STORE errors, continue after FP_INFINITE, FP_NAN or LOAD/STORE errors\n";
+        cout << "-trace 3 to collect FP_SUBNORMAL, FP_INFINITE, FP_NAN, INTEGER_OVERFLOW, DIV_BY_ZERO and CAST_INT_OVERFLOW\n";
+        cout << "-trace 4 to collect FP_SUBNORMAL, FP_INFINITE, FP_NAN, INTEGER_OVERFLOW, DIV_BY_ZERO, CAST_INT_OVERFLOW and LOAD/STORE errors, fails at first FP_INFINITE, FP_NAN, CAST_INT_OVERFLOW or LOAD/STORE errors\n";
+        cout << "-trace 5 to collect FP_SUBNORMAL, FP_INFINITE, FP_NAN, INTEGER_OVERFLOW, DIV_BY_ZERO, CAST_INT_OVERFLOW and LOAD/STORE errors, continue after FP_INFINITE, FP_NAN, CAST_INT_OVERFLOW or LOAD/STORE errors\n";
         cout << "-trace 6 to only check LOAD/STORE errors and continue\n";
         cout << "-trace 7 to only check LOAD/STORE errors and exit\n";
         exit(EXIT_FAILURE);
     }
-    cout << "Libfaust version : " << getCLibFaustVersion () << endl;
+    
+    cout << "Filename: " << argv[argc-1] << endl;
+    cout << "Libfaust version : " << getCLibFaustVersion() << endl;
     
     int argc1 = 0;
     const char* argv1[64];
@@ -150,7 +152,6 @@ int main(int argc, char* argv[])
         cout << argv[i] << " ";
     }
     cout << endl;
-    
     argv1[argc1] = nullptr;  // NULL terminated argv
     
     cout << "Using interpreter backend" << endl;
@@ -167,15 +168,16 @@ int main(int argc, char* argv[])
     dsp_factory* factory = nullptr;
     dsp* DSP = nullptr;
     GUI* interface = nullptr;
+    RandomControlUI random;
     
     try {
-    
+        
         string error_msg;
-        // argc : without the filename (last element);
+        // argc : without the filename (last element)
         factory = createInterpreterDSPFactoryFromFile(argv[argc-1], argc1, argv1, error_msg);
         
         if (!factory) {
-            cerr << "Cannot create factory : " << error_msg;
+            cerr << error_msg;
             exit(EXIT_FAILURE);
         }
         
@@ -185,10 +187,19 @@ int main(int argc, char* argv[])
             exit(EXIT_FAILURE);
         }
         
-        cout << "getName " << factory->getName() << endl;
+        if (isopt(argv, "-double")) {
+            cout << "Running in double..." << endl;
+        }
         
-        dummyaudio audio(44100, 16, INT_MAX);
-        if (!audio.init(filename, DSP)) {
+        cout << "getName " << factory->getName() << endl;
+        dummyaudio_base* audio = nullptr;
+        
+        if (isopt(argv, "-double")) {
+            audio = new dummyaudio_real<double>(44100, 16, INT_MAX, -1, false, trace_mode == 4);
+        } else {
+            audio = new dummyaudio_real<float>(44100, 16, INT_MAX, -1, false, trace_mode == 4);
+        }
+        if (!audio->init(filename, DSP)) {
             exit(EXIT_FAILURE);
         }
         
@@ -206,7 +217,7 @@ int main(int argc, char* argv[])
                 
                 cout << "------------------------------" << endl;
                 cout << "Check control min/max for " << ctl.fControlZone.size() << " controls" << endl;
-                for (int index = 0; index < ctl.fControlZone.size(); index++) {
+                for (size_t index = 0; index < ctl.fControlZone.size(); index++) {
                     cout << "------------------------------" << endl;
                     cout << "Control: " << ctl.getParamAddress(ctl.fControlZone[index].first) << endl;
                     FAUSTFLOAT min = ctl.fControlZone[index].second.fMin;
@@ -215,12 +226,12 @@ int main(int argc, char* argv[])
                     // Test min
                     cout << "Min: " << min << endl;
                     *ctl.fControlZone[index].first = min;
-                    audio.render();
+                    audio->render();
                     *ctl.fControlZone[index].first = init; // reset to init
                     // Test max
                     cout << "Max: " << max << endl;
                     *ctl.fControlZone[index].first = max;
-                    audio.render();
+                    audio->render();
                     *ctl.fControlZone[index].first = init; // reset to init
                 }
             }
@@ -232,20 +243,19 @@ int main(int argc, char* argv[])
                 
                 cout << "------------------------------" << endl;
                 cout << "Check control min/max successively keeping min for " << ctl.fControlZone.size() << " controls" << endl;
-                for (int index = 0; index < ctl.fControlZone.size(); index++) {
+                for (size_t index = 0; index < ctl.fControlZone.size(); index++) {
                     cout << "------------------------------" << endl;
                     cout << "Control: " << ctl.getParamAddress(ctl.fControlZone[index].first) << endl;
                     FAUSTFLOAT min = ctl.fControlZone[index].second.fMin;
                     FAUSTFLOAT max = ctl.fControlZone[index].second.fMax;
-                    FAUSTFLOAT init = ctl.fControlZone[index].second.fInit;
                     // Test max
                     cout << "Max: " << max << endl;
                     *ctl.fControlZone[index].first = max;
-                    audio.render();
+                    audio->render();
                     // Test min
                     cout << "Min: " << min << endl;
                     *ctl.fControlZone[index].first = min;
-                    audio.render();
+                    audio->render();
                 }
             }
             
@@ -256,36 +266,72 @@ int main(int argc, char* argv[])
                 
                 cout << "------------------------------" << endl;
                 cout << "Check control min/max successively, keeping max for " << ctl.fControlZone.size() << " controls" << endl;
-                for (int index = 0; index < ctl.fControlZone.size(); index++) {
+                for (size_t index = 0; index < ctl.fControlZone.size(); index++) {
                     cout << "------------------------------" << endl;
                     cout << "Control: " << ctl.getParamAddress(ctl.fControlZone[index].first) << endl;
                     FAUSTFLOAT min = ctl.fControlZone[index].second.fMin;
                     FAUSTFLOAT max = ctl.fControlZone[index].second.fMax;
-                    FAUSTFLOAT init = ctl.fControlZone[index].second.fInit;
                     // Test min
                     cout << "Min: " << min << endl;
                     *ctl.fControlZone[index].first = min;
-                    audio.render();
+                    audio->render();
                     // Test max
                     cout << "Max: " << max << endl;
                     *ctl.fControlZone[index].first = max;
-                    audio.render();
+                    audio->render();
                 }
             }
-
+            
+            // Check by setting each control to zero if contained in the [min..max] range
+            {
+                CheckControlUI ctl;
+                DSP->buildUserInterface(&ctl);
+                
+                cout << "------------------------------" << endl;
+                cout << "Check control to zero if contained in the [min..max] range" << endl;
+                for (size_t index = 0; index < ctl.fControlZone.size(); index++) {
+                    FAUSTFLOAT min = ctl.fControlZone[index].second.fMin;
+                    FAUSTFLOAT max = ctl.fControlZone[index].second.fMax;
+                    if (min < 0 && max > 0) {
+                        cout << "------------------------------" << endl;
+                        cout << "Control: " << ctl.getParamAddress(ctl.fControlZone[index].first) << endl;
+                        // Test zero
+                        *ctl.fControlZone[index].first = 0;
+                        audio->render();
+                    }
+                }
+            }
+            
+            // Generate random values for controllers
+            DSP->buildUserInterface(&random);
+            cout << "------------------------------" << endl;
+            cout << "Use RandomControlUI" << endl;
+            for (int step = 0; step < 10; step++) {
+                cout << "Set random controllers, step: " << step <<  " until: " << 10 << endl;
+                random.update();
+                audio->render();
+            }
+            
             goto end;
             
         } else {
-            audio.start();
+            audio->start();
         }
-       
+        
         if (!is_noui) {
             interface->run();
         } else {
+            cout << "Use Ctrl-c to Quit" << endl;
             usleep(time_out * 1e6);
         }
-        audio.stop();
-    } catch (...) {}
+        
+        audio->stop();
+        delete audio;
+        
+    } catch (...) {
+        cout << endl;
+        random.display();
+    }
     
 end:
     

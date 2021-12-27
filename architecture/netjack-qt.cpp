@@ -5,8 +5,7 @@
  each section for license and copyright information.
  *************************************************************************/
 
-/*******************BEGIN ARCHITECTURE SECTION (part 1/2)****************/
-
+/******************* BEGIN netjack-qt.cpp ****************/
 /************************************************************************
  FAUST Architecture File
  Copyright (C) 2003-2019 GRAME, Centre National de Creation Musicale
@@ -81,9 +80,11 @@
 #include "effect.h"
 #endif
 
+using namespace std;
+
 dsp* DSP;
 
-std::list<GUI*> GUI::fGuiList;
+list<GUI*> GUI::fGuiList;
 ztimedmap GUI::gTimedZoneMap;
 
 //-------------------------------------------------------------------------
@@ -97,8 +98,7 @@ int main(int argc, char* argv[])
     bool midi_sync = false;
     int nvoices = 0;
     bool control = true;
-    mydsp_poly* dsp_poly = NULL;
-
+  
     int celt = lopt(argv, "--c", -1);
     const char* master_ip = lopts(argv, "--a", DEFAULT_MULTICAST_IP);
     int master_port = lopt(argv, "--p", DEFAULT_PORT);
@@ -113,7 +113,7 @@ int main(int argc, char* argv[])
     snprintf(rcfilename, 256, "%s/.%src", home, appname);
     
     if (isopt(argv, "-h")) {
-        std::cout << "prog [--nvoices <val>] [--control <0/1>] [--group <0/1>]\n";
+        cout << "prog [--nvoices <val>] [--control <0/1>] [--group <0/1>]\n";
         exit(1);
     }
     
@@ -122,17 +122,17 @@ int main(int argc, char* argv[])
     control = lopt(argv, "--control", control);
     int group = lopt(argv, "--group", 1);
     
-    std::cout << "Started with " << nvoices << " voices\n";
-    dsp_poly = new mydsp_poly(new mydsp(), nvoices, control, group);
+    cout << "Started with " << nvoices << " voices\n";
+    DSP = new mydsp_poly(new mydsp(), nvoices, control, group);
     
 #if MIDICTRL
     if (midi_sync) {
-        DSP = new timed_dsp(new dsp_sequencer(dsp_poly, new effect()));
+        DSP = new timed_dsp(new dsp_sequencer(DSP, new effect()));
     } else {
-        DSP = new dsp_sequencer(dsp_poly, new effect());
+        DSP = new dsp_sequencer(DSP, new effect());
     }
 #else
-    DSP = new dsp_sequencer(dsp_poly, new effect());
+    DSP = new dsp_sequencer(DSP, new effect());
 #endif
     
 #else
@@ -141,17 +141,13 @@ int main(int argc, char* argv[])
     int group = lopt(argv, "--group", 1);
     
     if (nvoices > 0) {
-        std::cout << "Started with " << nvoices << " voices\n";
-        dsp_poly = new mydsp_poly(new mydsp(), nvoices, control, group);
+        cout << "Started with " << nvoices << " voices\n";
+        DSP = new mydsp_poly(new mydsp(), nvoices, control, group);
         
 #if MIDICTRL
         if (midi_sync) {
-            DSP = new timed_dsp(dsp_poly);
-        } else {
-            DSP = dsp_poly;
+            DSP = new timed_dsp(DSP);
         }
-#else
-        DSP = dsp_poly;
 #endif
     } else {
 #if MIDICTRL
@@ -166,8 +162,8 @@ int main(int argc, char* argv[])
     }
 #endif
     
-    if (DSP == 0) {
-        std::cerr << "Unable to allocate Faust DSP object" << std::endl;
+    if (!DSP) {
+        cerr << "Unable to allocate Faust DSP object" << endl;
         exit(1);
     }
     
@@ -200,8 +196,7 @@ int main(int argc, char* argv[])
 #ifdef MIDICTRL
     MidiUI* midiinterface = new MidiUI(&audio);
     DSP->buildUserInterface(midiinterface);
-    audio.addMidiIn(dsp_poly);
-    std::cout << "MIDI is on" << std::endl;
+    cout << "MIDI is on" << endl;
 #endif
 
 #ifdef HTTPCTRL
@@ -214,7 +209,7 @@ int main(int argc, char* argv[])
     
 #ifdef MIDICTRL
     if (!midiinterface->run()) {
-        std::cerr << "MidiUI run error\n";
+        cerr << "MidiUI run error\n";
     }
 #endif
     
@@ -247,4 +242,4 @@ int main(int argc, char* argv[])
     return 0;
 }
 
-/********************END ARCHITECTURE SECTION (part 2/2)****************/
+/******************* END netjack-qt.cpp ****************/

@@ -139,7 +139,7 @@ enum WasmOp {
 
 };
 
-// Use in in static table so not Garbageable
+// No Garbageable since used in static table
 struct BinOp {
     const char* fName;
     const char* fNameVec;
@@ -213,10 +213,11 @@ struct BinOp {
 extern BinOp* gBinOpTable[];
 extern BinOp* gBinOpLateqTable[];
 
-enum { kAdd, kSub, kMul, kDiv, kRem, kLsh, kRsh, kGT, kLT, kGE, kLE, kEQ, kNE, kAND, kOR, kXOR };
+enum SOperator { kAdd, kSub, kMul, kDiv, kRem, kLsh, kARsh, kLRsh, kGT, kLT, kGE, kLE, kEQ, kNE, kAND, kOR, kXOR };
 
 bool isBoolOpcode(int o);
 bool isLogicalOpcode(int o);
+bool isShiftOpcode(int o);
 bool isCommutativeOpcode(int o);
 
 #endif

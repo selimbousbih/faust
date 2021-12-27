@@ -3,6 +3,7 @@ using System;
 using System.Text;
 using System.Runtime.InteropServices;
 using System.Collections.Generic;
+using System.Globalization;
 using UnityEngine;
 
 /* @brief This file contains additional code to communicate with the plugin and build the inspector interface
@@ -245,15 +246,15 @@ namespace FaustUtilities_MODEL {
 
 		private IntPtr _context;
 
-        #if UNITY_EDITOR_OSX || UNITY_EDITOR_WIN || UNITY_STANDALONE_OSX || UNITY_STANDALONE_WIN || UNITY_WSA || UNITY_WSA_10_0
-        const string _dllName = "PLUGNAME";
-        #elif UNITY_IOS
-        const string _dllName = "__Internal";
-        #elif UNITY_EDITOR || UNITY_ANDROID || UNITY_STANDALONE_LINUX
-        const string _dllName = "PLUGINNAME";
-        #else
-        Debug.LogError("Architecture not supported by the plugin");
-        #endif
+		#if UNITY_EDITOR_OSX || UNITY_EDITOR_WIN || UNITY_STANDALONE_OSX || UNITY_STANDALONE_WIN || UNITY_WSA || UNITY_WSA_10_0
+		const string _dllName = "PLUGNAME";
+		#elif UNITY_IOS
+		const string _dllName = "__Internal";
+		#elif UNITY_EDITOR || UNITY_ANDROID || UNITY_STANDALONE_LINUX
+		const string _dllName = "PLUGINNAME";
+		#else
+		Debug.LogError("Architecture not supported by the plugin");
+		#endif
 
 		// Imports all c++ function to intialize and process the dsp. The methods need to be private
 		[DllImport(_dllName)]
@@ -362,24 +363,33 @@ namespace FaustUtilities_MODEL {
 							success = parseDQString(ref fJSON, out value);
 							faustUI.name = value.ToString();
 							break;
+                        case "filename":            // Don't use the result
+                            success = parseDQString(ref fJSON, out value);
+                            break;
+                        case "version":             // Don't use the result
+                            success = parseDQString(ref fJSON, out value);
+                            break;
+                        case "compile_options":     // Don't use the result
+                            success = parseDQString(ref fJSON, out value);
+                            break;
+                        case "library_list":        // Don't use the result
+                            success = parseGlobalMetaData(ref fJSON);
+                            break;
+                        case "include_pathnames":   // Don't use the result
+                            success = parseGlobalMetaData(ref fJSON);
+                            break;
 						case "inputs":
-							success = parseDQString(ref fJSON, out value);
+							success = parseNum(ref fJSON,  out value);
 							faustUI.inputs = Convert.ToInt32(value.ToString());
 							break;
 						case "outputs":
-							success = parseDQString(ref fJSON, out value);
+							success = parseNum(ref fJSON,  out value);
 							faustUI.outputs = Convert.ToInt32(value.ToString());
 							break;
 						case "meta":
 							success = parseGlobalMetaData(ref fJSON);
 							break;
-						case "library_list":
-							success = parseGlobalMetaData(ref fJSON);
-							break;
-						case "include_pathnames":
-							success = parseGlobalMetaData(ref fJSON);
-							break;
-						case "ui":
+	                    case "ui":
 							faustUI.ui = new List < Group > ();
 							int numitems = 0;
 							success = parseUI(ref fJSON, ref faustUI.ui, ref numitems);
@@ -429,6 +439,22 @@ namespace FaustUtilities_MODEL {
 				}
 				valid = true;
 				s = skipChar(ref s, name.ToString().Length + 2);
+			}
+			return valid;
+		}
+
+		private static bool parseNum(ref string s,  out StringBuilder name) {
+			bool valid = false;
+			name = new StringBuilder();
+			char[] c = s.ToCharArray();
+			if (c[0] == ' ') {
+				int i = 1;
+				while (c[i] != ' ' && c[i] != ',' && c[i] != '}' && c[i] != ']') {
+					name.Append(c[i]);
+					i++;
+				}
+				valid = true;
+				s = skipChar(ref s, name.ToString().Length + 1);
 			}
 			return valid;
 		}
@@ -486,6 +512,7 @@ namespace FaustUtilities_MODEL {
 		}
 
 		private static bool parseUI(ref string s, ref List < Group > uiItems, ref int numItems) {
+			CultureInfo culture = new CultureInfo("en-US");
 			if (parseChar(ref s, '[')) {
 
 				StringBuilder label;
@@ -524,26 +551,26 @@ namespace FaustUtilities_MODEL {
 									}
 									break;
 								case "init":
-									if (parseChar(ref s, ':') && parseDQString(ref s, out value)) {
-										float x = Convert.ToSingle(value.ToString());
+									if (parseChar(ref s, ':') && parseNum(ref s, out value)) {
+										float x = Convert.ToSingle(value.ToString(), culture);
 										uiItems[numItems].init = x;
 									}
 									break;
 								case "min":
-									if (parseChar(ref s, ':') && parseDQString(ref s, out value)) {
-										float x = Convert.ToSingle(value.ToString());
+									if (parseChar(ref s, ':') && parseNum(ref s, out value)) {
+										float x = Convert.ToSingle(value.ToString(), culture);
 										uiItems[numItems].min = x;
 									}
 									break;
 								case "max":
-									if (parseChar(ref s, ':') && parseDQString(ref s, out value)) {
-										float x = Convert.ToSingle(value.ToString());
+									if (parseChar(ref s, ':') && parseNum(ref s, out value)) {
+										float x = Convert.ToSingle(value.ToString(), culture);
 										uiItems[numItems].max = x;
 									}
 									break;
 								case "step":
-									if (parseChar(ref s, ':') && parseDQString(ref s, out value)) {
-										float x = Convert.ToSingle(value.ToString());
+									if (parseChar(ref s, ':') && parseNum(ref s, out value)) {
+										float x = Convert.ToSingle(value.ToString(), culture);
 										uiItems[numItems].step = x;
 									}
 									break;
@@ -560,8 +587,6 @@ namespace FaustUtilities_MODEL {
 							}
 						} while (parseChar(ref s , ','));
 						parseChar(ref s, '}');
-					} else {
-						return false;
 					}
 				} while (parseChar(ref s , ','));
 				return parseChar(ref s, ']');
@@ -629,5 +654,4 @@ namespace FaustUtilities_MODEL {
 		public string scale;
 		public string tooltip;
 	}
-
 }

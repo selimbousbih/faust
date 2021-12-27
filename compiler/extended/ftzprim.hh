@@ -38,8 +38,8 @@ when it is not available on the CPU.
 const char* FTZPattern[4][3] = {
     {"???", "???", "???"},                                                                                // not a float
     {"$0", "((fabsf($0)> FLT_MIN) ? $0 : 0.0f)", "((*(int*)&$0) & 0x7F800000) ? $0 : 0.0f"},              // float  (1)
-    {"$0", "((fabs ($0)> DBL_MIN) ? $0 : 0.0 )", "((*(long int*)&$0) & 0x7FF0000000000000) ? $0 : 0.0"},  // double (2)
-    {"$0", "((fabsl($0)>LDBL_MIN) ? $0 : 0.0L)", "((fabsl($0)>LDBL_MIN) ? $0 : 0.0L)"}                    // quad   (3)
+    {"$0", "((fabs($0)> DBL_MIN) ? $0 : 0.0 )", "((*(long int*)&$0) & 0x7FF0000000000000) ? $0 : 0.0"},   // double (2)
+    {"$0", "((fabsl($0)> LDBL_MIN) ? $0 : 0.0L)", "((fabsl($0)>LDBL_MIN) ? $0 : 0.0L)"}                   // quad   (3)
 };
 
 class FtzPrim : public xtended {
@@ -58,8 +58,6 @@ class FtzPrim : public xtended {
         faustassert(types.size() == arity());
         return types[0];
     }
-
-    virtual void sigVisit(Tree sig, sigvisitor* visitor) {}
 
     virtual int infereSigOrder(const vector<int>& args)
     {
@@ -84,7 +82,7 @@ class FtzPrim : public xtended {
     }
 
     virtual ValueInst* generateCode(CodeContainer* container, const list<ValueInst*>& args, ::Type result,
-                                    vector< ::Type> const& types)
+                                    vector<::Type> const& types)
     {
         faustassert(args.size() == arity());
         faustassert(types.size() == arity());
@@ -155,7 +153,7 @@ class FtzPrim : public xtended {
         }
     }
 
-    virtual string old_generateCode(Klass* klass, const vector<string>& args, const vector<Type>& types)
+    virtual string generateCode(Klass* klass, const vector<string>& args, const vector<::Type>& types)
     {
         faustassert(args.size() == arity());
         faustassert(types.size() == arity());
@@ -174,7 +172,7 @@ class FtzPrim : public xtended {
         }
     }
 
-    virtual string generateLateq(Lateq* lateq, const vector<string>& args, const vector<Type>& types)
+    virtual string generateLateq(Lateq* lateq, const vector<string>& args, const vector<::Type>& types)
     {
         faustassert(args.size() == arity());
         faustassert(types.size() == arity());

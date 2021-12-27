@@ -41,6 +41,14 @@ inline char replaceCR(char c)
 	return (c!='\n') ? c : ' ';
 }
 
+// A definition is accepted if the prefixset is empty or if
+// the current float precision is member of the prefix set
+bool acceptdefinition(int prefixset)
+{
+	int precisions[] = {0, 1, 2, 4, 8};
+	return (prefixset==0) || (prefixset & precisions[gGlobal->gFloatSize]);
+}
+
 Tree unquote(char* str)
 {
     size_t size = strlen(str) + 1;
@@ -50,7 +58,7 @@ Tree unquote(char* str)
     size_t j=0;
 
     if (str[0] == '"') {
-        //it is a quoted string, we remove the quotes
+        // it is a quoted string, we remove the quotes
         for (size_t i=1; j<size-1 && str[i];) {
             buf[j++] = replaceCR(str[i++]);
         }
@@ -69,12 +77,12 @@ Tree unquote(char* str)
 
 %}
 
-
 %union {
 	CTree* 	exp;
 	char* str;
 	string* cppstr;
 	bool b;
+	int numvariant;
 }
 
 %start program
@@ -99,8 +107,8 @@ Tree unquote(char* str)
 %left POWOP
 %left FDELAY
 %left DELAY1
-%left APPL DOT
-
+/*%left APPL*/
+%left DOT
 
 %token MEM
 %token PREFIX
@@ -125,7 +133,6 @@ Tree unquote(char* str)
 %token SOUNDFILE
 
 %token ATTACH
-
 
 %token ACOS
 %token ASIN
@@ -152,8 +159,6 @@ Tree unquote(char* str)
 %token CEIL
 %token RINT
 
-
-
 %token RDTBL
 %token RWTBL
 
@@ -163,7 +168,6 @@ Tree unquote(char* str)
 %token INT
 %token FLOAT
 
-
 %token LAMBDA
 %token DOT
 
@@ -171,11 +175,11 @@ Tree unquote(char* str)
 %token CUT
 %token ENDDEF
 %token VIRG
-%token LPAR
+%left LPAR
 %token RPAR
 %token LBRAQ
 %token RBRAQ
-%token LCROC
+%left LCROC
 %token RCROC
 %token WITH
 %token LETREC
@@ -208,6 +212,14 @@ Tree unquote(char* str)
 %token CASE
 %token ARROW
 
+%token ASSERTBOUNDS
+%token LOWEST
+%token HIGHEST
+
+%token FLOATMODE
+%token DOUBLEMODE
+%token QUADMODE
+%token FIXEDPOINTMODE
 
  /* Begin and End tags for documentations, equations and diagrams */
 %token BDOC
@@ -308,22 +320,31 @@ Tree unquote(char* str)
 %type <exp> lstattrdef
 %type <b> lstattrval
 
-
-
-
+%type <numvariant> variant
+%type <numvariant> variantlist
 
 %% /* grammar rules and actions follow */
 
-program         : stmtlist 						{ $$ = $1; gGlobal->gResult = formatDefinitions($$); }
+program         : stmtlist 							{ $$ = $1; gGlobal->gResult = formatDefinitions($$); }
 				;
 
-stmtlist        : /*empty*/                     { $$ = gGlobal->nil; }
-				| stmtlist statement            { $$ = cons ($2,$1); }
-
-deflist         : /*empty*/                     { $$ = gGlobal->nil; }
-				| deflist definition            { $$ = cons ($2,$1); }
+stmtlist        : /*empty*/                     	{ $$ = gGlobal->nil; }
+				| stmtlist variantlist statement    { if (acceptdefinition($2)) $$ = cons ($3,$1); else $$=$1; }
 				;
 
+deflist         : /*empty*/                     	{ $$ = gGlobal->nil; }
+				| deflist variantlist definition    { if (acceptdefinition($2)) $$ = cons ($3,$1); else $$=$1;}
+				;
+
+variantlist     : /*empty*/                     	{ $$ = 0; }
+				| variantlist variant    			{ $$ = $1 | $2;}
+				;
+
+variant			: FLOATMODE							{ $$ = 1;}
+				| DOUBLEMODE						{ $$ = 2;}
+				| QUADMODE							{ $$ = 4;}
+                | FIXEDPOINTMODE                    { $$ = 8;}
+				;
 
 reclist         : /*empty*/                             { $$ = gGlobal->nil; }
                 | reclist recinition                    { $$ = cons ($2,$1); }
@@ -339,13 +360,12 @@ vallist         : number                              { gGlobal->gWaveForm.push_
 
 number			: INT   						{ $$ = boxInt(atoi(yytext)); }
 				| FLOAT 						{ $$ = boxReal(atof(yytext)); }
-				| ADD INT   					{ $$ = boxInt (atoi(yytext)); }
+				| ADD INT   					{ $$ = boxInt(atoi(yytext)); }
 				| ADD FLOAT 					{ $$ = boxReal(atof(yytext)); }
-				| SUB INT   					{ $$ = boxInt ( -atoi(yytext) ); }
-				| SUB FLOAT 					{ $$ = boxReal( -atof(yytext) ); }				
+				| SUB INT   					{ $$ = boxInt(-atoi(yytext)); }
+				| SUB FLOAT 					{ $$ = boxReal(-atof(yytext)); }				
 				;
-				
-				
+							
 statement       : IMPORT LPAR uqstring RPAR ENDDEF	   	{ $$ = importFile($3); }
 				| DECLARE name string  ENDDEF		   	{ declareMetadata($2,$3); $$ = gGlobal->nil; }
 				| DECLARE name name string  ENDDEF		{ declareDefinitionMetadata($2,$3,$4); $$ = gGlobal->nil; }
@@ -432,7 +452,7 @@ infixexp		: infixexp ADD infixexp 	{ $$ = boxSeq(boxPar($1,$3),boxPrim2(sigAdd))
 				| infixexp DIV infixexp 	{ $$ = boxSeq(boxPar($1,$3),boxPrim2(sigDiv)); }
                 | infixexp MOD infixexp     { $$ = boxSeq(boxPar($1,$3),boxPrim2(sigRem)); }
                 | infixexp POWOP infixexp   { $$ = boxSeq(boxPar($1,$3),gGlobal->gPowPrim->box()); }
-                | infixexp FDELAY infixexp 	{ $$ = boxSeq(boxPar($1,$3),boxPrim2(sigFixDelay)); }
+                | infixexp FDELAY infixexp 	{ $$ = boxSeq(boxPar($1,$3),boxPrim2(sigDelay)); }
 				| infixexp DELAY1  			{ $$ = boxSeq($1,boxPrim1(sigDelay1)); }
 				| infixexp DOT ident  		{ $$ = boxAccess($1,$3); }
 
@@ -441,7 +461,7 @@ infixexp		: infixexp ADD infixexp 	{ $$ = boxSeq(boxPar($1,$3),boxPrim2(sigAdd))
 				| infixexp XOR infixexp 	{ $$ = boxSeq(boxPar($1,$3),boxPrim2(sigXOR)); }
 
 				| infixexp LSH infixexp 	{ $$ = boxSeq(boxPar($1,$3),boxPrim2(sigLeftShift)); }
-				| infixexp RSH infixexp 	{ $$ = boxSeq(boxPar($1,$3),boxPrim2(sigRightShift)); }
+				| infixexp RSH infixexp 	{ $$ = boxSeq(boxPar($1,$3),boxPrim2(sigARightShift)); }
 
 				| infixexp LT infixexp  	{ $$ = boxSeq(boxPar($1,$3),boxPrim2(sigLT)); }
 				| infixexp LE infixexp  	{ $$ = boxSeq(boxPar($1,$3),boxPrim2(sigLE)); }
@@ -450,8 +470,8 @@ infixexp		: infixexp ADD infixexp 	{ $$ = boxSeq(boxPar($1,$3),boxPrim2(sigAdd))
 				| infixexp EQ infixexp  	{ $$ = boxSeq(boxPar($1,$3),boxPrim2(sigEQ)); }
 				| infixexp NE infixexp		{ $$ = boxSeq(boxPar($1,$3),boxPrim2(sigNE)); }
 
-				| infixexp LPAR arglist RPAR 	%prec APPL	{ $$ = buildBoxAppl($1,$3); }
-				| infixexp LCROC deflist RCROC	%prec APPL	{ $$ = boxModifLocalDef($1,formatDefinitions($3)); }
+				| infixexp LPAR arglist RPAR   	{ $$ = buildBoxAppl($1,$3); }
+				| infixexp LCROC deflist RCROC 	{ $$ = boxModifLocalDef($1,formatDefinitions($3)); }
 				
 				| primitive						{ $$ = $1; }
 				;
@@ -479,14 +499,14 @@ primitive		: INT   						{ $$ = boxInt(atoi(yytext)); }
 				| MUL  							{ $$ = boxPrim2(sigMul); }
 				| DIV							{ $$ = boxPrim2(sigDiv); }
 				| MOD							{ $$ = boxPrim2(sigRem); }
-				| FDELAY						{ $$ = boxPrim2(sigFixDelay); }
+				| FDELAY						{ $$ = boxPrim2(sigDelay); }
 
 				| AND							{ $$ = boxPrim2(sigAND); }
 				| OR 							{ $$ = boxPrim2(sigOR); }
 				| XOR  							{ $$ = boxPrim2(sigXOR); }
 
 				| LSH							{ $$ = boxPrim2(sigLeftShift); }
-				| RSH 							{ $$ = boxPrim2(sigRightShift); }
+				| RSH 							{ $$ = boxPrim2(sigARightShift); }
 
 				| LT							{ $$ = boxPrim2(sigLT); }
 				| LE							{ $$ = boxPrim2(sigLE); }
@@ -498,7 +518,6 @@ primitive		: INT   						{ $$ = boxInt(atoi(yytext)); }
 				| ATTACH						{ $$ = boxPrim2(sigAttach); }
                 | ENABLE                        { $$ = boxPrim2(sigEnable); }
                 | CONTROL                       { $$ = boxPrim2(sigControl); }
-
 
 				| ACOS							{ $$ = gGlobal->gAcosPrim->box(); }
 				| ASIN							{ $$ = gGlobal->gAsinPrim->box(); }
@@ -526,17 +545,20 @@ primitive		: INT   						{ $$ = boxInt(atoi(yytext)); }
 				| CEIL							{ $$ = gGlobal->gCeilPrim->box(); }
 				| RINT							{ $$ = gGlobal->gRintPrim->box(); }
 
-
 				| RDTBL 						{ $$ = boxPrim3(sigReadOnlyTable); }
 				| RWTBL							{ $$ = boxPrim5(sigWriteReadTable); }
 
 				| SELECT2 						{ $$ = boxPrim3(sigSelect2); }
 				| SELECT3						{ $$ = boxPrim4(sigSelect3); }
 
+				| ASSERTBOUNDS					{ $$ = boxPrim3(sigAssertBounds);}
+				| LOWEST						{ $$ = boxPrim1(sigLowest);}
+				| HIGHEST						{ $$ = boxPrim1(sigHighest);}
+
 				| ident 						{ $$ = $1;  setUseProp($1, yyfilename, yylineno);}
                 | SUB ident                     { $$ = boxSeq(boxPar(boxInt(0),$2),boxPrim2(sigSub)); }
 
-				| LPAR expression RPAR				{ $$ = $2; }
+				| LPAR expression RPAR			{ $$ = $2; }
 				| LAMBDA LPAR params RPAR DOT LPAR expression RPAR
 												{ $$ = buildBoxAbstr($3,$7); }
 
@@ -569,7 +591,6 @@ primitive		: INT   						{ $$ = boxInt(atoi(yytext)); }
 				
 				| finputs						{ $$ = $1; }
 				| foutputs						{ $$ = $1; }
-				
 				;
 
 
@@ -579,8 +600,6 @@ ident			: IDENT							{ $$ = boxIdent(yytext); setUseProp($$, yyfilename, yyline
 name			: IDENT							{ $$ = tree(yytext); setUseProp($$, yyfilename, yylineno);  }
 				;
 
-
-
 arglist			: argument						{ $$ = cons($1,gGlobal->nil); }
 				| arglist PAR argument			{ $$ = cons($3,$1); }
 				;
@@ -589,7 +608,7 @@ argument		: argument SEQ argument  		{ $$ = boxSeq($1,$3); }
 				| argument SPLIT argument 		{ $$ = boxSplit($1,$3); }
 				| argument MIX argument 		{ $$ = boxMerge($1,$3); }
 				| argument REC argument  		{ $$ = boxRec($1,$3); }
-				| infixexp					{ $$ = $1; }
+				| infixexp						{ $$ = $1; }
 				;
 
 string			: STRING						{ $$ = tree(yytext); }
@@ -620,14 +639,11 @@ fprod			: IPROD LPAR ident PAR argument PAR expression RPAR
 												{ $$ = boxIProd($3,$5,$7); }
 				;
 
-
 finputs			: INPUTS LPAR expression RPAR { $$ = boxInputs($3); }
 				;
 
 foutputs		: OUTPUTS LPAR expression RPAR { $$ = boxOutputs($3); }
 				;
-
-				
 
 /* description of foreign functions */
 
@@ -637,6 +653,7 @@ ffunction		: FFUNCTION LPAR signature PAR fstring PAR string RPAR
 
 fconst          : FCONSTANT LPAR type name PAR fstring RPAR
                                                 { $$ = boxFConst($3,$4,$6); }
+                ;
 
 fvariable       : FVARIABLE LPAR type name PAR fstring RPAR
                                                 { $$ = boxFVar($3,$4,$6); }
@@ -646,7 +663,7 @@ fvariable       : FVARIABLE LPAR type name PAR fstring RPAR
 button			: BUTTON LPAR uqstring RPAR		{ $$ = boxButton($3); }
 				;
 
-checkbox		: CHECKBOX LPAR uqstring RPAR		{ $$ = boxCheckbox($3); }
+checkbox		: CHECKBOX LPAR uqstring RPAR	{ $$ = boxCheckbox($3); }
 				;
 
 vslider			: VSLIDER LPAR uqstring PAR argument PAR argument PAR argument PAR argument RPAR
@@ -710,4 +727,3 @@ type			: INTCAST                       { $$ = tree(0); }
 				;
 
 %%
-

@@ -27,13 +27,13 @@
  */
 class FaustWasm2ScriptProcessorPoly {
 
-   /**
-     * Creates an instance of FaustWasm2ScriptProcessorPoly.
-     * @param {string} dspName - dsp name
-     * @param {{ [key: string]: any }} dspProps - dsp properties parsed by json
-     * @param {{ [key: string]: any }} effectProps - dsp properties parsed by jsonEffect
-     * @param {{ debug: boolean, [key: string]: any }} options - compile options
-     */
+    /**
+      * Creates an instance of FaustWasm2ScriptProcessorPoly.
+      * @param {string} dspName - dsp name
+      * @param {{ [key: string]: any }} dspProps - dsp properties parsed by json
+      * @param {{ [key: string]: any }} effectProps - dsp properties parsed by jsonEffect
+      * @param {{ debug: boolean, [key: string]: any }} options - compile options
+      */
     constructor(dspName, dspProps, effectProps, options) {
         this.name = dspName;
         this.dspProps = dspProps;
@@ -67,41 +67,43 @@ class FaustWasm2ScriptProcessorPoly {
         }
         sp.json_object = this.dspProps;
         sp.effect_json_object = this.effectProps;
-    
+
         sp.output_handler = null;
         sp.ins = null;
         sp.outs = null;
         sp.mixing = null;
         sp.compute_handler = null;
-    
+
         sp.dspInChannnels = [];
         sp.dspOutChannnels = [];
-    
+
         sp.fFreqLabel = [];
         sp.fGateLabel = [];
         sp.fGainLabel = [];
+        sp.fKeyFun = null;
+        sp.fVelFun = null;
         sp.fDate = 0;
-    
+
         sp.fPitchwheelLabel = [];
         sp.fCtrlLabel = new Array(128).fill(null).map(() => []);
-        
+
         sp.remap = (v, mn0, mx0, mn1, mx1) => (v - mn0) / (mx0 - mn0) * (mx1 - mn1) + mn1;
-    
+
         sp.numIn = inputs;
         sp.numOut = outputs;
-    
+
         this.log(sp.numIn);
         this.log(sp.numOut);
-    
+
         // Memory allocator
         sp.ptr_size = 4;
         sp.sample_size = 4;
-    
+
         sp.factory = dspInstance.exports;
         sp.HEAP = memory.buffer;
         sp.HEAP32 = new Int32Array(sp.HEAP);
         sp.HEAPF32 = new Float32Array(sp.HEAP);
-    
+
         this.log(sp.HEAP);
         this.log(sp.HEAP32);
         this.log(sp.HEAPF32);
@@ -109,25 +111,25 @@ class FaustWasm2ScriptProcessorPoly {
         // bargraph
         sp.outputs_timer = 5;
         sp.outputs_items = [];
-    
+
         // input items
         sp.inputs_items = [];
-    
+
         // Start of HEAP index
-    
+
         // DSP is placed first with index 0. Audio buffer start at the end of DSP.
         sp.audio_heap_ptr = 0;
-    
+
         // Setup pointers offset
         sp.audio_heap_ptr_inputs = sp.audio_heap_ptr;
         sp.audio_heap_ptr_outputs = sp.audio_heap_ptr_inputs + sp.numIn * sp.ptr_size;
         sp.audio_heap_ptr_mixing = sp.audio_heap_ptr_outputs + sp.numOut * sp.ptr_size;
-    
+
         // Setup buffer offset
         sp.audio_heap_inputs = sp.audio_heap_ptr_mixing + sp.numOut * sp.ptr_size;
         sp.audio_heap_outputs = sp.audio_heap_inputs + sp.numIn * bufferSize * sp.sample_size;
         sp.audio_heap_mixing = sp.audio_heap_outputs + sp.numOut * bufferSize * sp.sample_size;
-        
+
         // Setup DSP voices offset
         sp.dsp_start = sp.audio_heap_mixing + sp.numOut * bufferSize * sp.sample_size;
 
@@ -139,27 +141,27 @@ class FaustWasm2ScriptProcessorPoly {
         this.log(sp.mixer);
         this.log(sp.factory);
         this.log(sp.effect);
-        
+
         // Start of DSP memory ('polyphony' DSP voices)
         sp.dsp_voices = [];
         sp.dsp_voices_state = [];
         sp.dsp_voices_level = [];
         sp.dsp_voices_date = [];
-    
+
         sp.kActiveVoice = 0;
         sp.kFreeVoice = -1;
         sp.kReleaseVoice = -2;
         sp.kNoVoice = -3;
 
         sp.pathTable = [];
-    
+
         for (let i = 0; i < polyphony; i++) {
             sp.dsp_voices[i] = sp.dsp_start + i * parseInt(sp.json_object.size);
             sp.dsp_voices_state[i] = sp.kFreeVoice;
             sp.dsp_voices_level[i] = 0;
             sp.dsp_voices_date[i] = 0;
         }
-            
+
         // Effect memory starts after last voice
         sp.effect_start = sp.dsp_voices[polyphony - 1] + parseInt(json_object.size);
 
@@ -220,7 +222,7 @@ class FaustWasm2ScriptProcessorPoly {
                 return sp.kNoVoice;
             }
         }
-    
+
         sp.update_outputs = () => {
             if (sp.outputs_items.length > 0 && sp.output_handler && sp.outputs_timer-- === 0) {
                 sp.outputs_timer = 5;
@@ -235,7 +237,7 @@ class FaustWasm2ScriptProcessorPoly {
                 dspInput.set(input);
             }
             try {
-          
+
                 // Possibly call an externally given callback (for instance to synchronize playing a MIDIFile...)
                 if (sp.compute_handler) sp.compute_handler(bufferSize);
                 sp.mixer.clearOutput(bufferSize, sp.numOut, sp.outs); // First clear the outputs
@@ -248,12 +250,12 @@ class FaustWasm2ScriptProcessorPoly {
                         sp.dsp_voices_state[i] = sp.kFreeVoice;
                     }
                 }
-                
+
                 if (sp.effect) sp.effect.compute(sp.effect_start, bufferSize, sp.outs, sp.outs); // Apply effect
-            } catch(e) {
+            } catch (e) {
                 console.log("ERROR in compute (" + e + ")");
             }
-            
+
             sp.update_outputs(); // Update bargraph
             for (let i = 0; i < sp.numOut; i++) { // Write outputs
                 const output = e.outputBuffer.getChannelData(i);
@@ -276,7 +278,7 @@ class FaustWasm2ScriptProcessorPoly {
                 sp.outputs_items.push(item.address);
                 sp.pathTable[item.address] = parseInt(item.index);
             } else if (item.type === "vslider" || item.type === "hslider" || item.type === "button"
-                    || item.type === "checkbox" || item.type === "nentry") {
+                || item.type === "checkbox" || item.type === "nentry") {
                 // Keep inputs adresses
                 sp.inputs_items.push(item.address);
                 sp.pathTable[item.address] = parseInt(item.index);
@@ -330,27 +332,55 @@ class FaustWasm2ScriptProcessorPoly {
                     sp.dspOutChannnels[i] = sp.HEAPF32.subarray(dspOutChans[i] >> 2, (dspOutChans[i] + bufferSize * sp.sample_size) >> 2);
                 }
             }
+
             // Parse JSON UI part
             sp.parse_ui(sp.json_object.ui);
-            if (sp.effect) sp.parse_ui(sp.effect_json_object.ui);
-    
+
+            if (sp.effect) {
+                sp.parse_ui(sp.effect_json_object.ui);
+            }
+
             // keep 'keyOn/keyOff' labels
             sp.inputs_items.forEach(item => {
-                if (item.endsWith("/gate")) sp.fGateLabel.push(sp.pathTable[item]);
-                else if (item.endsWith("/freq")) sp.fFreqLabel.push(sp.pathTable[item])
-                else if (item.endsWith("/gain")) sp.fGainLabel.push(sp.pathTable[item])
+                if (item.endsWith("/gate")) {
+                    sp.fGateLabel.push(sp.pathTable[item]);
+                } else if (item.endsWith("/freq")) {
+                    sp.fKeyFun = (pitch) => { return sp.midiToFreq(pitch); };
+                    sp.fFreqLabel.push(sp.pathTable[item]);
+                } else if (item.endsWith("/key")) {
+                    sp.fKeyFun = (pitch) => { return pitch; };
+                    sp.fFreqLabel.push(sp.pathTable[item]);
+                } else if (item.endsWith("/gain")) {
+                    sp.fVelFun = (vel) => { return vel / 127.0; };
+                    sp.fGainLabel.push(sp.pathTable[item])
+                } else if (item.endsWith("/vel") || item.endsWith("/velocity")) {
+                    sp.fVelFun = (vel) => { return vel; };
+                    sp.fGainLabel.push(sp.pathTable[item]);
+                }
             })
+
             // Init DSP voices
             for (let i = 0; i < polyphony; i++) {
                 sp.factory.init(sp.dsp_voices[i], audioCtx.sampleRate);
             }
-            
+
             // Init effect
-            if (sp.effect) sp.effect.init(sp.effect_start, audioCtx.sampleRate);
+            if (sp.effect) {
+                sp.effect.init(sp.effect_start, audioCtx.sampleRate);
+            }
         }
-        sp.getSampleRate = () => audioCtx.sampleRate; // Return current sample rate
-        sp.getNumInputs = () => sp.numIn; // Return instance number of audio inputs.
-        sp.getNumOutputs = () => sp.numOut; // Return instance number of audio outputs.
+
+        // Public API
+
+        /**
+         * Destroy the node, deallocate resources.
+         */
+        sp.destroy = () => { }
+
+        sp.getSampleRate = () => audioCtx.sampleRate;  // Return current sample rate
+        sp.getNumInputs = () => sp.numIn;              // Return instance number of audio inputs.
+        sp.getNumOutputs = () => sp.numOut;            // Return instance number of audio outputs.
+
         /**
          * Global init, doing the following initialization:
          * - static tables initialization
@@ -363,6 +393,7 @@ class FaustWasm2ScriptProcessorPoly {
                 sp.factory.init(sp.dsp_voices[i], sampleRate);
             }
         }
+
         /**
          * Init instance state.
          *
@@ -373,6 +404,7 @@ class FaustWasm2ScriptProcessorPoly {
                 sp.factory.instanceInit(sp.dsp_voices[i], sampleRate);
             }
         }
+
         /**
          * Init instance constant state.
          *
@@ -383,18 +415,21 @@ class FaustWasm2ScriptProcessorPoly {
                 sp.factory.instanceConstants(sp.dsp_voices[i], sampleRate);
             }
         }
+
         /* Init default control parameters values. */
         sp.instanceResetUserInterface = () => {
             for (let i = 0; i < polyphony; i++) {
                 sp.factory.instanceResetUserInterface(sp.dsp_voices[i]);
             }
         }
+
         /* Init instance state (delay lines...).*/
         sp.instanceClear = () => {
             for (let i = 0; i < polyphony; i++) {
                 sp.factory.instanceClear(sp.dsp_voices[i]);
             }
         }
+
         /**
          * Trigger the Meta handler with instance specific calls to 'declare' (key, value) metadata.
          *
@@ -405,6 +440,7 @@ class FaustWasm2ScriptProcessorPoly {
                 this.dspProps.meta.forEach(meta => handler.declare(Object.keys(meta)[0], Object.values(meta)[0]));
             }
         }
+
         /**
          * Setup a control output handler with a function of type (path, value)
          * to be used on each generated output value. This handler will be called
@@ -417,6 +453,7 @@ class FaustWasm2ScriptProcessorPoly {
          * Get the current output handler.
          */
         sp.getOutputParamHandler = () => sp.output_handler;
+
         /**
          * Instantiates a new polyphonic voice.
          *
@@ -428,16 +465,17 @@ class FaustWasm2ScriptProcessorPoly {
             const voice = sp.getFreeVoice();
             this.log("keyOn voice " + voice);
             for (let i = 0; i < sp.fFreqLabel.length; i++) {
-                sp.factory.setParamValue(sp.dsp_voices[voice], sp.fFreqLabel[i], sp.midiToFreq(pitch));
+                sp.factory.setParamValue(sp.dsp_voices[voice], sp.fFreqLabel[i], sp.fKeyFun(pitch));
             }
             for (let i = 0; i < sp.fGateLabel.length; i++) {
                 sp.factory.setParamValue(sp.dsp_voices[voice], sp.fGateLabel[i], 1.0);
             }
             for (let i = 0; i < sp.fGainLabel.length; i++) {
-                sp.factory.setParamValue(sp.dsp_voices[voice], sp.fGainLabel[i], velocity / 127);
+                sp.factory.setParamValue(sp.dsp_voices[voice], sp.fGainLabel[i], sp.fVelFun(velocity));
             }
             sp.dsp_voices_state[voice] = pitch;
         }
+
         /**
          * De-instantiates a polyphonic voice.
          *
@@ -458,6 +496,7 @@ class FaustWasm2ScriptProcessorPoly {
                 this.log("Playing voice not found...");
             }
         }
+
         /**
          * Gently terminates all the active voices.
          */
@@ -469,6 +508,7 @@ class FaustWasm2ScriptProcessorPoly {
                 sp.dsp_voices_state[i] = sp.kReleaseVoice;
             }
         }
+
         /**
          * Control change
          *
@@ -479,17 +519,18 @@ class FaustWasm2ScriptProcessorPoly {
         sp.ctrlChange = (channel, ctrl, value) => {
             if (ctrl === 123 || ctrl === 120) sp.allNotesOff();
             if (!sp.fCtrlLabel[ctrl].length) return;
-             sp.fCtrlLabel[ctrl].forEach(ctrl => {
+            sp.fCtrlLabel[ctrl].forEach(ctrl => {
                 const path = ctrl.path;
                 sp.setParamValue(path, sp.remap(value, 0, 127, ctrl.min, ctrl.max));
                 if (sp.output_handler) sp.output_handler(path, sp.getParamValue(path));
             })
         }
+
         /**
          * PitchWeel
          *
          * @param {number} channel - the MIDI channel (0..15, not used for now)
-         * @param {number} value - the MIDI controller value (-1..1)
+         * @param {number} value - the MIDI controller value (0..16383)
          */
         sp.pitchWheel = (channel, wheel) => {
             sp.fPitchwheelLabel.forEach(pw => {
@@ -508,6 +549,7 @@ class FaustWasm2ScriptProcessorPoly {
             }
             return false;
         }
+
         /**
          * Set control value.
          *
@@ -523,10 +565,11 @@ class FaustWasm2ScriptProcessorPoly {
                 }
             }
         }
+
         /**
          * Get control value.
          *
-         * @param {string} path - the path to the wanted control (retrieved using 'controls' method)
+         * @param {string} path - the path to the wanted control (retrieved using 'getParams' method)
          *
          * @return {number} the float value
          */
@@ -537,14 +580,16 @@ class FaustWasm2ScriptProcessorPoly {
                 return sp.factory.getParamValue(sp.dsp_voices[0], sp.pathTable[path]);
             }
         }
+
         /**
          * Get the table of all input parameters paths.
          *
          * @return {object} the table of all input parameter paths.
          */
         sp.getParams = () => sp.inputs_items;
+
         /**
-         * Get DSP JSON description with its UI and metadata
+         * Get DSP JSON description with its UI and metadata.
          *
          * @return {string} DSP JSON description
          */
@@ -553,14 +598,18 @@ class FaustWasm2ScriptProcessorPoly {
             const e = sp.effect_json_object;
             const r = { ...o };
             if (e) {
-                r.ui = [{ type: "tgroup", label: "Sequencer", items: [
-                    { type: "vgroup", label: "Instrument", items: o.ui },
-                    { type: "vgroup", label: "Effect", items: e.ui }
-                ] }];
+                r.ui = [{
+                    type: "tgroup", label: "Sequencer", items: [
+                        { type: "vgroup", label: "Instrument", items: o.ui },
+                        { type: "vgroup", label: "Effect", items: e.ui }
+                    ]
+                }];
             } else {
-                r.ui = [{ type: "tgroup", label: "Polyphonic", items: [
-                    { type: "vgroup", label: "Voices", items: o.ui }
-                ] }];
+                r.ui = [{
+                    type: "tgroup", label: "Polyphonic", items: [
+                        { type: "vgroup", label: "Voices", items: o.ui }
+                    ]
+                }];
             }
             return JSON.stringify(r);
         };
@@ -575,11 +624,12 @@ class FaustWasm2ScriptProcessorPoly {
          * Get the current compute handler.
          */
         sp.getComputeHandler = () => sp.compute_handler;
-    
+
         // Init resulting DSP
         sp.initAux();
         return sp;
     }
+
     createMemory(bufferSize, polyphony) {
         // Memory allocator
         const ptrSize = 4;
@@ -599,6 +649,7 @@ class FaustWasm2ScriptProcessorPoly {
         memorySize = Math.max(2, memorySize); // As least 2
         return new WebAssembly.Memory({ initial: memorySize, maximum: memorySize });
     }
+
     /**
      * Create a ScriptProcessorNode Web Audio object
      * by loading and compiling the Faust wasm file
@@ -620,7 +671,7 @@ class FaustWasm2ScriptProcessorPoly {
                 memoryBase: 0,
                 tableBase: 0,
                 _abs: Math.abs,
-                
+
                 // Float version
                 _acosf: Math.acos,
                 _asinf: Math.asin,
@@ -647,7 +698,10 @@ class FaustWasm2ScriptProcessorPoly {
                 _coshf: Math.cosh,
                 _sinhf: Math.sinh,
                 _tanhf: Math.tanh,
-                
+                _isnanf: Number.isNaN,
+                _isinff: function (x) { return !isFinite(x); },
+                _copysignf: function (x, y) { return Math.sign(x) === Math.sign(y) ? x : -x; },
+
                 // Double version
                 _acos: Math.acos,
                 _asin: Math.asin,
@@ -674,7 +728,10 @@ class FaustWasm2ScriptProcessorPoly {
                 _cosh: Math.cosh,
                 _sinh: Math.sinh,
                 _tanh: Math.tanh,
-                
+                _isnan: Number.isNaN,
+                _isinf: function (x) { return !isFinite(x); },
+                _copysign: function (x, y) { return Math.sign(x) === Math.sign(y) ? x : -x; },
+
                 table: new WebAssembly.Table({ initial: 0, element: "anyfunc" })
             }
         };

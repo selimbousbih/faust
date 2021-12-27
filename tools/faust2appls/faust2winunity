@@ -17,6 +17,8 @@
 . faustpath
 . faustoptflags
 
+CXXFLAGS+=" $MYGCCFLAGS"  # So that additional CXXFLAGS can be used
+
 NVOICES=-1
 
 #-----------------------------------------------------------------------
@@ -45,7 +47,7 @@ do
         NVOICES=$1
     elif [ ${p:0:1} = "-" ]; then
         OPTIONS="$OPTIONS $p"
-    elif [[ -f "$p" ]]; then
+    elif [[ -f "$p" ]] && [ ${p: -4} == ".dsp" ]; then
         FILES="$FILES $p"
     else
         OPTIONS="$OPTIONS $p"
@@ -63,10 +65,9 @@ fi
 #-----------------------------------------------------------------------
 # Compiler settings
 
-CXXFLAGS="-O3 -mfpmath=sse -msse -ffast-math -Wl,--enable-auto-import"
+CXXFLAGS+=" -Wl,--enable-auto-import"
 LIB="-shared"
 EXT=".dll"
-
 
 #-----------------------------------------------------------------------
 # compiles the *.dsp files
@@ -87,7 +88,7 @@ for p in $FILES; do
     mkdir "$TMP"
 
     # compile faust to c++
-    faust -i -a $FAUSTARCH/unity/unityplugin.cpp $OPTIONS "$SRCDIR/$f" -o "$TMP/$NAME.cpp" || (echo "$f : Faust to C++ compilation failed in faust2unitywin"; exit 1)
+    faust -uim -i -a $FAUSTARCH/unity/unityplugin.cpp $OPTIONS "$SRCDIR/$f" -o "$TMP/$NAME.cpp" || (echo "$f : Faust to C++ compilation failed in faust2unitywin"; exit 1)
 
     for BIT in $BITS; do
         #-----------------------------------------------------------------------

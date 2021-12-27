@@ -28,13 +28,20 @@
 #include <vector>
 #include <map>
 #include <string>
+#include <stdio.h>
 
 #include "faust/gui/UI.h"
 #include "faust/gui/PathBuilder.h"
 
 /*******************************************************************************
- * MapUI : Faust User Interface
- * This class creates a map of complete hierarchical path and zones for each UI items.
+ * MapUI : Faust User Interface.
+ *
+ * This class creates:
+ * - a map of 'labels' and zones for each UI item.
+ * - a map of complete hierarchical 'paths' and zones for each UI item.
+ *
+ * Simple 'labels' and complete 'paths' (to fully discriminate between possible same
+ * 'labels' at different location in the UI hierachy) can be used to access a given parameter.
  ******************************************************************************/
 
 class MapUI : public UI, public PathBuilder
@@ -50,8 +57,8 @@ class MapUI : public UI, public PathBuilder
     
     public:
         
-        MapUI() {};
-        virtual ~MapUI() {};
+        MapUI() {}
+        virtual ~MapUI() {}
         
         // -- widget's layouts
         void openTabBox(const char* label)
@@ -114,16 +121,18 @@ class MapUI : public UI, public PathBuilder
         virtual void addSoundfile(const char* label, const char* filename, Soundfile** sf_zone) {}
         
         // -- metadata declarations
-        void declare(FAUSTFLOAT* zone, const char* key, const char* val)
+        virtual void declare(FAUSTFLOAT* zone, const char* key, const char* val)
         {}
         
-        // set/get
+        // setParamValue/getParamValue
         void setParamValue(const std::string& path, FAUSTFLOAT value)
         {
             if (fPathZoneMap.find(path) != fPathZoneMap.end()) {
                 *fPathZoneMap[path] = value;
             } else if (fLabelZoneMap.find(path) != fLabelZoneMap.end()) {
                 *fLabelZoneMap[path] = value;
+            } else {
+                fprintf(stderr, "ERROR : setParamValue '%s' not found\n", path.c_str());
             }
         }
         
@@ -134,7 +143,8 @@ class MapUI : public UI, public PathBuilder
             } else if (fLabelZoneMap.find(path) != fLabelZoneMap.end()) {
                 return *fLabelZoneMap[path];
             } else {
-                return FAUSTFLOAT(0);
+                fprintf(stderr, "ERROR : getParamValue '%s' not found\n", path.c_str());
+                return 0;
             }
         }
     
@@ -144,30 +154,63 @@ class MapUI : public UI, public PathBuilder
         int getParamsCount() { return int(fPathZoneMap.size()); }
         
         std::string getParamAddress(int index)
-        { 
-            std::map<std::string, FAUSTFLOAT*>::iterator it = fPathZoneMap.begin();
-            while (index-- > 0 && it++ != fPathZoneMap.end()) {}
-            return (*it).first;
+        {
+            if (index < 0 || index > int(fPathZoneMap.size())) {
+                return "";
+            } else {
+                auto it = fPathZoneMap.begin();
+                while (index-- > 0 && it++ != fPathZoneMap.end()) {}
+                return it->first;
+            }
+        }
+        
+        const char* getParamAddress1(int index)
+        {
+            if (index < 0 || index > int(fPathZoneMap.size())) {
+                return nullptr;
+            } else {
+                auto it = fPathZoneMap.begin();
+                while (index-- > 0 && it++ != fPathZoneMap.end()) {}
+                return it->first.c_str();
+            }
         }
     
         std::string getParamAddress(FAUSTFLOAT* zone)
         {
-            std::map<std::string, FAUSTFLOAT*>::iterator it = fPathZoneMap.begin();
-            do {
-                if ((*it).second == zone) return (*it).first;
+            for (const auto& it : fPathZoneMap) {
+                if (it.second == zone) return it.first;
             }
-            while (it++ != fPathZoneMap.end());
             return "";
         }
     
-        static bool endsWith(std::string const& str, std::string const& end)
+        FAUSTFLOAT* getParamZone(const std::string& str)
+        {
+            if (fPathZoneMap.find(str) != fPathZoneMap.end()) {
+                return fPathZoneMap[str];
+            } else if (fLabelZoneMap.find(str) != fLabelZoneMap.end()) {
+                return fLabelZoneMap[str];
+            }
+            return nullptr;
+        }
+    
+        FAUSTFLOAT* getParamZone(int index)
+        {
+            if (index < 0 || index > int(fPathZoneMap.size())) {
+                return nullptr;
+            } else {
+                auto it = fPathZoneMap.begin();
+                while (index-- > 0 && it++ != fPathZoneMap.end()) {}
+                return it->second;
+            }
+        }
+    
+        static bool endsWith(const std::string& str, const std::string& end)
         {
             size_t l1 = str.length();
             size_t l2 = end.length();
             return (l1 >= l2) && (0 == str.compare(l1 - l2, l2, end));
         }
 };
-
 
 #endif // FAUST_MAPUI_H
 /**************************  END  MapUI.h **************************/

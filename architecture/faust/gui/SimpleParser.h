@@ -35,8 +35,10 @@
 #include <vector>
 #include <map>
 #include <string>
+#include <cmath>
 #include <fstream>
-#include <iostream>
+#include <sstream>
+#include <stdio.h> // We use the lighter fprintf code
 #include <ctype.h>
 
 #ifndef _WIN32
@@ -50,12 +52,12 @@ struct itemInfo {
     std::string address;
     int index;
     double init;
-    double min;
-    double max;
+    double fmin;
+    double fmax;
     double step;
     std::vector<std::pair<std::string, std::string> > meta;
     
-    itemInfo():index(0), init(0.), min(0.), max(0.), step(0.)
+    itemInfo():index(0), init(0.), fmin(0.), fmax(0.), step(0.)
     {}
 };
 
@@ -66,7 +68,7 @@ struct itemInfo {
 // Report a parsing error
 static bool parseError(const char*& p, const char* errmsg)
 {
-    std::cerr << "Parse error : " << errmsg << " here : " << p << std::endl;
+    fprintf(stderr, "Parse error : %s here : %s\n", errmsg, p);
     return true;
 }
 
@@ -128,32 +130,40 @@ static bool parseWord(const char*& p, const char* w)
 }
 
 /**
- * @brief parseDouble : parse number [s]dddd[.dddd] and store the result in x
+ * @brief parseDouble : parse number [s]dddd[.dddd] or [s]d[.dddd][E|e][s][dddd] and store the result in x
  * @param p the string to parse, then the remaining string
  * @param x the float number found if any
  * @return true if a float number was found at the begin of p
  */
 static bool parseDouble(const char*& p, double& x)
 {
-    double sign = +1.0;    // sign of the number
+    double sign = 1.0;     // sign of the number
     double ipart = 0;      // integral part of the number
     double dpart = 0;      // decimal part of the number before division
     double dcoef = 1.0;    // division factor for the decimal part
+    double expsign = 1.0;  // sign of the E|e part
+    double expcoef = 0.0;  // multiplication factor of E|e part
     
     bool valid = false;    // true if the number contains at least one digit
-    skipBlank(p);
-    const char* saved = p; // to restore position if we fail
     
+    skipBlank(p);
+    const char* saved = p;  // to restore position if we fail
+    
+    // Sign
     if (parseChar(p, '+')) {
         sign = 1.0;
     } else if (parseChar(p, '-')) {
         sign = -1.0;
     }
+    
+    // Integral part
     while (isdigit(*p)) {
         valid = true;
         ipart = ipart*10 + (*p - '0');
         p++;
     }
+    
+    // Possible decimal part
     if (parseChar(p, '.')) {
         while (isdigit(*p)) {
             valid = true;
@@ -162,12 +172,25 @@ static bool parseDouble(const char*& p, double& x)
             p++;
         }
     }
+    
+    // Possible E|e part
+    if (parseChar(p, 'E') || parseChar(p, 'e')) {
+        if (parseChar(p, '+')) {
+            expsign = 1.0;
+        } else if (parseChar(p, '-')) {
+            expsign = -1.0;
+        }
+        while (isdigit(*p)) {
+            expcoef = expcoef*10 + (*p - '0');
+            p++;
+        }
+    }
+    
     if (valid)  {
-        x = sign*(ipart + dpart/dcoef);
+        x = (sign*(ipart + dpart/dcoef)) * std::pow(10.0, expcoef*expsign);
     } else {
         p = saved;
     }
- 
     return valid;
 }
 
@@ -246,7 +269,6 @@ static bool parseMenuItem(const char*& p, std::string& name, double& value)
 static bool parseMenuItem2(const char*& p, std::string& name)
 {
     const char* saved = p;  // to restore position if we fail
-    
     // single quoted
     if (parseSQString(p, name)) {
         return true;
@@ -314,7 +336,7 @@ static bool parseMenuList2(const char*& p, std::vector<std::string>& names, bool
     }
     
 error:
-    if (debug) { std::cerr << "parseMenuList2 : (" << saved << ") is not a valid list !\n"; }
+    if (debug) { fprintf(stderr, "parseMenuList2 : (%s) is not a valid list !\n", p); }
     p = saved;
     return false;
 }
@@ -343,6 +365,7 @@ static bool parseList(const char*& p, std::vector<std::string>& items)
 
 static bool parseMetaData(const char*& p, std::map<std::string, std::string>& metadatas)
 {
+    const char* saved = p; // to restore position if we fail
     std::string metaKey, metaValue;
     if (parseChar(p, ':') && parseChar(p, '[')) {
         do { 
@@ -352,12 +375,14 @@ static bool parseMetaData(const char*& p, std::map<std::string, std::string>& me
         } while (tryChar(p, ','));
         return parseChar(p, ']');
     } else {
+        p = saved;
         return false;
     }
 }
 
 static bool parseItemMetaData(const char*& p, std::vector<std::pair<std::string, std::string> >& metadatas)
 {
+    const char* saved = p; // to restore position if we fail
     std::string metaKey, metaValue;
     if (parseChar(p, ':') && parseChar(p, '[')) {
         do { 
@@ -367,6 +392,7 @@ static bool parseItemMetaData(const char*& p, std::vector<std::pair<std::string,
         } while (tryChar(p, ','));
         return parseChar(p, ']');
     } else {
+        p = saved;
         return false;
     }
 }
@@ -378,6 +404,7 @@ static bool parseItemMetaData(const char*& p, std::vector<std::pair<std::string,
 /// ---------------------------------------------------------------------
 static bool parseGlobalMetaData(const char*& p, std::string& key, std::string& value, double& dbl, std::map<std::string, std::string>& metadatas, std::vector<std::string>& items)
 {
+    const char* saved = p; // to restore position if we fail
     if (parseDQString(p, key)) {
         if (key == "meta") {
             return parseMetaData(p, metadatas);
@@ -385,6 +412,7 @@ static bool parseGlobalMetaData(const char*& p, std::string& key, std::string& v
             return parseChar(p, ':') && (parseDQString(p, value) || parseList(p, items) || parseDouble(p, dbl));
         }
     } else {
+        p = saved;
         return false;
     }
 }
@@ -396,6 +424,7 @@ static bool parseGlobalMetaData(const char*& p, std::string& key, std::string& v
 /// ---------------------------------------------------------------------
 static bool parseUI(const char*& p, std::vector<itemInfo>& uiItems, int& numItems)
 {
+    const char* saved = p; // to restore position if we fail
     if (parseChar(p, '{')) {
    
         std::string label;
@@ -435,7 +464,7 @@ static bool parseUI(const char*& p, std::vector<itemInfo>& uiItems, int& numItem
                 
                 else if (label == "index") {
                     if (parseChar(p, ':') && parseDouble(p, dbl)) {
-                        uiItems[numItems].index = dbl;
+                        uiItems[numItems].index = int(dbl);
                     }
                 }
                 
@@ -453,17 +482,17 @@ static bool parseUI(const char*& p, std::vector<itemInfo>& uiItems, int& numItem
                 
                 else if (label == "min") {
                     if (parseChar(p, ':') && parseDouble(p, dbl)) {
-                        uiItems[numItems].min = dbl;
+                        uiItems[numItems].fmin = dbl;
                     }
                 }
                 
                 else if (label == "max") {
                     if (parseChar(p, ':') && parseDouble(p, dbl)) {
-                        uiItems[numItems].max = dbl;
+                        uiItems[numItems].fmax = dbl;
                     }
                 }
                 
-                else if (label == "step"){
+                else if (label == "step") {
                     if (parseChar(p, ':') && parseDouble(p, dbl)) {
                         uiItems[numItems].step = dbl;
                     }
@@ -473,6 +502,7 @@ static bool parseUI(const char*& p, std::vector<itemInfo>& uiItems, int& numItem
                     if (parseChar(p, ':') && parseChar(p, '[')) {
                         do {
                             if (!parseUI(p, uiItems, numItems)) {
+                                p = saved;
                                 return false;
                             }
                         } while (tryChar(p, ','));
@@ -485,11 +515,12 @@ static bool parseUI(const char*& p, std::vector<itemInfo>& uiItems, int& numItem
                     }
                 }
             } else {
+                p = saved;
                 return false;
             }
             
         } while (tryChar(p, ','));
-        
+    
         return parseChar(p, '}');
     } else {
         return true; // "items": [] is valid

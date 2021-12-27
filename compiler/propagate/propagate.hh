@@ -24,24 +24,32 @@
 
 #include <vector>
 #include "boxes.hh"
-#include "signals.hh"
 
-////////////////////////////////////////////////////////////////////////
 /**
- * boxPropagateSig : box listOfSignal-> listOfSignal'
- *
- * Propagate a list of signals into a block-diagram. Fo example to
- * compute the list of outputs of a block-diagram with n inputs, do :
- * Tree lsig =  boxPropagateSig(box, makeSigInputList(n));
+ * makeSigInputList : create a list of input signals
  */
-///////////////////////////////////////////////////////////////////////
-
-using namespace std;
-
-typedef vector<Tree> siglist;
 
 siglist makeSigInputList(int n);
 
+/**
+ * boxPropagateSig : path box listOfSignal-> listOfSignal'
+ *
+ * Propagate a list of signals into a block-diagram. For example to
+ * compute the list of outputs of a block-diagram with n inputs, do:
+ * Tree lsig = boxPropagateSig(box, makeSigInputList(n));
+ */
+
 Tree boxPropagateSig(Tree path, Tree box, const siglist& lsig);
+
+/**
+ * Propagate a list of signals into a block diagram. Do memoization.
+ *
+ * @param slotenv environment associating slots and signals
+ * @param path user interface group path
+ * @param box the block diagram
+ * @param lsig the list of input signals to propagate
+ * @return the resulting list of output signals
+ */
+siglist propagate(Tree slotenv, Tree path, Tree box, const siglist& lsig);
 
 #endif

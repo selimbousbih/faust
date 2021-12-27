@@ -25,9 +25,9 @@
 #include "sigtype.hh"
 #include "sigtyperules.hh"
 
-// imprime le type d'un signal en clair
+// Print the signal type
 #if 0
-void printSigType (Tree tp)
+void printSigType(Tree tp)
 {
 	Tree t0;
 	int n, v, c;
@@ -45,7 +45,7 @@ void printSigType (Tree tp)
 	}
 }
 
-void printSigTypeList (Tree l)
+void printSigTypeList(Tree l)
 {
 	char sep = '(';
 
@@ -66,9 +66,9 @@ void printSigType(int n, int v, int c)
     putchar("CI X"[c]);
 }
 
-const char* binopname[] = {"+", "-", "*", "/", "%", "<<", ">>", ">", "<", ">=", "<=", "==", "!=", "&", "|", "^"};
+static const char* binopname[] = {"+", "-", "*", "/", "%", "<<", ">>", ">", "<", ">=", "<=", "==", "!=", "&", "|", "^"};
 
-int binopprec[] = {2, 2, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+static int binopprec[] = {2, 2, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 
 void printSignal(Tree sig, FILE* out, int prec)
 {
@@ -121,7 +121,7 @@ void printSignal(Tree sig, FILE* out, int prec)
         fputs(",", out);
         printSignal(y, out, 0);
         fputs(")", out);
-    } else if (isSigFixDelay(sig, x, y)) {
+    } else if (isSigDelay(sig, x, y)) {
         if (prec > 4) fputs("(", out);
         printSignal(x, out, 4);
         fputs("@", out);

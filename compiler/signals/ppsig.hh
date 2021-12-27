@@ -23,8 +23,7 @@
 #define _PPSIG_H
 
 /**********************************************************************
-            - ppsig.h : pretty print signals expressions (projet FAUST) -
-
+        - ppsig.h : pretty print signals expressions (projet FAUST) -
 
         Historique :
         -----------
@@ -39,10 +38,8 @@
 
 using namespace std;
 
-// void 		fppbox (FILE* fout, Tree box, int priority=0);
-
-// box pretty printer.
-// usage : out << boxpp(aBoxExp);
+// signal pretty printer.
+// usage : out << ppsig(aSignalExp);
 
 class ppsig : public virtual Garbageable {
     Tree sig;
@@ -66,12 +63,12 @@ class ppsig : public virtual Garbageable {
     ostream& printff(ostream& fout, Tree ff, Tree largs) const;
     ostream& printrec(ostream& fout, Tree var, Tree lexp, bool hide) const;
     ostream& printrec(ostream& fout, Tree lexp, bool hide) const;
-    ostream& printextended(ostream& fout, Tree sig) const;
+    ostream& printextended(ostream& fout, Tree sig1) const;
     ostream& printui(ostream& fout, const string& funame, Tree label) const;
     ostream& printui(ostream& fout, const string& funame, Tree label, Tree lo, Tree hi, Tree step) const;
     ostream& printui(ostream& fout, const string& funame, Tree label, Tree cur, Tree lo, Tree hi, Tree step) const;
     ostream& printlabel(ostream& fout, Tree pathname) const;
-    ostream& printFixDelay(ostream& fout, Tree exp, Tree delay) const;
+    ostream& printDelay(ostream& fout, Tree exp, Tree delay) const;
 };
 
 inline ostream& operator<<(ostream& file, const ppsig& pp)

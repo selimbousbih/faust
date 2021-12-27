@@ -33,10 +33,12 @@
 #include <vector>
 
 #include "faust/dsp/dsp.h"
+#include "faust/dsp/libfaust-signal.h"
+#include "faust/dsp/libfaust-box.h"
 #include "faust/gui/meta.h"
 
 /*!
- \addtogroup llvmcpp C++ interface for compiling Faust code. Note that the API is not thread safe : use 'startMTDSPFactories/stopMTDSPFactories' to use it in a multi-thread context.
+ \addtogroup llvmcpp C++ interface for compiling Faust code with the LLVM backend. Note that the API is not thread safe: use 'startMTDSPFactories/stopMTDSPFactories' to use it in a multi-thread context.
  @{
  */
  
@@ -199,6 +201,52 @@ llvm_dsp_factory* createDSPFactoryFromString(const std::string& name_app,
                                              const std::string& target, 
                                              std::string& error_msg,
                                              int opt_level = -1);
+
+/**
+ * Create a Faust DSP factory from a vector of output signals.
+ * It has to be used with the signal API defined in libfaust-signal.h.
+ *
+ * @param name_app - the name of the Faust program
+ * @param signals - the vector of output signals
+ * @param argc - the number of parameters in argv array
+ * @param argv - the array of parameters
+ * @param target - the LLVM machine target: like 'i386-apple-macosx10.6.0:opteron',
+ *                 using an empty string takes the current machine settings,
+ *                 and i386-apple-macosx10.6.0:generic kind of syntax for a generic processor
+ * @param error_msg - the error string to be filled
+ * @param opt_level - LLVM IR to IR optimization level (from -1 to 4, -1 means 'maximum possible value'
+ * since the maximum value may change with new LLVM versions)
+ *
+ * @return a DSP factory on success, otherwise a null pointer.
+ */
+llvm_dsp_factory* createDSPFactoryFromSignals(const std::string& name_app, tvec signals_vec,
+                                              int argc, const char* argv[],
+                                              const std::string& target,
+                                              std::string& error_msg,
+                                              int opt_level = -1);
+
+/**
+ * Create a Faust DSP factory from a box expression.
+ * It has to be used with the box API defined in libfaust-box.h.
+ *
+ * @param name_app - the name of the Faust program
+ * @param box - the box expression
+ * @param argc - the number of parameters in argv array
+ * @param argv - the array of parameters
+ * @param target - the LLVM machine target: like 'i386-apple-macosx10.6.0:opteron',
+ *                 using an empty string takes the current machine settings,
+ *                 and i386-apple-macosx10.6.0:generic kind of syntax for a generic processor
+ * @param error_msg - the error string to be filled
+ * @param opt_level - LLVM IR to IR optimization level (from -1 to 4, -1 means 'maximum possible value'
+ * since the maximum value may change with new LLVM versions)
+ *
+ * @return a DSP factory on success, otherwise a null pointer.
+ */
+llvm_dsp_factory* createDSPFactoryFromBoxes(const std::string& name_app, Box box,
+                                            int argc, const char* argv[],
+                                            const std::string& target,
+                                            std::string& error_msg,
+                                            int opt_level = -1);
 
 /**
  * Delete a Faust DSP factory, that is decrements it's reference counter, possibly really deleting the internal pointer. 
@@ -419,7 +467,7 @@ llvm_dsp_factory* readDSPFactoryFromMachineFile(const std::string& machine_code_
 bool writeDSPFactoryToMachineFile(llvm_dsp_factory* factory, const std::string& machine_code_path, const std::string& target);
 
 /**
- * Write a Faust DSP factory into a object code file.
+ * Write a Faust DSP factory into an object code file.
  *
  * @param factory - the DSP factory
  * @param target - the LLVM machine target: like 'i386-apple-macosx10.6.0:opteron',
@@ -463,4 +511,4 @@ DEPRECATED(void deleteDSPInstance(llvm_dsp* dsp));
  */
 
 #endif
-/**************************  END  llvm-dsp.h **************************/
+/************************** END llvm-dsp.h **************************/

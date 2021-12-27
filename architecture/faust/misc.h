@@ -34,14 +34,6 @@
 
 #include "faust/gui/meta.h"
 
-using std::max;
-using std::min;
-
-struct XXXX_Meta : std::map<const char*, const char*>
-{
-    void declare(const char* key, const char* value) { (*this)[key] = value; }
-};
-
 struct MY_Meta : Meta, std::map<const char*, const char*>
 {
     void declare(const char* key, const char* value) { (*this)[key] = value; }
@@ -53,8 +45,7 @@ static int int2pow2(int x) { int r = 0; while ((1<<r) < x) r++; return r; }
 
 static long lopt(char* argv[], const char* name, long def)
 {
-    int i;
-    for (i = 0; argv[i]; i++) if (!strcmp(argv[i], name)) return std::atoi(argv[i+1]);
+    for (int i = 0; argv[i]; i++) if (!strcmp(argv[i], name)) return std::atoi(argv[i+1]);
     return def;
 }
 
@@ -70,8 +61,7 @@ static long lopt1(int argc, char* argv[], const char* longname, const char* shor
 
 static const char* lopts(char* argv[], const char* name, const char* def)
 {
-    int i;
-    for (i = 0; argv[i]; i++) if (!strcmp(argv[i], name)) return argv[i+1];
+    for (int i = 0; argv[i]; i++) if (!strcmp(argv[i], name)) return argv[i+1];
     return def;
 }
 
@@ -87,8 +77,7 @@ static const char* lopts1(int argc, char* argv[], const char* longname, const ch
 
 static bool isopt(char* argv[], const char* name)
 {
-    int i;
-    for (i = 0; argv[i]; i++) if (!strcmp(argv[i], name)) return true;
+    for (int i = 0; argv[i]; i++) if (!strcmp(argv[i], name)) return true;
     return false;
 }
 

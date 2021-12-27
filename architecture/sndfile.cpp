@@ -5,11 +5,10 @@
  each section for license and copyright information.
  *************************************************************************/
 
-/*******************BEGIN ARCHITECTURE SECTION (part 1/2)****************/
-
+/******************* BEGIN sndfile.cpp ****************/
 /************************************************************************
  FAUST Architecture File
- Copyright (C) 2003-2019 GRAME, Centre National de Creation Musicale
+ Copyright (C) 2003-2021 GRAME, Centre National de Creation Musicale
  ---------------------------------------------------------------------
  This Architecture section is free software; you can redistribute it
  and/or modify it under the terms of the GNU General Public License
@@ -32,6 +31,7 @@
  ************************************************************************
  ************************************************************************/
 
+#include <libgen.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -46,23 +46,12 @@
 #include <map>
 #include <iostream>
 
+#include "faust/dsp/dsp.h"
 #include "faust/gui/console.h"
 #include "faust/gui/FUI.h"
-#include "faust/dsp/dsp.h"
+#include "faust/gui/ControlSequenceUI.h"
 #include "faust/dsp/dsp-tools.h"
 #include "faust/misc.h"
-
-#ifndef FAUSTFLOAT
-#define FAUSTFLOAT float
-#endif  
-
-#define READ_SAMPLE sf_readf_float
-//#define READ_SAMPLE sf_readf_double
-
-#define WRITE_SAMPLE sf_writef_float
-//#define WRITE_SAMPLE sf_writef_float
-
-using namespace std;
 
 /******************************************************************************
  *******************************************************************************
@@ -84,9 +73,17 @@ using namespace std;
 
 /*******************BEGIN ARCHITECTURE SECTION (part 2/2)***************/
 
+#ifndef FAUSTFLOAT
+#define FAUSTFLOAT float
+#endif
 
-// loptrm : Scan command-line arguments and remove and return long int value when found
-long loptrm(int* argcP, char* argv[], const char* longname, const char* shortname, long def)
+typedef sf_count_t (* sample_read)(SNDFILE* sndfile, void* buffer, sf_count_t frames);
+typedef sf_count_t (* sample_write)(SNDFILE* sndfile, void* buffer, sf_count_t frames);
+
+using namespace std;
+
+// loptrm : scan command-line arguments and remove and return long int value when found
+static long loptrm(int* argcP, char* argv[], const char* longname, const char* shortname, long def)
 {
     int argc = *argcP;
     for (int i = 2; i < argc; i++) {
@@ -104,73 +101,191 @@ long loptrm(int* argcP, char* argv[], const char* longname, const char* shortnam
 
 mydsp DSP;
 
-#define kFrames 512
+std::list<GUI*> GUI::fGuiList;
+ztimedmap GUI::gTimedZoneMap;
 
-int main(int argc, char* argv[])
+#define kBufferSize  64
+#define kSampleRate  44100
+
+int main(int argc_aux, char* argv_aux[])
 {
-    SNDFILE* in_sf;
-    SNDFILE* out_sf;
-    SF_INFO in_info;
-    SF_INFO out_info;
-
-    unsigned int num_samples = loptrm(&argc, argv, "--continue", "-c", 0);
+    char name[256];
+    char rcfilename[256];
+    char* home = getenv("HOME");
+    snprintf(name, 256, "%s", basename(argv_aux[0]));
+    snprintf(rcfilename, 256, "%s/.%src", home, name);
+    string cfilename;
+    
+    int argc = 0;
+    char* argv[64];
+    for (int i = 0; i < argc_aux; i++) {
+        if (string(argv_aux[i]) == "-ct") {
+            cfilename = argv_aux[i+1];
+            i++;
+            continue;
+        }
+        argv[argc++] = argv_aux[i];
+    }
+    
+    // Recall state before handling commands
+    FUI finterface;
+    DSP.buildUserInterface(&finterface);
     
     CMDUI* interface = new CMDUI(argc, argv, true);
     DSP.buildUserInterface(interface);
-    interface->process_command(true);
     
-    // open input file
-    in_info.format = 0;
-    in_info.channels = 0;
-    in_sf = sf_open(interface->input_file(), SFM_READ, &in_info);
-    if (in_sf == NULL) {
-        fprintf(stderr, "*** Input file not found.\n");
-        sf_perror(in_sf);
-        exit(1);
+    interface->process_command(FILE_MODE);
+    interface->printhelp_command(FILE_MODE);
+    
+    sample_read reader;
+    sample_write writer;
+    if (sizeof(FAUSTFLOAT) == 4) {
+        reader = reinterpret_cast<sample_read>(sf_readf_float);
+        writer = reinterpret_cast<sample_write>(sf_writef_float);
+    } else {
+        reader = reinterpret_cast<sample_read>(sf_readf_double);
+        writer = reinterpret_cast<sample_write>(sf_writef_double);
     }
     
-    // open output file
-    out_info = in_info;
-    out_info.format = in_info.format;
-    out_info.channels = DSP.getNumOutputs();
-    out_sf = sf_open(interface->output_file(), SFM_WRITE, &out_info);
-    if (out_sf == NULL) {
-        fprintf(stderr, "*** Cannot write output file.\n");
-        sf_perror(out_sf);
-        exit(1);
+    bool is_rc = loptrm(&argc, argv, "--rcfile", "-rc", 0);
+    
+    int buffer_size = loptrm(&argc, argv, "--buffer-size", "-bs", kBufferSize);
+    
+    if (FILE_MODE == INPUT_OUTPUT_FILE) {
+        
+        int num_samples = loptrm(&argc, argv, "--continue", "-c", 0);
+        
+        SF_INFO in_info;
+        memset(&in_info, 0, sizeof(in_info));
+        SNDFILE* in_sf = sf_open(interface->input_file(), SFM_READ, &in_info);
+        if (!in_sf) {
+            cerr << "ERROR : input file not found" << endl;
+            sf_perror(in_sf);
+            exit(1);
+        }
+        
+        SF_INFO out_info = in_info;
+        out_info.format = in_info.format;
+        out_info.channels = DSP.getNumOutputs();
+        SNDFILE* out_sf = sf_open(interface->output_file(), SFM_WRITE, &out_info);
+        if (!out_sf) {
+            cerr << "ERROR : cannot write output file" << endl;
+            sf_perror(out_sf);
+            exit(1);
+        }
+        
+        // Handling of the file containing sequence of time-stamped OSC messages
+        ControlSequenceUI sequenceUI(OSCSequenceReader::read(cfilename, in_info.samplerate));
+        DSP.buildUserInterface(&sequenceUI);
+        
+        // Init DSP with SR
+        DSP.init(in_info.samplerate);
+        
+        // Possibly restore saved state
+        if (is_rc) {
+            finterface.recallState(rcfilename);
+        }
+        
+        // Modify the UI values according to the command line options, after init
+        interface->process_init();
+        
+        // Create deinterleaver and interleaver
+        Deinterleaver dilv(buffer_size, in_info.channels, DSP.getNumInputs());
+        Interleaver ilv(buffer_size, DSP.getNumOutputs(), DSP.getNumOutputs());
+        
+        // Process all samples
+        int nbf;
+        uint64_t cur_frame = 0;
+        do {
+            // Read samples
+            nbf = reader(in_sf, dilv.input(), buffer_size);
+            dilv.deinterleave();
+            // Update controllers
+            sequenceUI.process(cur_frame, cur_frame + nbf);
+            cur_frame += nbf;
+            // Compute DSP
+            DSP.compute(nbf, dilv.outputs(), ilv.inputs());
+            // Write samples
+            ilv.interleave();
+            writer(out_sf, ilv.output(), nbf);
+        } while (nbf == buffer_size);
+        
+        sf_close(in_sf);
+        
+        // Compute tail, if any
+        if (num_samples > 0) {
+            FAUSTFLOAT* input = (FAUSTFLOAT*)calloc(num_samples * DSP.getNumInputs(), sizeof(FAUSTFLOAT));
+            FAUSTFLOAT* inputs[1] = { input };
+            Interleaver ilv(num_samples, DSP.getNumOutputs(), DSP.getNumOutputs());
+            DSP.compute(num_samples, inputs, ilv.inputs());
+            ilv.interleave();
+            writer(out_sf, ilv.output(), num_samples);
+        }
+        
+        sf_close(out_sf);
+        
+        // Possibly save state
+        if (is_rc) {
+            finterface.saveState(rcfilename);
+        }
+        
+    } else {
+        
+        int sample_rate = loptrm(&argc, argv, "--sample-rate", "-sr", kSampleRate);
+        
+        // Handling of the file containing sequence of time-stamped OSC messages
+        ControlSequenceUI sequenceUI(OSCSequenceReader::read(cfilename, sample_rate));
+        uint64_t begin, end;
+        sequenceUI.getRange(begin, end);
+        DSP.buildUserInterface(&sequenceUI);
+        
+        int num_samples = loptrm(&argc, argv, "--samples", "-s", ((end > 0) ? (end + kSampleRate) : kSampleRate * 5));
+        int bit_depth = loptrm(&argc, argv, "--bith-depth (16|24|32)", "-bd", 16);
+        int bd = (bit_depth == 16) ? SF_FORMAT_PCM_16 : ((bit_depth == 24) ? SF_FORMAT_PCM_24 : SF_FORMAT_PCM_32);
+        
+        SF_INFO out_info = { num_samples, sample_rate, DSP.getNumOutputs(), SF_FORMAT_WAV|bd|SF_ENDIAN_LITTLE, 0, 0};
+        SNDFILE* out_sf = sf_open(interface->input_file(), SFM_WRITE, &out_info);
+        if (!out_sf) {
+            cerr << "ERROR : cannot write output file" << endl;
+            sf_perror(out_sf);
+            exit(1);
+        }
+        
+        // Init DSP with SR
+        DSP.init(sample_rate);
+        
+        // Possibly restore saved state
+        if (is_rc) {
+            finterface.recallState(rcfilename);
+        }
+        
+        // Modify the UI values according to the command line options, after init
+        interface->process_init();
+        
+        // Create interleaver
+        Interleaver ilv(buffer_size, DSP.getNumOutputs(), DSP.getNumOutputs());
+        
+        // Process all samples
+        uint64_t cur_frame = 0;
+        do {
+            int nbf = std::min(int(num_samples - cur_frame), int(buffer_size));
+            // Update controllers
+            sequenceUI.process(cur_frame, cur_frame + nbf);
+            // Compute DSP
+            DSP.compute(nbf, nullptr, ilv.inputs());
+            // Write samples
+            ilv.interleave();
+            writer(out_sf, ilv.output(), nbf);
+            cur_frame += nbf;
+        } while (cur_frame < num_samples);
+        
+        sf_close(out_sf);
+        
+        // Possibly save state
+        if (is_rc) {
+            finterface.saveState(rcfilename);
+        }
     }
-    
-    // create separator and interleaver
-    Deinterleaver sep(kFrames, in_info.channels, DSP.getNumInputs());
-    Interleaver ilv(kFrames, DSP.getNumOutputs(), DSP.getNumOutputs());
-    
-    // init signal processor
-    DSP.init(in_info.samplerate);
-    interface->process_init();
-    
-    // process all samples
-    int nbf;
-    do {
-        nbf = READ_SAMPLE(in_sf, sep.input(), kFrames);
-        sep.deinterleave();
-        DSP.compute(nbf, sep.outputs(), ilv.inputs());
-        ilv.interleave();
-        WRITE_SAMPLE(out_sf, ilv.output(), nbf);
-    } while (nbf == kFrames);
-    
-    sf_close(in_sf);
-    
-    // compute tail, if any
-    if (num_samples > 0) {
-        FAUSTFLOAT* input = (FAUSTFLOAT*)calloc(num_samples * DSP.getNumInputs(), sizeof(FAUSTFLOAT));
-        FAUSTFLOAT* inputs[1] = { input };
-        Interleaver ailv(num_samples, DSP.getNumOutputs(), DSP.getNumOutputs());
-        DSP.compute(num_samples, inputs, ailv.inputs());
-        ailv.interleave();
-        WRITE_SAMPLE(out_sf, ailv.output(), num_samples);
-    }
-    
-    sf_close(out_sf);
 }
 
-/********************END ARCHITECTURE SECTION (part 2/2)****************/
+/******************* END sndfile.cpp ****************/

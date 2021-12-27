@@ -128,7 +128,7 @@ ostream& ppsig::printff(ostream& fout, Tree ff, Tree largs) const
     return fout;
 }
 
-ostream& ppsig::printFixDelay(ostream& fout, Tree exp, Tree delay) const
+ostream& ppsig::printDelay(ostream& fout, Tree exp, Tree delay) const
 {
     int d;
 
@@ -139,8 +139,6 @@ ostream& ppsig::printFixDelay(ostream& fout, Tree exp, Tree delay) const
     }
     return fout;
 }
-
-//	else if ( isSigFixDelay(sig, x, y) ) 			{ printinfix(fout, "@", 8, x, y); 	}
 
 ostream& ppsig::printrec(ostream& fout, Tree var, Tree lexp, bool hide) const
 {
@@ -160,14 +158,14 @@ ostream& ppsig::printrec(ostream& fout, Tree lexp, bool hide) const
     return fout;
 }
 
-ostream& ppsig::printextended(ostream& fout, Tree sig) const
+ostream& ppsig::printextended(ostream& fout, Tree sig1) const
 {
     string   sep = "";
     xtended* p   = (xtended*)getUserData(sig);
 
     fout << p->name() << '(';
-    for (int i = 0; i < sig->arity(); i++) {
-        fout << sep << ppsig(sig->branch(i), fEnv);
+    for (int i = 0; i < sig1->arity(); i++) {
+        fout << sep << ppsig(sig1->branch(i), fEnv);
         sep = ", ";
     }
     fout << ')';
@@ -212,9 +210,8 @@ ostream& ppsig::print(ostream& fout) const
     else if (isSigDelay1(sig, x)) {
         fout << ppsig(x, fEnv, 9) << "'";
     }
-    // else if ( isSigFixDelay(sig, x, y) ) 			{ printinfix(fout, "@", 8, x, y); 	}
-    else if (isSigFixDelay(sig, x, y)) {
-        printFixDelay(fout, x, y);
+    else if (isSigDelay(sig, x, y)) {
+        printDelay(fout, x, y);
     } else if (isSigPrefix(sig, x, y)) {
         printfun(fout, "prefix", x, y);
     } else if (isSigIota(sig, x)) {
@@ -249,8 +246,6 @@ ostream& ppsig::print(ostream& fout) const
 
     else if (isSigSelect2(sig, sel, x, y)) {
         printfun(fout, "select2", sel, x, y);
-    } else if (isSigSelect3(sig, sel, x, y, z)) {
-        printfun(fout, "select3", sel, x, y, z);
     }
 
     else if (isSigIntCast(sig, x)) {

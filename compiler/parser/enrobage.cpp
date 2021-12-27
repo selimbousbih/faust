@@ -1,7 +1,7 @@
 /************************************************************************
  ************************************************************************
  FAUST compiler
-    Copyright (C) 2003-2018 GRAME, Centre National de Creation Musicale
+ Copyright (C) 2003-2018 GRAME, Centre National de Creation Musicale
  ---------------------------------------------------------------------
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -59,7 +59,7 @@ static bool wordBoundaries(const string& str, string::size_type pos, string::siz
 
 /**
  * Replace every occurrence of oldstr by newstr inside str. str is modified
- * and returned as reference for convenience
+ * and returned as reference for convenience.
  */
 static string& replaceOccurrences(string& str, const string& oldstr, const string& newstr, bool force)
 {
@@ -86,7 +86,6 @@ static string& replaceOccurrences(string& str, const string& oldstr, const strin
  */
 static string& replaceClassName(string& str)
 {
-    string res;
     // "mydsp" can be replaced as the DSP class name, or appearing anywhere in the file
     replaceOccurrences(str, "mydsp", gGlobal->gClassName, true);
     // But "dsp" string has to be replaced in a strict manner
@@ -109,17 +108,20 @@ class myparser {
    public:
     
     myparser(const string& s) : str(s), N(s.length()), p(0) {}
+    
     bool skip()
     {
         while (p < N && isspace(str[p])) p++;
         return true;
     }
+    
     bool parse(const string& s)
     {
         bool f;
         if ((f = (p == str.find(s, p)))) p += s.length();
         return f;
     }
+    
     bool filename(string& fname)
     {
         size_t saved = p;
@@ -138,14 +140,19 @@ class myparser {
 };
 
 /**
- * True if string s match '#include <faust/fname>'
+ * True if string s match '#include <faust/fname>' or include("/usr/local/share/faust/julia/fname")
  */
 static bool isFaustInclude(const string& line, string& fname)
 {
     myparser P(line);
+    // C/C++ case
     if (P.skip() && P.parse("#include") && P.skip() && P.filename(fname)) {
         myparser Q(fname);
         return Q.parse("faust/");
+    // Julia case
+    } else if (P.skip() && P.parse("include(") && P.skip() && P.filename(fname)) {
+        myparser Q(fname);
+        return Q.parse("/usr/local/share/faust/julia");
     } else {
         return false;
     }
@@ -154,18 +161,16 @@ static bool isFaustInclude(const string& line, string& fname)
 /**
  * Inject file fname into dst ostream
  */
+
 static void inject(ostream& dst, const string& fname)
 {
     if (gGlobal->gAlreadyIncluded.find(fname) == gGlobal->gAlreadyIncluded.end()) {
         gGlobal->gAlreadyIncluded.insert(fname);
-        istream* src = openArchStream(fname.c_str());
+        unique_ptr<istream> src = unique_ptr<istream>(openArchStream(fname.c_str()));
         if (src) {
             streamCopyUntilEnd(*src, dst);
-            delete src;
         } else {
-            stringstream error;
-            error << fname << " not found\n";
-            gGlobal->gErrorMsg = error.str();
+            gGlobal->gErrorMsg = "ERROR : " + fname + " not found\n";
         }
     }
 }
@@ -180,13 +185,11 @@ static string removeSpaces(const string& line)
 }
 
 #define TRY_OPEN(filename)           \
-    ifstream* f = new ifstream();    \
+    unique_ptr<ifstream> f = unique_ptr<ifstream>(new ifstream());    \
     f->open(filename, ifstream::in); \
     err = chdir(old);                \
     if (f->is_open())                \
         return f;                    \
-    else                             \
-        delete f;
 
 /**
  * Check if an URL exists.
@@ -303,7 +306,7 @@ static void buildFullPathname(string& fullpath, const char* filename)
 /**
  * Try to open an architecture file searching in various directories
  */
-ifstream* openArchStream(const char* filename)
+unique_ptr<ifstream> openArchStream(const char* filename)
 {
     char  buffer[FAUST_PATH_MAX];
     char* old = getcwd(buffer, FAUST_PATH_MAX);
@@ -321,7 +324,7 @@ ifstream* openArchStream(const char* filename)
 
 /**
  * Try to open the file <filename> searching in various directories. If succesful
- *  place its full pathname in the string <fullpath>
+ * place its full pathname in the string <fullpath>
  */
 FILE* fopenSearch(const char* filename, string& fullpath)
 {
@@ -483,8 +486,9 @@ void streamCopyLicense(istream& src, ostream& dst, const string& exceptiontag)
 }
 
 /**
- * Copy src to dst until specific line.
+ * Copy src to dst until a specific line
  */
+
 void streamCopyUntil(istream& src, ostream& dst, const string& until)
 {
     string fname, line;
@@ -503,4 +507,9 @@ void streamCopyUntil(istream& src, ostream& dst, const string& until)
 void streamCopyUntilEnd(istream& src, ostream& dst)
 {
     streamCopyUntil(src, dst, "<<<FORBIDDEN LINE IN A FAUST ARCHITECTURE FILE>>>");
+}
+
+std::string makeOutputFile(const std::string& fname)
+{
+    return (gGlobal->gOutputDir != "") ? (gGlobal->gOutputDir + "/" + fname) : fname;
 }

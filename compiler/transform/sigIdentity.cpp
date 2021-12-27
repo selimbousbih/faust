@@ -75,8 +75,8 @@ Tree SignalIdentity::transformation(Tree sig)
         return sigOutput(i, self(x));
     } else if (isSigDelay1(sig, x)) {
         return sigDelay1(self(x));
-    } else if (isSigFixDelay(sig, x, y)) {
-        return sigFixDelay(self(x), self(y));
+    } else if (isSigDelay(sig, x, y)) {
+        return sigDelay(self(x), self(y));
     } else if (isSigPrefix(sig, x, y)) {
         return sigPrefix(self(x), self(y));
     } else if (isSigIota(sig, x)) {
@@ -115,10 +115,8 @@ Tree SignalIdentity::transformation(Tree sig)
     // Select2 and Select3
     else if (isSigSelect2(sig, sel, x, y)) {
         return sigSelect2(self(sel), self(x), self(y));
-    } else if (isSigSelect3(sig, sel, x, y, z)) {
-        return sigSelect3(self(sel), self(x), self(y), self(z));
     }
-
+    
     // Table sigGen
     else if (isSigGen(sig, x)) {
         if (fVisitGen) {
@@ -166,7 +164,7 @@ Tree SignalIdentity::transformation(Tree sig)
         return sigHBargraph(label, self(x), self(y), self(z));
     }
 
-    // Sounfile length, rate, channels, buffer
+    // Soundfile length, rate, channels, buffer
     else if (isSigSoundfile(sig, label)) {
         return sig;
     } else if (isSigSoundfileLength(sig, sf, x)) {
@@ -186,6 +184,19 @@ Tree SignalIdentity::transformation(Tree sig)
         return sigControl(self(x), self(y));
     }
 
+    // Signal interval annotation
+    else if (isSigAssertBounds(sig, x, y, z)) {
+        return sigAssertBounds(self(x), self(y), self(z));
+    }
+
+    else if (isSigLowest(sig, x)) {
+        return sigLowest(self(x));
+    }
+    
+    else if (isSigHighest(sig, x)) {
+        return sigHighest(self(x));
+    }
+    	
     else {
         stringstream error;
         error << "ERROR : unrecognized signal : " << *sig << endl;

@@ -5,8 +5,7 @@
  each section for license and copyright information.
  *************************************************************************/
 
-/*******************BEGIN ARCHITECTURE SECTION (part 1/2)****************/
-
+/******************* BEGIN plot.cpp ****************/
 /************************************************************************
  FAUST Architecture File
  Copyright (C) 2003-2019 GRAME, Centre National de Creation Musicale
@@ -73,7 +72,10 @@ using namespace std;
 /*******************BEGIN ARCHITECTURE SECTION (part 2/2)***************/
 					
 mydsp DSP;
-	
+
+std::list<GUI*> GUI::fGuiList;
+ztimedmap GUI::gTimedZoneMap;
+
 #define kFrames 512
 	
 int main(int argc, char* argv[])
@@ -104,6 +106,7 @@ int main(int argc, char* argv[])
         DSP.compute(kFrames, 0, chan.buffers());
         for (int i = 0; i < kFrames; i++) {
             for (int c = 0; c < nouts; c++) {
+                if (c) cout << "\t\t";
                 cout << chan.buffers()[c][i];
             }
             cout << endl;
@@ -114,6 +117,7 @@ int main(int argc, char* argv[])
     DSP.compute(nbsamples, 0, chan.buffers());
     for (int i = 0; i < nbsamples; i++) {
         for (int c = 0; c < nouts; c++) {
+            if (c) cout << "\t\t";
             cout << chan.buffers()[c][i];
         }
         cout << endl;
@@ -121,5 +125,4 @@ int main(int argc, char* argv[])
     return 0;
 }
 
-/********************END ARCHITECTURE SECTION (part 2/2)****************/
-
+/******************* END plot.cpp ****************/

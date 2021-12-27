@@ -28,7 +28,7 @@
 #include <list>
 #include <map>
 #include <vector>
-#include <iostream>
+#include <assert.h>
 
 #ifdef _WIN32
 # pragma warning (disable: 4100)
@@ -37,6 +37,8 @@
 #endif
 
 #include "faust/gui/UI.h"
+#include "faust/gui/ValueConverter.h"
+#include "faust/gui/MetaDataUI.h"
 #include "faust/gui/ring-buffer.h"
 
 /*******************************************************************************
@@ -51,23 +53,62 @@ struct clist;
 
 typedef void (*uiCallback)(FAUSTFLOAT val, void* data);
 
+/**
+ * Base class for uiTypedItem: memory zones that can be grouped and synchronized, using an internal cache.
+ */
 struct uiItemBase
 {
     
-    uiItemBase(GUI* ui, FAUSTFLOAT* zone) {}
+    uiItemBase(GUI* ui, FAUSTFLOAT* zone)
+    {
+        assert(ui);
+        assert(zone);
+    }
     
     virtual ~uiItemBase()
     {}
     
+    /**
+     * This method will be called when the value changes externally,
+     * and will signal the new value to all linked uItem
+     * when the value is different from the cached one.
+     *
+     * @param v - the new value
+     */
     virtual void modifyZone(FAUSTFLOAT v) = 0;
+    
+    /**
+     * This method will be called when the value changes externally,
+     * and will signal the new value to all linked uItem
+     * when the value is different from the cached one.
+     *
+     * @param date - the timestamp of the received value in usec
+     * @param v - the new value
+     */
     virtual void modifyZone(double date, FAUSTFLOAT v) {}
-    virtual double cache() = 0;
+    
+    /**
+     * This method is called by the synchronisation mecanism and is expected
+     * to 'reflect' the new value, by changing the Widget layout for instance,
+     * or sending a message (OSC, MIDI...)
+     */
     virtual void reflectZone() = 0;
+    
+    /**
+     * Return the cached value.
+     *
+     * @return - the cached value
+     */
+    virtual double cache() = 0;
+    
 };
 
-
+// Declared as 'static' to avoid code duplication at link time
 static void deleteClist(clist* cl);
 
+/**
+ * A list containing all groupe uiItemBase objects.
+ */
 struct clist : public std::list<uiItemBase*>
 {
     
@@ -92,7 +133,7 @@ class GUI : public UI
         static std::list<GUI*> fGuiList;
         zmap fZoneMap;
         bool fStopped;
-        
+    
      public:
             
         GUI():fStopped(false)
@@ -103,9 +144,8 @@ class GUI : public UI
         virtual ~GUI() 
         {   
             // delete all items
-            zmap::iterator it;
-            for (it = fZoneMap.begin(); it != fZoneMap.end(); it++) {
-                delete (*it).second;
+            for (const auto& it : fZoneMap) {
+                delete it.second;
             }
             // suppress 'this' in static fGuiList
             fGuiList.remove(this);
@@ -118,35 +158,27 @@ class GUI : public UI
             if (fZoneMap.find(z) == fZoneMap.end()) fZoneMap[z] = new clist();
             fZoneMap[z]->push_back(c);
         }
- 
-        void updateAllZones()
-        {
-            for (zmap::iterator m = fZoneMap.begin(); m != fZoneMap.end(); m++) {
-                FAUSTFLOAT* z = m->first;
-                clist* l = m->second;
-                if (z) {
-                    FAUSTFLOAT v = *z;
-                    for (clist::iterator c = l->begin(); c != l->end(); c++) {
-                        if ((*c)->cache() != v) (*c)->reflectZone();
-                    }
-                }
-            }
-        }
-        
+    
         void updateZone(FAUSTFLOAT* z)
         {
             FAUSTFLOAT v = *z;
-            clist* l = fZoneMap[z];
-            for (clist::iterator c = l->begin(); c != l->end(); c++) {
-                if ((*c)->cache() != v) (*c)->reflectZone();
+            clist* cl = fZoneMap[z];
+            for (const auto& c : *cl) {
+                if (c->cache() != v) c->reflectZone();
+            }
+        }
+    
+        void updateAllZones()
+        {
+            for (const auto& m : fZoneMap) {
+                updateZone(m.first);
             }
         }
     
         static void updateAllGuis()
         {
-            std::list<GUI*>::iterator g;
-            for (g = fGuiList.begin(); g != fGuiList.end(); g++) {
-                (*g)->updateAllZones();
+            for (const auto& g : fGuiList) {
+                g->updateAllZones();
             }
         }
     
@@ -155,16 +187,9 @@ class GUI : public UI
             createUiCallbackItem(this, zone, foo, data);
         }
 
-        virtual void show() {};	
+        // Start event or message processing
         virtual bool run() { return false; };
-
-        static void runAllGuis() {
-            std::list<GUI*>::iterator g;
-            for (g = fGuiList.begin(); g != fGuiList.end(); g++) {
-                (*g)->run();
-            }
-        }
-    
+        // Stop event or message processing
         virtual void stop() { fStopped = true; }
         bool stopped() { return fStopped; }
     
@@ -202,11 +227,10 @@ class GUI : public UI
 };
 
 /**
- * User Interface Item: abstract definition
+ * User Interface Item: abstract definition.
  */
-
 template <typename REAL>
-class uiTypedItem : public uiItemBase
+class uiTypedItemReal : public uiItemBase
 {
     protected:
         
@@ -214,7 +238,7 @@ class uiTypedItem : public uiItemBase
         REAL* fZone;
         REAL fCache;
         
-        uiTypedItem(GUI* ui, REAL* zone):uiItemBase(ui, static_cast<FAUSTFLOAT*>(zone)),
+        uiTypedItemReal(GUI* ui, REAL* zone):uiItemBase(ui, static_cast<FAUSTFLOAT*>(zone)),
         fGUI(ui), fZone(zone), fCache(REAL(-123456.654321))
         {
             ui->registerZone(zone, this);
@@ -222,7 +246,7 @@ class uiTypedItem : public uiItemBase
         
     public:
         
-        virtual ~uiTypedItem()
+        virtual ~uiTypedItemReal()
         {}
     
         void modifyZone(REAL v)
@@ -238,11 +262,11 @@ class uiTypedItem : public uiItemBase
     
 };
 
-class uiItem : public uiTypedItem<FAUSTFLOAT> {
+class uiItem : public uiTypedItemReal<FAUSTFLOAT> {
     
     protected:
     
-        uiItem(GUI* ui, FAUSTFLOAT* zone):uiTypedItem<FAUSTFLOAT>(ui, zone)
+        uiItem(GUI* ui, FAUSTFLOAT* zone):uiTypedItemReal<FAUSTFLOAT>(ui, zone)
         {}
 
     public:
@@ -262,9 +286,33 @@ class uiItem : public uiTypedItem<FAUSTFLOAT> {
 };
 
 /**
- * User Interface item owned (and so deleted) by external code
+ * Base class for items with a value converter.
  */
+struct uiConverter {
+    
+    ValueConverter* fConverter;
+    
+    uiConverter(MetaDataUI::Scale scale, FAUSTFLOAT umin, FAUSTFLOAT umax, FAUSTFLOAT fmin, FAUSTFLOAT fmax)
+    {
+        // Select appropriate converter according to scale mode
+        if (scale == MetaDataUI::kLog) {
+            fConverter = new LogValueConverter(umin, umax, fmin, fmax);
+        } else if (scale == MetaDataUI::kExp) {
+            fConverter = new ExpValueConverter(umin, umax, fmin, fmax);
+        } else {
+            fConverter = new LinearValueConverter(umin, umax, fmin, fmax);
+        }
+    }
+    
+    virtual ~uiConverter()
+    {
+        delete fConverter;
+    }
+};
 
+/**
+ * User Interface item owned (and so deleted) by external code.
+ */
 class uiOwnedItem : public uiItem {
     
     protected:
@@ -281,9 +329,8 @@ class uiOwnedItem : public uiItem {
 };
 
 /**
- * Callback Item
+ * Callback Item.
  */
-
 class uiCallbackItem : public uiItem {
     
     protected:
@@ -305,9 +352,8 @@ class uiCallbackItem : public uiItem {
 };
 
 /**
- *  For timestamped control
+ *  For timestamped control.
  */
-
 struct DatedControl {
     
     double fDate;
@@ -318,9 +364,8 @@ struct DatedControl {
 };
 
 /**
- * Base class for timed items
+ * Base class for timed items.
  */
-
 class uiTimedItem : public uiItem
 {
     
@@ -356,16 +401,15 @@ class uiTimedItem : public uiItem
             size_t res;
             DatedControl dated_val(date, v);
             if ((res = ringbuffer_write(GUI::gTimedZoneMap[fZone], (const char*)&dated_val, sizeof(DatedControl))) != sizeof(DatedControl)) {
-                std::cerr << "ringbuffer_write error DatedControl" << std::endl;
+                fprintf(stderr, "ringbuffer_write error DatedControl\n");
             }
         }
     
 };
 
 /**
- * Allows to group a set of zones
+ * Allows to group a set of zones.
  */
-
 class uiGroupItem : public uiItem
 {
     protected:
@@ -385,9 +429,8 @@ class uiGroupItem : public uiItem
             fCache = v;
             
             // Update all zones of the same group
-            std::vector<FAUSTFLOAT*>::iterator it;
-            for (it = fZoneMap.begin(); it != fZoneMap.end(); it++) {
-                (*(*it)) = v;
+            for (const auto& it : fZoneMap) {
+                *it = v;
             }
         }
         
@@ -395,7 +438,7 @@ class uiGroupItem : public uiItem
 
 };
 
-// Can not be defined as method in the classes
+// Cannot be defined as method in the classes.
 
 static void createUiCallbackItem(GUI* ui, FAUSTFLOAT* zone, uiCallback foo, void* data)
 {
@@ -404,13 +447,17 @@ static void createUiCallbackItem(GUI* ui, FAUSTFLOAT* zone, uiCallback foo, void
 
 static void deleteClist(clist* cl)
 {
-    std::list<uiItemBase*>::iterator it;
-    for (it = cl->begin(); it != cl->end(); it++) {
-        uiOwnedItem* owned = dynamic_cast<uiOwnedItem*>(*it);
+    for (const auto& it : *cl) {
+        // This specific code is only used in JUCE context. TODO: use proper 'shared_ptr' based memory management.
+    #if defined(JUCE_32BIT) || defined(JUCE_64BIT)
+        uiOwnedItem* owned = dynamic_cast<uiOwnedItem*>(it);
         // owned items are deleted by external code
         if (!owned) {
-            delete (*it);
+            delete it;
         }
+    #else
+        delete it;
+    #endif
     }
 }
 

@@ -5,8 +5,7 @@
  each section for license and copyright information.
  *************************************************************************/
 
-/*******************BEGIN ARCHITECTURE SECTION (part 1/2)****************/
-
+/******************* BEGIN ra-qt.cpp ****************/
 /************************************************************************
  FAUST Architecture File
  Copyright (C) 2003-2019 GRAME, Centre National de Creation Musicale
@@ -157,7 +156,8 @@ int main(int argc, char* argv[])
 #endif
     
 #endif
-    if (DSP == 0) {
+    
+    if (!DSP) {
         std::cerr << "Unable to allocate Faust DSP object" << std::endl;
         exit(1);
     }
@@ -229,4 +229,4 @@ int main(int argc, char* argv[])
     return 0;
 }
 
-/********************END ARCHITECTURE SECTION (part 2/2)****************/
+/******************* END ra-qt.cpp ****************/

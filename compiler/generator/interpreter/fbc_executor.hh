@@ -1,7 +1,7 @@
 /************************************************************************
  ************************************************************************
     FAUST compiler
-    Copyright (C) 2003-2018 GRAME, Centre National de Creation Musicale
+    Copyright (C) 2019-2020 GRAME, Centre National de Creation Musicale
     ---------------------------------------------------------------------
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -25,20 +25,51 @@
 #include "faust/gui/CGlue.h"
 #include "interpreter_bytecode.hh"
 
-template <class T>
+/*
+ * The base class for Interpreter and mixed Interpreter/Compiler.
+ */
+template <class REAL>
 struct FBCExecutor {
-    virtual void ExecuteBuildUserInterface(FIRUserInterfaceBlockInstruction<T>* block, UITemplate* glue){};
-    virtual void ExecuteBlock(FBCBlockInstruction<T>* block, bool compile = false){};
+    
+    virtual ~FBCExecutor() {}
+    
+    virtual void ExecuteBuildUserInterface(FIRUserInterfaceBlockInstruction<REAL>* block, UITemplate* glue) {};
+    virtual void ExecuteBlock(FBCBlockInstruction<REAL>* block, bool compile = false) {};
 
     virtual void setIntValue(int offset, int value) {}
     virtual int  getIntValue(int offset) { return -1; }
 
-    virtual void setInput(int offset, T* buffer) {}
-    virtual void setOutput(int offset, T* buffer) {}
+    virtual void setInput(int offset, REAL* buffer) {}
+    virtual void setOutput(int offset, REAL* buffer) {}
 
-    virtual ~FBCExecutor() {}
+    virtual void updateInputControls() {}
+    virtual void updateOutputControls() {}
 
-    virtual void dumpMemory(FBCBlockInstruction<T>* block, const std::string& name, const std::string& filename) {}
+    virtual void dumpMemory(FBCBlockInstruction<REAL>* block, const std::string& name, const std::string& filename) {}
+    
+};
+
+/*
+ * The base class for a Compiler to compile the hot 'compute' function.
+ */
+template <class REAL>
+struct FBCExecuteFun {
+
+    FBCExecuteFun() {}
+    // The FBC block used in the'compute' function.
+    FBCExecuteFun(FBCBlockInstruction<REAL>* fbc_block) {}
+    virtual ~FBCExecuteFun() {}
+   
+    /*
+     * The function to be executed each cycle.
+     *
+     * @param int_heap - the integer heap
+     * @param real_heap - the REAL heap
+     * @param inputs - the audio inputs
+     * @param outputs - the audio outputs
+     */
+    virtual void Execute(int* int_heap, REAL* real_heap, REAL** inputs, REAL** outputs) {}
+    
 };
 
 #endif

@@ -1,25 +1,25 @@
 /************************************************************************
-    FAUST Architecture File
-    Copyright (C) 2016 GRAME, Centre National de Creation Musicale
-    ---------------------------------------------------------------------
-    This Architecture section is free software; you can redistribute it
-    and/or modify it under the terms of the GNU General Public License
-    as published by the Free Software Foundation; either version 3 of
-    the License, or (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; If not, see <http://www.gnu.org/licenses/>.
-
-    EXCEPTION : As a special exception, you may create a larger work
-    that contains this FAUST architecture section and distribute
-    that work under terms of your choice, so long as this FAUST
-    architecture section is not modified.
-
+ FAUST Architecture File
+ Copyright (C) 2016 GRAME, Centre National de Creation Musicale
+ ---------------------------------------------------------------------
+ This Architecture section is free software; you can redistribute it
+ and/or modify it under the terms of the GNU General Public License
+ as published by the Free Software Foundation; either version 3 of
+ the License, or (at your option) any later version.
+ 
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+ 
+ You should have received a copy of the GNU General Public License
+ along with this program; If not, see <http://www.gnu.org/licenses/>.
+ 
+ EXCEPTION : As a special exception, you may create a larger work
+ that contains this FAUST architecture section and distribute
+ that work under terms of your choice, so long as this FAUST
+ architecture section is not modified.
+ 
  ************************************************************************/
 
 #include <libgen.h>
@@ -28,14 +28,13 @@
 #include <sstream>
 
 /*
-#ifndef FAUSTFLOAT
-#define FAUSTFLOAT double
-#endif
-*/
+ #ifndef FAUSTFLOAT
+ #define FAUSTFLOAT double
+ #endif
+ */
 
 #include "faust/audio/coreaudio-dsp.h"
 #include "faust/dsp/llvm-dsp.h"
-#include "faust/dsp/dsp-adapter.h"
 #include "faust/dsp/proxy-dsp.h"
 #include "faust/dsp/poly-llvm-dsp.h"
 #include "faust/dsp/poly-interpreter-dsp.h"
@@ -88,6 +87,7 @@ int main(int argc, char* argv[])
     bool is_osc = isopt(argv, "-osc");
     bool is_httpd = isopt(argv, "-httpd");
     bool is_resample = isopt(argv, "-resample");
+    bool is_double = isopt(argv, "-double");
     int nvoices = lopt(argv, "-nvoices", -1);
     
     malloc_memory_manager manager;
@@ -113,7 +113,7 @@ int main(int argc, char* argv[])
     coreaudio audio(44100, 512);
     string error_msg;
     
-    cout << "Libfaust version : " << getCLibFaustVersion () << endl;
+    cout << "Libfaust version : " << getCLibFaustVersion() << endl;
     
     int argc1 = 0;
     const char* argv1[64];
@@ -206,12 +206,12 @@ int main(int argc, char* argv[])
     }
     
     if (!factory) {
-        cerr << "Cannot create factory : " << error_msg;
+        cerr << error_msg;
         exit(EXIT_FAILURE);
     }
     
     //factory->setMemoryManager(&manager);  // causes crash in -fm mode
-    DSP = factory->createPolyDSPInstance(nvoices, true, true);
+    DSP = factory->createPolyDSPInstance(nvoices, true, true, is_double);
     if (!DSP) {
         cerr << "Cannot create instance "<< endl;
         exit(EXIT_FAILURE);
@@ -220,15 +220,11 @@ int main(int argc, char* argv[])
     cout << "getName " << factory->getName() << endl;
     //cout << "getSHAKey " << factory->getSHAKey() << endl;
     
-    if (isopt(argv, "-double")) {
-        cout << "Running in double..." << endl;
-    }
-    
     /*
-    JSONUI json(DSP->getNumInputs(), DSP->getNumOutputs());
-    DSP->buildUserInterface(&json);
-    cout << "JSON : " << json.JSON() << endl;
-    */
+     JSONUI json(DSP->getNumInputs(), DSP->getNumOutputs());
+     DSP->buildUserInterface(&json);
+     cout << "JSON : " << json.JSON() << endl;
+     */
     
     GUI* interface = new GTKUI(filename, &argc, &argv);
     DSP->buildUserInterface(interface);
@@ -247,10 +243,7 @@ int main(int argc, char* argv[])
     } else {
         soundinterface = new SoundUI();
     }
-    // SoundUI has to be dispatched on all internal voices
-    DSP->setGroup(false);
     DSP->buildUserInterface(soundinterface);
-    DSP->setGroup(true);
     
     if (is_httpd) {
         httpdinterface = new httpdUI(name, DSP->getNumInputs(), DSP->getNumOutputs(), argc, argv);
@@ -261,10 +254,9 @@ int main(int argc, char* argv[])
         oscinterface = new OSCUI(filename, argc, argv);
         DSP->buildUserInterface(oscinterface);
     }
-    rt_midi midi_handler(name);
-    midi_handler.addMidiIn(DSP);
-    
+   
     if (is_midi) {
+        rt_midi midi_handler(name);
         midiinterface = new MidiUI(&midi_handler);
         DSP->buildUserInterface(midiinterface);
         cout << "MIDI is on" << endl;
@@ -276,7 +268,7 @@ int main(int argc, char* argv[])
     if (is_httpd) {
         httpdinterface->run();
     }
-
+    
     if (is_osc) {
         oscinterface->run();
     }
@@ -286,38 +278,38 @@ int main(int argc, char* argv[])
     }
     
     /*
-    cout << DSP->getJSON();
+     cout << DSP->getJSON();
      
-    // Test setParamValue API
-    DSP->setParamValue("/Polyphonic/Voices/clarinet/otherParams/bellOpening", 0.35);
-    DSP->setParamValue("/Polyphonic/Voices/clarinet/midi/bend", 1.5);
-    
-    // Test MIDI API
-    DSP->keyOn(0, 60, 100);
-    DSP->keyOn(0, 64, 100);
-    DSP->keyOn(0, 67, 100);
-    
-    usleep(1000000);
-    
-    DSP->keyOff(0, 60, 100);
-    DSP->keyOff(0, 64, 100);
-    DSP->keyOff(0, 67, 100);
-    
-    // Test MIDI API
-    DSP->pitchWheel(0, 4000);
-    DSP->keyOn(0, 60, 100);
-    DSP->keyOn(0, 64, 100);
-    DSP->keyOn(0, 67, 100);
-    
-    usleep(1000000);
-    
-    DSP->keyOff(0, 60, 100);
-    DSP->keyOff(0, 64, 100);
-    DSP->keyOff(0, 67, 100);
-    */
+     // Test setParamValue API
+     DSP->setParamValue("/Polyphonic/Voices/clarinet/otherParams/bellOpening", 0.35);
+     DSP->setParamValue("/Polyphonic/Voices/clarinet/midi/bend", 1.5);
+     
+     // Test MIDI API
+     DSP->keyOn(0, 60, 100);
+     DSP->keyOn(0, 64, 100);
+     DSP->keyOn(0, 67, 100);
+     
+     usleep(1000000);
+     
+     DSP->keyOff(0, 60, 100);
+     DSP->keyOff(0, 64, 100);
+     DSP->keyOff(0, 67, 100);
+     
+     // Test MIDI API
+     DSP->pitchWheel(0, 4000);
+     DSP->keyOn(0, 60, 100);
+     DSP->keyOn(0, 64, 100);
+     DSP->keyOn(0, 67, 100);
+     
+     usleep(1000000);
+     
+     DSP->keyOff(0, 60, 100);
+     DSP->keyOff(0, 64, 100);
+     DSP->keyOff(0, 67, 100);
+     */
     
     interface->run();
-
+    
     audio.stop();
     
     finterface->saveState(rcfilename);

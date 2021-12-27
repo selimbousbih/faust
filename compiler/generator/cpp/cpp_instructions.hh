@@ -26,6 +26,7 @@ using namespace std;
 
 #include "text_instructions.hh"
 #include "type_manager.hh"
+#include "struct_manager.hh"
 
 class CPPInstVisitor : public TextInstVisitor {
    private:
@@ -37,18 +38,20 @@ class CPPInstVisitor : public TextInstVisitor {
 
     // Polymorphic math functions
     map<string, string> gPolyMathLibTable;
+    
+    string cast2FAUSTFLOAT(const string& str) { return "FAUSTFLOAT(" + str + ")"; }
 
    public:
     using TextInstVisitor::visit;
 
     CPPInstVisitor(std::ostream* out, int tab = 0)
-        : TextInstVisitor(out, "->", new CStringTypeManager(FLOATMACRO, "*"), tab)
+        : TextInstVisitor(out, "->", new CStringTypeManager(xfloat(), "*"), tab)
     {
         // Mark all math.h functions as generated...
         gFunctionSymbolTable["abs"] = true;
-
-        gFunctionSymbolTable["max"] = true;
-        gFunctionSymbolTable["min"] = true;
+    
+        gFunctionSymbolTable["max_i"] = true;
+        gFunctionSymbolTable["min_i"] = true;
 
         // Float version
         gFunctionSymbolTable["fabsf"]      = true;
@@ -147,7 +150,7 @@ class CPPInstVisitor : public TextInstVisitor {
         gPolyMathLibTable["sinf"]       = "std::sin";
         gPolyMathLibTable["sqrtf"]      = "std::sqrt";
         gPolyMathLibTable["tanf"]       = "std::tan";
-
+   
         // Polymath mapping double version
         gPolyMathLibTable["max_"] = "std::max<double>";
         gPolyMathLibTable["min_"] = "std::min<double>";
@@ -174,7 +177,7 @@ class CPPInstVisitor : public TextInstVisitor {
         gPolyMathLibTable["sin"]       = "std::sin";
         gPolyMathLibTable["sqrt"]      = "std::sqrt";
         gPolyMathLibTable["tan"]       = "std::tan";
-
+      
         // Polymath mapping quad version
         gPolyMathLibTable["max_l"] = "std::max<quad>";
         gPolyMathLibTable["min_l"] = "std::min<quad>";
@@ -201,7 +204,7 @@ class CPPInstVisitor : public TextInstVisitor {
         gPolyMathLibTable["sinl"]       = "std::sin";
         gPolyMathLibTable["sqrtl"]      = "std::sqrt";
         gPolyMathLibTable["tanl"]       = "std::tan";
-    }
+     }
 
     virtual ~CPPInstVisitor() {}
 
@@ -222,13 +225,13 @@ class CPPInstVisitor : public TextInstVisitor {
     {
         string name;
         switch (inst->fOrient) {
-            case 0:
+            case OpenboxInst::kVerticalBox:
                 name = "ui_interface->openVerticalBox(";
                 break;
-            case 1:
+            case OpenboxInst::kHorizontalBox:
                 name = "ui_interface->openHorizontalBox(";
                 break;
-            case 2:
+            case OpenboxInst::kTabBox:
                 name = "ui_interface->openTabBox(";
                 break;
         }
@@ -266,9 +269,11 @@ class CPPInstVisitor : public TextInstVisitor {
                 name = "ui_interface->addNumEntry";
                 break;
         }
-        *fOut << name << "(" << quote(inst->fLabel) << ", "
-              << "&" << inst->fZone << ", " << checkReal(inst->fInit) << ", " << checkReal(inst->fMin) << ", "
-              << checkReal(inst->fMax) << ", " << checkReal(inst->fStep) << ")";
+        *fOut << name << "(" << quote(inst->fLabel) << ", " << "&" << inst->fZone << ", "
+              << cast2FAUSTFLOAT(checkReal(inst->fInit)) << ", "
+              << cast2FAUSTFLOAT(checkReal(inst->fMin)) << ", "
+              << cast2FAUSTFLOAT(checkReal(inst->fMax)) << ", "
+              << cast2FAUSTFLOAT(checkReal(inst->fStep)) << ")";
         EndLine();
     }
 
@@ -283,8 +288,9 @@ class CPPInstVisitor : public TextInstVisitor {
                 name = "ui_interface->addVerticalBargraph";
                 break;
         }
-        *fOut << name << "(" << quote(inst->fLabel) << ", &" << inst->fZone << ", " << checkReal(inst->fMin) << ", "
-              << checkReal(inst->fMax) << ")";
+        *fOut << name << "(" << quote(inst->fLabel) << ", &" << inst->fZone << ", "
+              << cast2FAUSTFLOAT(checkReal(inst->fMin)) << ", "
+              << cast2FAUSTFLOAT(checkReal(inst->fMax)) << ")";
         EndLine();
     }
 
@@ -349,11 +355,61 @@ class CPPInstVisitor : public TextInstVisitor {
         generateFunDefArgs(inst);
         generateFunDefBody(inst);
     }
+    
+    virtual void generateFunDefArgs(DeclareFunInst* inst)
+    {
+        *fOut << "(";
+        
+        size_t size = inst->fType->fArgsTypes.size(), i = 0;
+        for (const auto& it : inst->fType->fArgsTypes) {
+            // Pointers are set with 'noalias' for non paired arguments, which are garantied to be unique
+            if (isPtrType(it->getType()) && !inst->fType->isPairedFunArg(it->fName)) {
+                *fOut << fTypeManager->generateType(it, NamedTyped::kNoalias);
+            } else {
+                *fOut << fTypeManager->generateType(it);
+            }
+            if (i++ < size - 1) *fOut << ", ";
+        }
+    }
 
     virtual void visit(LoadVarAddressInst* inst)
     {
         *fOut << "&";
         inst->fAddress->accept(this);
+    }
+    
+    virtual void visit(BinopInst* inst)
+    {
+        // Special case for 'logical right-shift'
+        if (strcmp(gBinOpTable[inst->fOpcode]->fName, ">>>") == 0) {
+            TypingVisitor typing;
+            inst->fInst1->accept(&typing);
+            if (isInt64Type(typing.fCurType)) {
+                *fOut << "(int64_t(uint64_t(";
+            } else if (isInt32Type(typing.fCurType)) {
+                *fOut << "(int32_t(uint32_t(";
+            } else {
+                faustassert(false);
+            }
+            inst->fInst1->accept(this);
+            *fOut << ") >> ";
+            inst->fInst2->accept(this);
+            *fOut << "))w";
+        } else {
+            TextInstVisitor::visit(inst);
+        }
+    }
+    
+    virtual void visit(FixedPointNumInst* inst) { *fOut << "fixpoint_t(" << checkFloat(inst->fNum) << ")"; }
+    
+    virtual void visit(FixedPointArrayNumInst* inst)
+    {
+        char sep = '{';
+        for (size_t i = 0; i < inst->fNumTable.size(); i++) {
+            *fOut << sep << "fixpoint_t(" << checkFloat(inst->fNumTable[i]) << ")";
+            sep = ',';
+        }
+        *fOut << '}';
     }
 
     virtual void visit(::CastInst* inst)
@@ -379,7 +435,7 @@ class CPPInstVisitor : public TextInstVisitor {
                 *fOut << ")";
                 break;
             case Typed::kInt64:
-                *fOut << "*reinterpret_cast<long long*>(&";
+                *fOut << "*reinterpret_cast<int64_t*>(&";
                 inst->fInst->accept(this);
                 *fOut << ")";
                 break;
@@ -402,11 +458,8 @@ class CPPInstVisitor : public TextInstVisitor {
     virtual void visit(FunCallInst* inst)
     {
         string name = gGlobal->getMathFunction(inst->fName);
-        if (gPolyMathLibTable.find(name) != gPolyMathLibTable.end()) {
-            generateFunCall(inst, gPolyMathLibTable[name]);
-        } else {
-            generateFunCall(inst, name);
-        }
+        name = (gPolyMathLibTable.find(name) != gPolyMathLibTable.end()) ? gPolyMathLibTable[name] : name;
+        generateFunCall(inst, name);
     }
 
     virtual void visit(ForLoopInst* inst)
@@ -424,393 +477,140 @@ class CPPInstVisitor : public TextInstVisitor {
     static void cleanup() { gFunctionSymbolTable.clear(); }
 };
 
+// Used for -os1 mode (TODO : does not work with 'soundfile')
+class CPPInstVisitor1 : public CPPInstVisitor {
+    
+    private:
+        
+        StructInstVisitor fStructVisitor;
+        
+    public:
+        
+        CPPInstVisitor1(std::ostream* out, int tab = 0)
+        :CPPInstVisitor(out, tab)
+        {}
+        
+        virtual void visit(AddSoundfileInst* inst)
+        {
+            // Not supported for now
+            throw faustexception("ERROR : AddSoundfileInst not supported for -os mode\n");
+        }
+        
+        virtual void visit(DeclareVarInst* inst)
+        {
+            Address::AccessType access = inst->fAddress->getAccess();
+            string name = inst->fAddress->getName();
+            if (((access & Address::kStruct) || (access & Address::kStaticStruct)) && !isControl(name)) {
+                fStructVisitor.visit(inst);
+            } else {
+                CPPInstVisitor::visit(inst);
+            }
+        }
+    
+        virtual void visit(NamedAddress* named)
+        {
+            Typed::VarType type;
+            string name = named->getName();
+            
+            if (fStructVisitor.hasField(name, type)) {
+                if (type == Typed::kInt32) {
+                    FIRIndex value = FIRIndex(fStructVisitor.getFieldIntOffset(name)/sizeof(int));
+                    InstBuilder::genLoadArrayFunArgsVar("iZone", value)->accept(this);
+                } else {
+                    FIRIndex value = FIRIndex(fStructVisitor.getFieldRealOffset(name)/ifloatsize());
+                    InstBuilder::genLoadArrayFunArgsVar("fZone", value)->accept(this);
+                }
+            } else {
+                TextInstVisitor::visit(named);
+            }
+        }
+        
+        virtual void visit(IndexedAddress* indexed)
+        {
+            Typed::VarType type;
+            string name = indexed->getName();
+            
+            if (fStructVisitor.hasField(name, type)) {
+                if (type == Typed::kInt32) {
+                    FIRIndex value = FIRIndex(indexed->fIndex) + fStructVisitor.getFieldIntOffset(name)/sizeof(int);
+                    InstBuilder::genLoadArrayFunArgsVar("iZone", value)->accept(this);
+                } else {
+                    FIRIndex value = FIRIndex(indexed->fIndex) + fStructVisitor.getFieldRealOffset(name)/ifloatsize();
+                    InstBuilder::genLoadArrayFunArgsVar("fZone", value)->accept(this);
+                }
+            } else {
+                TextInstVisitor::visit(indexed);
+            }
+        }
+        
+        // Size is expressed in unit of the actual type (so 'int' or 'float/double')
+        int getIntZoneSize() { return fStructVisitor.getStructIntSize()/sizeof(int); }
+        int getRealZoneSize() { return fStructVisitor.getStructRealSize()/ifloatsize(); }
+    
+};
+
+// Used for -os2 mode (TODO : does not work with 'soundfile')
+class CPPInstVisitor2 : public CPPInstVisitor {
+    
+    private:
+        
+        // Fields are distributed between the DSP struct and iZone/fZone model
+        StructInstVisitor1 fStructVisitor;
+       
+    public:
+        
+        CPPInstVisitor2(std::ostream* out, int external_memory, int tab = 0)
+        :CPPInstVisitor(out, tab), fStructVisitor(external_memory, 4)
+        {}
+        
+        virtual void visit(AddSoundfileInst* inst)
+        {
+            // Not supported for now
+            throw faustexception("ERROR : AddSoundfileInst not supported for -os mode\n");
+        }
+        
+        virtual void visit(DeclareVarInst* inst)
+        {
+            Address::AccessType access = inst->fAddress->getAccess();
+            string name = inst->fAddress->getName();
+            if (((access & Address::kStruct) || (access & Address::kStaticStruct)) && !isControl(name)) {
+                fStructVisitor.visit(inst);
+                // Local fields have to be generated
+                if (fStructVisitor.getFieldMemoryType(name) == MemoryDesc::kLocal) {
+                    CPPInstVisitor::visit(inst);
+                }
+            } else {
+                CPPInstVisitor::visit(inst);
+            }
+        }
+        
+        virtual void visit(IndexedAddress* indexed)
+        {
+            Typed::VarType type;
+            string name = indexed->getName();
+            
+            if (fStructVisitor.hasField(name, type) && fStructVisitor.getFieldMemoryType(name) == MemoryDesc::kExternal) {
+                if (type == Typed::kInt32) {
+                    FIRIndex value = FIRIndex(indexed->fIndex) + fStructVisitor.getFieldIntOffset(name)/sizeof(int);
+                    InstBuilder::genLoadArrayFunArgsVar("iZone", value)->accept(this);
+                } else {
+                    FIRIndex value = FIRIndex(indexed->fIndex) + fStructVisitor.getFieldRealOffset(name)/ifloatsize();
+                    InstBuilder::genLoadArrayFunArgsVar("fZone", value)->accept(this);
+                }
+            } else {
+                TextInstVisitor::visit(indexed);
+            }
+        }
+      
+        // Size is expressed in unit of the actual type (so 'int' or 'float/double')
+        int getIntZoneSize() { return fStructVisitor.getStructIntSize()/sizeof(int); }
+        int getRealZoneSize() { return fStructVisitor.getStructRealSize()/ifloatsize(); }
+    
+};
+
 class CPPVecInstVisitor : public CPPInstVisitor {
    public:
     CPPVecInstVisitor(std::ostream* out, int tab = 0) : CPPInstVisitor(out, tab) {}
 };
 
-/**
- * Use the Apple Accelerate framework.
- *
- */
-
-/*
-class CPPVecAccelerateInstVisitor : public CPPVecInstVisitor {
-
-    protected:
-
-        std::string fCurValue;
-        Typed::VarType fCurType;
-
-        std::map<int, string> fVecBinOpTable;
-        std::map<int, string> fScalarBinOpTable;
-        std::map<string, string> fFunctionTable;
-        int fVecCounter;
-
-    public:
-
-        CPPVecAccelerateInstVisitor(std::ostream* out, int tab = 0)
-            :CPPVecInstVisitor(out, tab), fCurType(Typed::kNoType)
-        {
-            fVecBinOpTable[kAdd] = "vDSP_vadd";
-            fVecBinOpTable[kSub] = "vDSP_vsub";
-            fVecBinOpTable[kMul] = "vDSP_vmul";
-            fVecBinOpTable[kDiv] = "vDSP_vdiv";
-
-            fFunctionTable["sin"] = "vvsin";
-            fFunctionTable["sinf"] = "vvsinf";
-            fFunctionTable["cos"] = "vvcos";
-            fFunctionTable["cosf"] = "vvcosf";
-            fFunctionTable["tan"] = "vvatan";
-            fFunctionTable["tanf"] = "vvatanf";
-            fFunctionTable["log"] = "vvlog";
-            fFunctionTable["logf"] = "vvlogf";
-            fFunctionTable["log10"] = "vvlog10";
-            fFunctionTable["log10f"] = "vvlog10f";
-
-            //fFunctionTable["log2"] = "native_log2";
-            //fFunctionTable["log2f"] = "native_log2";
-
-            fFunctionTable["exp"] = "vvexp";
-            fFunctionTable["expf"] = "vvexpf";
-            fFunctionTable["pow"] = "vvpow";
-            fFunctionTable["powf"] = "vvpowf";
-            fFunctionTable["sqrt"] = "vvrsqrt";
-            fFunctionTable["sqrtf"] = "vvrsqrtf";
-            fFunctionTable["fabsf"] = "vvfabf";
-            fFunctionTable["floor"] = "vvfloor";
-            fFunctionTable["floorf"] = "vvfloorf";
-            fFunctionTable["fmodf"] = "vvfmodf";
-
-            fVecCounter = 0;
-        }
-
-        ~CPPVecAccelerateInstVisitor()
-        {}
-
-        inline string generateNameVec()
-        {
-            return subst("vec$0_", T(fVecCounter++));
-        }
-
-        virtual void visit(LoadVarInst* inst)
-        {
-             // Keep name as value
-            fCurValue = inst->fAddress->getName();
-            //cerr << "inst->fAddress->getName " << inst->fAddress->getName() << std::endl;
-            // Keep type
-            faustassert(gGlobal->gVarTypeTable.find(inst->fAddress->getName()) != gGlobal->gVarTypeTable.end());
-            fCurType = gGlobal->gVarTypeTable[inst->fAddress->getName()]->getType();
-        }
-
-        virtual void visit(FloatNumInst* inst)
-        {
-            fCurValue = T(inst->fNum);
-            fCurType = Typed::kFloat;
-        }
-
-        virtual void visit(Int32NumInst* inst)
-        {
-            fCurValue = T(inst->fNum);
-            fCurType = Typed::kInt32;
-        }
-
-        virtual void visit(BoolNumInst* inst)
-        {
-            fCurValue = T(inst->fNum);
-            fCurType = Typed::kBool;
-        }
-
-        virtual void visit(DoubleNumInst* inst)
-        {
-            fCurValue = T(inst->fNum);
-            fCurType = Typed::kDouble;
-        }
-
-        virtual void visit(BinopInst* inst)
-        {
-            // Keep result of first arg compilation
-            inst->fInst1->accept(this);
-            std::string res1 = fCurValue;
-
-            // Keep result of second arg compilation
-            inst->fInst2->accept(this);
-            std::string res2 = fCurValue;
-
-            // Generate new result symbol, both arguments are equal, so fCurType is the one of last evaluated one
-            fCurValue = generateNameVec();
-            *fOut << fTypeDirectTable[fCurType] << " " << fCurValue << "[" << inst->fSize << "]";
-            EndLine();
-
-            // Generate stream
-            if (inst->fInst1->fSize >= 1 && inst->fInst2->fSize >= 1) {
-                // Full vector operation
-                cerr << "inst->fOpcode " << inst->fOpcode  << endl;
-                *fOut << fVecBinOpTable[inst->fOpcode] << "(" << res1 << ", 1, " << res2 << ", 1, " << fCurValue << ",
-1, " << inst->fSize << ")"; } else if (inst->fInst1->fSize > 1) {
-                // Scalar-Vec operation
-                // TODO
-                // *fOut << fScalarBinOpTable[inst->fOpcode] << "(" << res1 << ", 1, " << res2 << fCurValue << ", 1, "
-<< inst->fSize << ")"; } else {
-                // Scalar operation
-                CPPVecInstVisitor::visit(inst);
-            }
-
-            EndLine();
-        }
-
-        virtual void visit(CastInst* inst)
-        {
-            // Compile value to cast, result in fCurValue
-            inst->fInst->accept(this);
-
-            BasicTyped* basic_typed = dynamic_cast<BasicTyped*>(inst->fType);
-
-            switch (basic_typed->fType) {
-
-                case Typed::kFloat: {
-                    string res = generateNameVec();
-                    *fOut << fTypeDirectTable[Typed::kFloat] << " " << res << "[" << inst->fSize << "]";
-                    EndLine();
-
-                    switch (fCurType) {
-
-                        case Typed::kInt32:
-                            *fOut << "vDSP_vflt32(" << fCurValue << " , 1 " << res << " , 1, " << inst->fSize << ")";
-                            break;
-
-                        case Typed::kFloat:
-                            // No supposed to happen
-                            faustassert(false);
-                            break;
-
-                         case Typed::kDouble:
-                            *fOut << "vDSP_vspdp(" << fCurValue << " , 1 " << res << " , 1, " << inst->fSize << ")";
-                            break;
-
-                         default:
-                            // No supposed to happen
-                            cerr << "CurType " << fTypeDirectTable[fCurType] << endl;
-                            faustassert(false);
-                            break;
-                    }
-                    fCurType = Typed::kFloat;
-                    fCurValue = res;
-                    break;
-                }
-
-                case Typed::kInt32: {
-                    string res = generateNameVec();
-                    // *fOut << fTypeDirectTable[Typed::kInt32] << " " << res << "[" << inst->fSize << "]"; EndLine();
-                    switch (fCurType) {
-
-                        case Typed::kInt32:
-                            // No supposed to happen
-                            faustassert(false);
-                            break;
-
-                        case Typed::kFloat:
-                            *fOut << "vDSP_vfixr32(" << fCurValue << " , 1 " << res << " , 1, " << inst->fSize << ")";
-                            break;
-
-                         case Typed::kDouble:
-                            *fOut << "vDSP_vfixr32D(" << fCurValue << " , 1 " << res << " , 1, " << inst->fSize << ")";
-                            break;
-
-                         default:
-                            // No supposed to happen
-                            faustassert(false);
-                            break;
-                    }
-                    fCurType = Typed::kInt32;
-                    fCurValue = res;
-                    break;
-                }
-
-                case Typed::kDouble: {
-                    string res = generateNameVec();
-                    *fOut << fTypeDirectTable[Typed::kDouble] << " " << res << "[" << inst->fSize << "]";
-                    EndLine();
-
-                    switch (fCurType) {
-
-                        case Typed::kInt32:
-                            *fOut << "vDSP_vflt32D(" << fCurValue << " , 1 " << res << " , 1, " << inst->fSize << ")";
-                            break;
-
-                        case Typed::kFloat:
-                            *fOut << "vDSP_vdpsp(" << fCurValue << " , 1 " << res << " , 1, " << inst->fSize << ")";
-                            break;
-
-                         case Typed::kDouble:
-                            // No supposed to happen
-                            faustassert(false);
-                            break;
-
-                         default:
-                            // No supposed to happen
-                            faustassert(false);
-                            break;
-                    }
-                    fCurType = Typed::kDouble;
-                    fCurValue = res;
-                    break;
-                }
-
-                case Typed::kQuad:
-                    // No supposed to happen
-                    faustassert(false);
-                    break;
-
-                default:
-                    // No supposed to happen
-                    faustassert(false);
-                    break;
-
-            }
-            EndLine();
-        }
-
-        virtual void visit(FunCallInst* inst)
-        {
-            string res = generateNameVec();
-            *fOut << fTypeDirectTable[fCurType] << " " << res << "[" << inst->fSize << "]";
-            EndLine();
-
-            if (inst->fMethod) {
-                list<ValueInst*>::const_iterator it =  inst->fArgs.begin();
-                // Compile object arg
-                (*it)->accept(this);
-                *fOut << "->" << ((fFunctionTable.find(inst->fName) != fFunctionTable.end()) ?
-fFunctionTable[inst->fName] : inst->fName) << "("; list<ValueInst*>::const_iterator it1; int i = 0;
-                // Add result in parameter list
-                *fOut << res;
-                for (it1 = ++it; it1 != inst->fArgs.end(); it1++, i++) {
-                    // Compile argument
-                    (*it1)->accept(this);
-                    *fOut << ", ";
-                }
-                // Add "count" in parameter list
-                *fOut << inst->fSize;
-                *fOut << ")";
-            } else {
-                *fOut << ((fFunctionTable.find(inst->fName) != fFunctionTable.end()) ? fFunctionTable[inst->fName] :
-inst->fName) << "("; list<ValueInst*>::const_iterator it; int i = 0;
-                // Add result in parameter list
-                *fOut << res;
-                for (it = inst->fArgs.begin(); it != inst->fArgs.end(); it++, i++) {
-                    // Compile argument
-                    (*it)->accept(this);
-                    *fOut << ", ";
-                }
-                // Add "count" in parameter list
-                *fOut << inst->fSize;
-                *fOut << ")";
-            }
-
-            fCurValue = res;
-            // fCurType does not change
-        }
-
-        virtual void visit(Select2Inst* inst)
-        {
-            // Compile condition, result in fCurValue
-            inst->fCond->accept(this);
-            std::string cond_value = fCurValue;
-
-            // Compile then branch, result in fCurValue
-            inst->fThen->accept(this);
-            std::string then_value = fCurValue;
-
-            // Compile else branch, result in fCurValue
-            inst->fElse->accept(this);
-            std::string else_value = fCurValue;
-
-            // TODO
-        }
-
-};
-
-class MRCPPInstVisitor : public CPPInstVisitor {
-
-    private:
-
-        map <string, StructTyped*> gTypeTable;
-
-    public:
-
-        MRCPPInstVisitor(std::ostream* out, int tab = 0)
-            :CPPInstVisitor(out, tab)
-        {}
-
-        virtual ~MRCPPInstVisitor()
-        {}
-
-        void visitStructAddress(StructTyped* struct_type, IndexedAddress* indexed)
-        {
-            ArrayTyped* array_type = dynamic_cast<ArrayTyped*>(struct_type->fType);
-            faustassert(array_type);
-            StructTyped* struct_type1 = dynamic_cast<StructTyped*>(array_type->fType);
-            BasicTyped* basic_type1 = dynamic_cast<BasicTyped*>(array_type->fType);
-            IndexedAddress* indexed1 = dynamic_cast<IndexedAddress*>(indexed->fAddress);
-
-            *fOut << "[";
-            indexed->fIndex->accept(this);
-
-            if (indexed1) {
-                *fOut << "].f";
-            } else {
-                *fOut << "]";
-            }
-
-            if (struct_type1 && indexed1) {
-                visitStructAddress(struct_type1, indexed1);
-            } else if (basic_type1 && indexed1) {
-                visitAddress(indexed1);
-            }
-        }
-
-        void visitAddress(IndexedAddress* indexed)
-        {
-            *fOut << "[";
-            indexed->fIndex->accept(this);
-            *fOut << "]";
-        }
-
-        virtual void visit(IndexedAddress* indexed)
-        {
-            // Struct type access
-            if (gGlobal->gVarTypeTable.find(indexed->getName()) != gGlobal->gVarTypeTable.end()) {
-                Typed* var_type = gGlobal->gVarTypeTable[indexed->getName()];
-                ArrayTyped* array_type = dynamic_cast<ArrayTyped*>(var_type);
-                faustassert(array_type);
-                StructTyped* struct_type = dynamic_cast<StructTyped*>(array_type->fType);
-                if (struct_type) {
-                    visitStructAddress(struct_type, indexed);
-                    return;
-                }
-            }
-
-            // Default case
-            visitAddress(indexed);
-        }
-
-        virtual void visit(DeclareTypeInst* inst)
-        {
-            StructTyped* struct_typed = dynamic_cast<StructTyped*>(inst->fType);
-
-            // Check if type is already generated
-            if (struct_typed && gTypeTable.find(struct_typed->fName) == gTypeTable.end()) {
-                Typed* sub_type = struct_typed->fType;
-                *fOut << "struct " << struct_typed->fName << " {" << endl;
-                *fOut << "\t" << fTypeManager->generateType(sub_type, "f");
-                EndLine();
-                *fOut << "}";
-                EndLine();
-                gTypeTable[struct_typed->fName] = struct_typed;
-            }
-        }
-
-};
-*/
 #endif

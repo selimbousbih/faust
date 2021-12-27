@@ -2,17 +2,18 @@
 
 #####################################################################
 #                                                                   #
-#               Compiles Faust programs to dummy                    #
-#               (c) Grame, 2017                                     #
+#               Compiles Faust programs to dummy audio driver       #
+#               (c) Grame, 2017-2020                                #
 #                                                                   #
 #####################################################################
 
 . faustpath
 . faustoptflags
+. usage.sh
+
+CXXFLAGS+=" $MYGCCFLAGS"  # So that additional CXXFLAGS can be used
 
 ARCHFILE=$FAUSTARCH/dummy.cpp
-
-CXXFLAGS=$MYGCCFLAGS
 
 OSCDEFS=""
 NVOICES=-1
@@ -23,7 +24,6 @@ MIDIDEFS=""
 #-------------------------------------------------------------------
 # Analyze command arguments :
 # faust options                 -> OPTIONS
-# if -omp : -openmp or -fopenmp -> OPENMP
 # existing *.dsp files          -> FILES
 #
 
@@ -37,6 +37,18 @@ fi
 while [ $1 ]
 do
     p=$1
+    
+    if [ $p = "-help" ] || [ $p = "-h" ]; then
+        usage faust2dummy "[options] [Faust options] <file.dsp>"
+		platform MacOS
+		echo "Compiles Faust programs to dummy audio driver"
+		option
+        options -httpd -osc -midi
+        option "-nvoices <num>"
+        option "Faust options"
+        exit
+    fi
+    
     if [ $p = "-osc" ]; then
         OSCDEFS="-DOSCCTRL -lOSCFaust"
     elif [ $p = "-httpd" ]; then
@@ -51,7 +63,7 @@ do
         MIDIDEFS="-DMIDICTRL"
     elif [ ${p:0:1} = "-" ]; then
 	    OPTIONS="$OPTIONS $p"
-	elif [[ -f "$p" ]]; then
+	elif [[ -f "$p" ]] && [ ${p: -4} == ".dsp" ]; then
 	    FILES="$FILES $p"
 	else
 	    OPTIONS="$OPTIONS $p"        
@@ -72,7 +84,11 @@ for f in $FILES; do
 	# compile c++ to binary
 	(
 		$CXX $CXXFLAGS "$f.cpp" $OSCDEFS $HTTPDEFS $POLYDEFS $MIDIDEFS $ARCHLIB -o "${f%.dsp}"
+		if [[ $(uname) == Darwin ]]; then
+		    codesign --sign - --deep --force "${f%.dsp}"
+		fi
 	) > /dev/null || exit
+	
 	rm "$f.cpp"
 
 	# collect binary file name for FaustWorks

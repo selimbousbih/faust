@@ -222,14 +222,10 @@ struct Loop2FunctionBuider : public DispatchVisitor {
             fArgsValueList.push_front(InstBuilder::genLoadFunArgsVar("dsp"));
         }
 
-        // Create function type
-        BasicTyped* result   = InstBuilder::genVoidTyped();
-        FunTyped*   fun_type = InstBuilder::genFunTyped(fArgsTypeList, result, FunTyped::kVirtual);
+        // Create function
+        fFunctionDef = InstBuilder::genVoidFunction(fun_name, fArgsTypeList, function_code);
 
-        // Creates function definition
-        fFunctionDef = InstBuilder::genDeclareFunInst(fun_name, fun_type, function_code);
-
-        // Creates function call
+        // Create function call
         fFunctionCall = InstBuilder::genDropInst(InstBuilder::genFunCallInst(fun_name, fArgsValueList));
     }
 };
@@ -276,7 +272,6 @@ struct ConstantPropagationBuilder : public BasicCloneVisitor {
         } else if (int1 && int2) {
             faustassert(false);
             return 0;
-            // return new Int32NumInst(inst->fOpcode(int1->fNum, int2->fNum));
         } else {
             return InstBuilder::genBinopInst(inst->fOpcode, val1, val2);
         }

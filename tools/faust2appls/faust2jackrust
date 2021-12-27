@@ -3,14 +3,16 @@
 #####################################################################
 #                                                                   #
 #               Compiles Faust programs to JACK and Rust binary     #
-#               (c) Grame, 2017                                     #
+#               (c) Grame, 2017-2021                                #
 #                                                                   #
 #####################################################################
 
 . faustpath
 . faustoptflags
+. usage.sh
 
-ARCHFILE=$FAUSTARCH/minimal-jack.rs
+SRC="0"
+ARCHFILE=$FAUSTARCH/jack.rs
 
 #PHASE 2 : dispatch command arguments
 while [ $1 ]
@@ -18,12 +20,18 @@ do
     p=$1
 
     if [ $p = "-help" ] || [ $p = "-h" ]; then
-        echo "faust2jackrust [additional Faust options (-vec -vs 8...)] <file.dsp>"
+        usage faust2jackrust "[options] [Faust options] <file.dsp>"
+        echo "Compiles Faust programs to JACK and Rust binary"
+        option
+        option -source "only generates the source project."
+        option "Faust options"
     fi
 
-    if [ ${p:0:1} = "-" ]; then
+    if [ $p = "-source" ]; then
+        SRC="1"
+    elif [ ${p:0:1} = "-" ]; then
         OPTIONS="$OPTIONS $p"
-    elif [[ -f "$p" ]]; then
+    elif [[ -f "$p" ]] && [ ${p: -4} == ".dsp" ]; then
         FILES="$FILES $p"
     else
         OPTIONS="$OPTIONS $p"
@@ -43,22 +51,29 @@ for p in $FILES; do
     SRCDIR=$(dirname "$p")
 
     # creates the dir
-    dspName="${f%.dsp}-rust"
+    dspName="${f%.dsp}-jackrust"
     rm -rf "$SRCDIR/$dspName"
 
     # create rust project
+    pushd "$SRCDIR"
     cargo new $dspName --bin
+    popd
 
     # compile Faust DSP and put in the cargo folder
-    faust -a $ARCHFILE -lang rust "$SRCDIR/$f" -o "$SRCDIR/$dspName/src/main.rs"
+    faust -a $ARCHFILE -lang rust $OPTIONS "$SRCDIR/$f" -o "$SRCDIR/$dspName/src/main.rs"
 
     # add dependencies
     echo "jack = \"0.5.3\"" >> "$SRCDIR/$dspName/Cargo.toml"
     echo "libm = \"*\"" >> "$SRCDIR/$dspName/Cargo.toml"
 
     # build the project
-    cd "$SRCDIR/$dspName"
-    cargo build --release
-    cargo build
+    if [ $SRC = "0" ]; then
+    (
+        cd "$SRCDIR/$dspName"
+        cargo build --release
+        cargo build
+    ) > /dev/null || exit
+
+    fi
 
 done

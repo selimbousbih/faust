@@ -19,13 +19,18 @@
  ************************************************************************
  ************************************************************************/
 
+#include <fstream>
+
 #include "instructions.hh"
 #include "floats.hh"
 #include "global.hh"
 #include "sigtype.hh"
+#include "fir_to_fir.hh"
 
 // Used when inlining functions
 std::stack<BlockInst*> BasicCloneVisitor::fBlockStack;
+
+vector <string> NamedTyped::AttributeMap = {" ", " RESTRICT "};
 
 DeclareStructTypeInst* isStructType(const string& name)
 {
@@ -63,16 +68,17 @@ Typed::VarType ctType(Type t)
     return (t->nature() == kInt) ? Typed::kInt32 : Typed::kFloat;
 }
 
-string Typed::gTypeString[] = {"kInt32",          "kInt32_ptr",    "kInt32_vec",      "kInt32_vec_ptr",
-                               "kInt64",          "kInt64_ptr",    "kInt64_vec",      "kInt64_vec_ptr",
-                               "kBool",           "kBool_ptr",     "kBool_vec",       "kBool_vec_ptr",
-                               "kFloat",          "kFloat_ptr",    "kFloat_ptr_ptr",  "kFloat_vec",
-                               "kFloat_vec_ptr",  "kFloatMacro",   "kFloatMacro_ptr", "kFloatMacro_ptr_ptr",
-                               "kDouble",         "kDouble_ptr",   "kDouble_ptr_ptr", "kDouble_vec",
-                               "kDouble_vec_ptr", "kQuad",         "kQuad_ptr",       "kQuad_ptr_ptr",
-                               "kQuad_vec",       "kQuad_vec_ptr", "kVoid",           "kVoid_ptr",
-                               "kVoid_ptr_ptr",   "kObj",          "kObj_ptr",        "kSound",
-                               "kSound_ptr",      "kUint_ptr",     "kNoType"};
+string Typed::gTypeString[] = {"kInt32",          "kInt32_ptr",      "kInt32_vec",          "kInt32_vec_ptr",
+                               "kInt64",          "kInt64_ptr",      "kInt64_vec",          "kInt64_vec_ptr",
+                               "kBool",           "kBool_ptr",       "kBool_vec",           "kBool_vec_ptr",
+                               "kFloat",          "kFloat_ptr",      "kFloat_ptr_ptr",      "kFloat_vec",
+                               "kFloat_vec_ptr",  "kFloatMacro",     "kFloatMacro_ptr",     "kFloatMacro_ptr_ptr",
+                               "kDouble",         "kDouble_ptr",     "kDouble_ptr_ptr",     "kDouble_vec",       "kDouble_vec_ptr",
+                               "kQuad",           "kQuad_ptr",       "kQuad_ptr_ptr",       "kQuad_vec",         "kQuad_vec_ptr",
+                               "kFixedPoint",     "kFixedPoint_ptr", "kFixedPoint_ptr_ptr", "kFixedPoint_vec",   "kFixedPoint_vec_ptr",
+                               "kVoid",           "kVoid_ptr",       "kVoid_ptr_ptr",
+                               "kObj",            "kObj_ptr",        "kSound",
+                               "kSound_ptr",      "kUint_ptr",       "kNoType"};
 
 void BasicTyped::cleanup()
 {
@@ -98,9 +104,9 @@ DeclareVarInst::DeclareVarInst(Address* address, Typed* type, ValueInst* value)
         } else {
             // If array type, check their size and internal type
             ArrayTyped* array_t1 = dynamic_cast<ArrayTyped*>(gGlobal->gVarTypeTable[fAddress->getName()]);
-            ArrayTyped* arry_t2  = dynamic_cast<ArrayTyped*>(type);
-            if (array_t1 && arry_t2) {
-                faustassert(array_t1->fSize == arry_t2->fSize && array_t1->fType == arry_t2->fType);
+            ArrayTyped* array_t2  = dynamic_cast<ArrayTyped*>(type);
+            if (array_t1 && array_t2) {
+                faustassert(array_t1->fSize == array_t2->fSize && array_t1->fType == array_t2->fType);
             } else {
                 faustassert(false);
             }
@@ -137,35 +143,28 @@ DeclareFunInst::DeclareFunInst(const string& name, FunTyped* type, BlockInst* co
 
 BasicTyped* InstBuilder::genBasicTyped(Typed::VarType type)
 {
-    // Possibly force FAUSTFLOAT type (= kFloatMacro) to internal real
-    Typed::VarType new_type = ((type == Typed::kFloatMacro) && gGlobal->gFAUSTFLOATToInternal) ? itfloat() : type;
-
-    // If not defined, add the type in the table
-    if (gGlobal->gTypeTable.find(new_type) == gGlobal->gTypeTable.end()) {
-        gGlobal->gTypeTable[new_type] = new BasicTyped(new_type);
-    }
-    return gGlobal->gTypeTable[new_type];
+    return gGlobal->genBasicTyped(type);
 }
 
-int BasicTyped::getSize()
+int BasicTyped::getSizeBytes() const
 {
     faustassert(gGlobal->gTypeSizeMap.find(fType) != gGlobal->gTypeSizeMap.end());
     return gGlobal->gTypeSizeMap[fType];
 }
 
-int FunTyped::getSize()
+int FunTyped::getSizeBytes() const
 {
     return gGlobal->gTypeSizeMap[Typed::kVoid_ptr];
 }
 
-int ArrayTyped::getSize()
+int ArrayTyped::getSizeBytes() const
 {
     if (fSize == 0) {
         // Array of zero size are treated as pointer in the corresponding type
         faustassert(gGlobal->gTypeSizeMap.find(getType()) != gGlobal->gTypeSizeMap.end());
         return gGlobal->gTypeSizeMap[getType()];
     } else {
-        return fType->getSize() * fSize;
+        return fType->getSizeBytes() * fSize;
     }
 }
 
@@ -206,7 +205,7 @@ Typed* BasicCloneVisitor::visit(BasicTyped* typed)
     return gGlobal->gTypeTable[typed->fType];
 }
 
-bool BlockInst::hasReturn()
+bool BlockInst::hasReturn() const
 {
     list<StatementInst*>::const_iterator it = fCode.end();
     it--;
@@ -235,6 +234,16 @@ struct StoreVarInst* DeclareVarInst::store(ValueInst* exp)
 struct LoadVarInst* DeclareVarInst::load()
 {
     return InstBuilder::genLoadVarInst(fAddress);
+}
+
+bool ControlInst::hasCondition(ValueInst* cond)
+{
+    // Compare string representation of both conditions
+    stringstream res1;
+    stringstream res2;
+    dump2FIR(fCond, &res1, false);
+    dump2FIR(cond, &res2, false);
+    return (res1.str() == res2.str());
 }
 
 // Function calls
@@ -339,6 +348,13 @@ DeclareFunInst* InstBuilder::genFunction6(const string& name, Typed::VarType res
     return InstBuilder::genDeclareFunInst(name, fun_type, code);
 }
 
+bool LoadVarInst::isSimpleValue() const
+{
+    NamedAddress* named = dynamic_cast<NamedAddress*>(fAddress);
+    IndexedAddress* indexed = dynamic_cast<IndexedAddress*>(fAddress);
+    return named || (indexed && dynamic_cast<Int32NumInst*>(indexed->getIndex()));
+}
+
 void ScalVecDispatcherVisitor::Dispatch2Visitor(ValueInst* inst)
 {
     std::cout << "Dispatch2Visitor %d\n";
@@ -438,7 +454,7 @@ static Typed* sharedTypeToFirType(Tree t)
         return InstBuilder::genArrayTyped(sharedTypeToFirType(subtree), size);
     } else {
         faustassert(false);
-        return NULL;
+        return nullptr;
     }
 }
 

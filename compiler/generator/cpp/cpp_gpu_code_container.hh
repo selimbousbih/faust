@@ -29,14 +29,7 @@ class CPPGPUCodeContainer : public CPPCodeContainer {
     void prepareFIR(void);
 
    protected:
-    static bool isControl(string name)
-    {
-        return (name.find("fbutton") != string::npos || name.find("fcheckbox") != string::npos ||
-                name.find("fvbargraph") != string::npos || name.find("fhbargraph") != string::npos ||
-                name.find("fvslider") != string::npos || name.find("fhslider") != string::npos ||
-                name.find("fentry") != string::npos);
-    }
-
+   
     // To access control inside fControl field
     struct UIInstVisitor : public CPPInstVisitor {
         UIInstVisitor(std::ostream* out, int tab) : CPPInstVisitor(out, tab) {}
@@ -278,8 +271,6 @@ class CPPGPUCodeContainer : public CPPCodeContainer {
     {
         fNumInputs  = numInputs;
         fNumOutputs = numOutputs;
-        fInputRates.resize(numInputs);
-        fOutputRates.resize(numOutputs);
     }
 
     virtual ~CPPGPUCodeContainer() {}
@@ -366,7 +357,7 @@ class CPPOpenCLCodeContainer : public CPPGPUCodeContainer {
             /*
             if (inst->fAddress->getAccess() & Address::kGlobal) {
                 if (gGlobal->gSymbolGlobalsTable.find(inst->fAddress->getName()) == gGlobal->gSymbolGlobalsTable.end())
-            {
+                {
                     // If global is not defined
                     gGlobal->gSymbolGlobalsTable[inst->fAddress->getName()] = 1;
                 } else {
@@ -467,8 +458,6 @@ class CPPCUDACodeContainer : public CPPGPUCodeContainer {
         fKernelCodeProducer = new CUDAKernelInstVisitor(fGPUOut, 0);
         fNumInputs          = numInputs;
         fNumOutputs         = numOutputs;
-        fInputRates.resize(numInputs);
-        fOutputRates.resize(numOutputs);
     }
     virtual ~CPPCUDACodeContainer() { delete fGPUOut; }
 

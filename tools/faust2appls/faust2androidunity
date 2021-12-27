@@ -17,6 +17,9 @@
 
 . faustpath
 . faustoptflags
+. usage.sh
+
+CXXFLAGS+=" $MYGCCFLAGS"  # So that additional CXXFLAGS can be used
 
 NVOICES=-1
 ANDROID_MK=Android.mk
@@ -31,23 +34,29 @@ do
     p=$1
     
     if [ $p = "-help" ] || [ $p = "-h" ]; then
-        echo "faust2androidunity [-nvoices <num>] [additional Faust options (-vec -vs 8...)] <file1.dsp> [<file2.dsp>]"
+        usage faust2androidunity "[options] [Faust options] <file1.dsp> [<file2.dsp>]"
+ 		platform Android Unity
+		require Android SDK "Make sure the ANDROID_HOME environment variable is set to the sdk folder."
+
         echo "Creates android libraries (armeabi-v7a and x86) for faust unity plugin."
-        echo "Android sdk should be installed. Make sure the ANDROID_HOME environment variable is correctly set up. It should be pointing to the sdk folder."
-        echo "Use 'faust2unity -android' to also create the c# and JSON files"
-        echo "Use '-nvoices <num>' to produce a polyphonic self-contained DSP with <num> voices, ready to be used with MIDI"
         echo "If you need other android architectures, open architecture/unity/Android/Application.mk and modify APP_ABI."
-        echo "See architecture/unity/README.md for more info or in the compile folder"
+        echo "See architecture/unity/README.md for more info (also available from the compile folder)"
+
+		option
+        option "-nvoices <num>"
+        option -android "creates also the c# and JSON files"
         exit
     fi
     
     if [ $p = "-nvoices" ]; then
         shift
         NVOICES=$1
-        ANDROID_MK=AndroidPoly.mk
+        if [ $NVOICES != -1 ]; then
+		    ANDROID_MK=AndroidPoly.mk
+        fi
     elif [ ${p:0:1} = "-" ]; then
         OPTIONS="$OPTIONS $p"
-    elif [[ -f "$p" ]]; then
+    elif [[ -f "$p" ]] && [ ${p: -4} == ".dsp" ]; then
         FILES="$FILES $p"
     else
         OPTIONS="$OPTIONS $p"
@@ -77,11 +86,11 @@ for p in $FILES; do
     fi
 
     # compiles faust to c++
-    faust -i -a $FAUSTLIB/unity/unityplugin.cpp $OPTIONS "$SRCDIR/$f" -o "$TMP/$NAME.cpp" || (echo "$f : Faust to C++ compilation failed in faust2androidunity"; exit 1)
+    faust -uim -i -a $FAUSTLIB/unity/unityplugin.cpp $OPTIONS "$SRCDIR/$f" -o "$TMP/$NAME.cpp" || (echo "$f : Faust to C++ compilation failed in faust2androidunity"; exit 1)
 
     # compiles c++ to binary
     cd "$TMP"
-
+  
     # Android.mk and Application.mk contains the compilation settings.
     # They are moved to the working directory for compilation then deleted
     cp -r "$FAUSTLIB/unity/Android/$ANDROID_MK" "Android.mk"

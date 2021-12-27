@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.4.0)
 
 #######################################
 # versions management
-set (VERSION 1.2.0)
+set (VERSION 1.2.2)
 set (SOVERS 1)
 
 #######################################
@@ -15,6 +15,9 @@ option ( OSCDYNAMIC 	"Include Faust OSC dynamic library"	off )
 # check for variables that are normally set at upper level
 if (NOT DEFINED LIBDIR)
 	set (LIBDIR lib)
+endif()
+if (NOT DEFINED LIBSDIR)
+	set (LIBSDIR lib)
 endif()
 if (NOT DEFINED ROOT)
 	set (ROOT ../..)
@@ -136,9 +139,9 @@ if (PACK)
 endif()
 
 install ( TARGETS ${TARGETS}
-    RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/lib 
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}/lib 
-    LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/lib
+	RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/${LIBSDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/${LIBSDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}/${LIBSDIR}
     PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_PREFIX}/include/faust/osc
 )
 

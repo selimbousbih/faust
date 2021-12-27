@@ -28,21 +28,17 @@
 
 #ifdef WIN32
 #include <windows.h>
+#define kPSEP '\\'
 #else
 #include <libgen.h>
 #include <unistd.h>
 #define GetCurrentDir getcwd
+#define kPSEP '/'
 #endif
 
 #include "exepath.hh"
 
 using namespace std;
-
-#ifdef WIN32
-#define kPSEP '\\'
-#else
-#define kPSEP '/'
-#endif
 
 //-----------------------------------------------------------------
 // removes the exe name from a path (similar to dirname)
@@ -61,10 +57,9 @@ string exepath::dirup(const string& path)
 // recursively removes expressions like /a_name/.. from a path
 string exepath::stripPath(const string& path)
 {
-    regex  e("/[^/]*/\\.\\.");  // matches sequence like /path/..
-    string stripped = regex_replace(path, e, "");
-    if (stripped == path) return path;
-    return stripPath(stripped);
+    regex e("/[^/]*/\\.\\.");  // matches sequence like /path/..
+    string stripped = regex_replace(path, e, string(""));
+    return (stripped == path) ? path : stripPath(stripped);
 }
 
 #ifdef WIN32
@@ -85,8 +80,7 @@ string exepath::resolvelink(const string& path)
         bool relative = (buff[0] != '/');
         if (relative) {  // this is a relative link
             string tmp = dirup(path);
-            if (tmp[0] == '/') return stripPath(tmp + "/" + buff);
-            return relative2absolute(buff);
+            return (tmp[0] == '/') ? stripPath(tmp + "/" + buff) : relative2absolute(buff);
         }
         return buff;
     }
@@ -100,7 +94,7 @@ string exepath::resolvelink(const string& path)
 string exepath::get(const string& name)
 {
     char  buff[1024];
-    DWORD n = GetModuleFileNameA(0, buff, 1024);
+    DWORD n = GetModuleFileNameA(NULL, buff, 1024);
     return n ? dirup(buff) : "";
 }
 

@@ -4,14 +4,73 @@
 GRAME - Centre national de creation musicale
 http://www.grame.fr
 ====================================================
-Copyright GRAME (c) 2012-2019
+Copyright GRAME (c) 2012-2021
+
+----------------------------------------------------
+Version 1.53 - 10/29/2021
+
+- use Faust 2.37.4 and LLVM 12.0.1 on macOS, LLVM 10.0 on Windows.
+
+----------------------------------------------------
+Version 1.52 - 10/22/2021
+
+- use Faust 2.37.3 and LLVM 12.0.1 on macOS, LLVM 10.0 on Windows.
+
+----------------------------------------------------
+Version 1.51 - 05/13/2021
+
+- correct documentation URL.
+
+----------------------------------------------------
+Version 1.50 - 02/01/2021
+
+- cleanup MidiUI/midi_handler and SoundUI rework.
+
+----------------------------------------------------
+Version 1.49 - 01/20/2021
+
+- add 'assist' handling
+
+----------------------------------------------------
+Version 1.48 - 12/16/2020
+
+- use Faust 2.30.5 and LLVM 10.0
+- add a new MIDI output on a new most-right outlet, that send MIDI messages when the DSP code uses MIDI metadata.
+
+----------------------------------------------------
+Version 1.45 - 07/26/2020
+
+- use Faust 2.27.1 and LLVM 10.0
+- bug fixes
+
+----------------------------------------------------
+Version 1.41 - 10/30/2019
+
+- new "dump" message to send  [path, cur, min, max] messages for all controllers on a new most-right outlet
+- "reset" message renamed to "init " and send [path, init, min, max] messages for all controllers on a new most-right outlet
+- "bang" message sent on most-right outlet when DSP compilation is finished
+
+----------------------------------------------------
+Version 1.40 - 10/25/2019
+
+- correct messages handling bug, correctly cast values to FAUSTFLOAT
+- add DSP controller state save/load after recompilation
+- add "reset" message to restore the DSP controller state to the 'init' values
+- use Faust 2.19.3 version and LLVM 9.0
+
+----------------------------------------------------
+Version 1.39 - 10/10/2019
+
+- correct messages handling bug, remove unneeded lock
+- updated libraries.
+- use Faust 2.19.0 version
 
 ----------------------------------------------------
 Version 1.36 - 03/05/2019
 
-  - add ‘soundfile’ primitive support
-  - add OSC support
-  - various bug fixes
+  - add ‘soundfile’ primitive support.
+  - add OSC support.
+  - various bug fixes.
 
 ----------------------------------------------------
 Version 1.12 - 01/05/2017

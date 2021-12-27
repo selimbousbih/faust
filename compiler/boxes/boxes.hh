@@ -39,6 +39,7 @@ box ::= i | f | p0 | p1 | p3
 
 #include "signals.hh"
 #include "tlib.hh"
+#include "export.hh"
 
 struct Automaton;
 
@@ -62,8 +63,8 @@ bool isBoxIdent(Tree t, const char** name);
                                     Numbers
 *****************************************************************************/
 
-Tree boxInt(int n);
-Tree boxReal(double n);
+EXPORT Tree boxInt(int n);
+EXPORT Tree boxReal(double n);
 
 bool isBoxInt(Tree t);
 bool isBoxReal(Tree t);
@@ -74,11 +75,11 @@ bool isBoxReal(Tree t, double* r);
 /*****************************************************************************
                                     Waveform
     waveform {1,2,3,...}
-    an object with 2 outputs : the size of the waveform, the actual waveform.
-    A Waveform is in is all its values are int. It is float otherwise.
+    an object with 2 outputs: the size of the waveform and the actual waveform.
+    A Waveform is int if all its values are int. It is float otherwise.
 *****************************************************************************/
 
-Tree boxWaveform(const tvec& br);
+EXPORT Tree boxWaveform(const tvec& br);
 bool isBoxWaveform(Tree t);
 
 /*****************************************************************************
@@ -87,15 +88,15 @@ bool isBoxWaveform(Tree t);
     a n-inputs, m-outputs routing object
 *****************************************************************************/
 
-Tree boxRoute(Tree n, Tree m, Tree r);
+EXPORT Tree boxRoute(Tree n, Tree m, Tree r);
 bool isBoxRoute(Tree s, Tree& n, Tree& m, Tree& r);
 
 /*****************************************************************************
                                 Wire and Cut
 *****************************************************************************/
 
-Tree boxWire();
-Tree boxCut();
+EXPORT Tree boxWire();
+EXPORT Tree boxCut();
 
 bool isBoxWire(Tree t);
 bool isBoxCut(Tree t);
@@ -117,11 +118,11 @@ bool isBoxSymbolic(Tree t, Tree& slot, Tree& body);
                               Composition of Boxes
 *****************************************************************************/
 
-Tree boxSeq(Tree x, Tree y);
-Tree boxPar(Tree x, Tree y);
-Tree boxRec(Tree x, Tree y);
-Tree boxSplit(Tree x, Tree y);
-Tree boxMerge(Tree x, Tree y);
+EXPORT Tree boxSeq(Tree x, Tree y);
+EXPORT Tree boxPar(Tree x, Tree y);
+EXPORT Tree boxRec(Tree x, Tree y);
+EXPORT Tree boxSplit(Tree x, Tree y);
+EXPORT Tree boxMerge(Tree x, Tree y);
 
 bool isBoxSeq(Tree t, Tree& x, Tree& y);
 bool isBoxPar(Tree t, Tree& x, Tree& y);
@@ -193,7 +194,7 @@ Tree boxModifLocalDef(Tree body, Tree ldef);
 bool isBoxModifLocalDef(Tree t, Tree& body, Tree& ldef);
 
 /*****************************************************************************
-                             Error Boxe
+                             Error Box
 *****************************************************************************/
 
 Tree boxError();
@@ -235,15 +236,15 @@ bool isBoxPrim5(Tree s, prim5* p);
                              Foreign Functions
 *****************************************************************************/
 
-Tree boxFFun(Tree ff);
+EXPORT Tree boxFFun(Tree ff);
 bool isBoxFFun(Tree s);
 bool isBoxFFun(Tree s, Tree& ff);
 
-Tree boxFConst(Tree type, Tree name, Tree file);
+EXPORT Tree boxFConst(Tree type, Tree name, Tree file);
 bool isBoxFConst(Tree s);
 bool isBoxFConst(Tree s, Tree& type, Tree& name, Tree& file);
 
-Tree boxFVar(Tree type, Tree name, Tree file);
+EXPORT Tree boxFVar(Tree type, Tree name, Tree file);
 bool isBoxFVar(Tree s);
 bool isBoxFVar(Tree s, Tree& type, Tree& name, Tree& file);
 
@@ -267,26 +268,37 @@ bool isImportFile(Tree s, Tree& filename);
                              User Interface Elements
 *****************************************************************************/
 
-Tree boxButton(Tree label);
+// GUI inputs
+EXPORT Tree boxButton(Tree label);
 bool isBoxButton(Tree s);
 bool isBoxButton(Tree s, Tree& label);
 
-Tree boxCheckbox(Tree label);
+EXPORT Tree boxCheckbox(Tree label);
 bool isBoxCheckbox(Tree s);
 bool isBoxCheckbox(Tree s, Tree& label);
 
-Tree boxVSlider(Tree label, Tree cur, Tree min, Tree max, Tree step);
+EXPORT Tree boxVSlider(Tree label, Tree cur, Tree min, Tree max, Tree step);
 bool isBoxVSlider(Tree s);
 bool isBoxVSlider(Tree s, Tree& label, Tree& cur, Tree& min, Tree& max, Tree& step);
 
-Tree boxHSlider(Tree label, Tree cur, Tree min, Tree max, Tree step);
+EXPORT Tree boxHSlider(Tree label, Tree cur, Tree min, Tree max, Tree step);
 bool isBoxHSlider(Tree s);
 bool isBoxHSlider(Tree s, Tree& label, Tree& cur, Tree& min, Tree& max, Tree& step);
 
-Tree boxNumEntry(Tree label, Tree cur, Tree min, Tree max, Tree step);
+EXPORT Tree boxNumEntry(Tree label, Tree cur, Tree min, Tree max, Tree step);
 bool isBoxNumEntry(Tree s);
 bool isBoxNumEntry(Tree s, Tree& label, Tree& cur, Tree& min, Tree& max, Tree& step);
 
+// GUI outputs
+EXPORT Tree boxVBargraph(Tree label, Tree min, Tree max);
+bool isBoxVBargraph(Tree s);
+bool isBoxVBargraph(Tree s, Tree& label, Tree& min, Tree& max);
+
+EXPORT Tree boxHBargraph(Tree label, Tree min, Tree max);
+bool isBoxHBargraph(Tree s);
+bool isBoxHBargraph(Tree s, Tree& label, Tree& min, Tree& max);
+
+// Groups
 Tree boxVGroup(Tree label, Tree x);
 bool isBoxVGroup(Tree s);
 bool isBoxVGroup(Tree s, Tree& label, Tree& x);
@@ -299,16 +311,7 @@ Tree boxTGroup(Tree label, Tree x);
 bool isBoxTGroup(Tree s);
 bool isBoxTGroup(Tree s, Tree& label, Tree& x);
 
-// GUI outputs
-Tree boxVBargraph(Tree label, Tree min, Tree max);
-bool isBoxVBargraph(Tree s);
-bool isBoxVBargraph(Tree s, Tree& label, Tree& min, Tree& max);
-
-Tree boxHBargraph(Tree label, Tree min, Tree max);
-bool isBoxHBargraph(Tree s);
-bool isBoxHBargraph(Tree s, Tree& label, Tree& min, Tree& max);
-
-Tree boxSoundfile(Tree label, Tree chan);
+EXPORT Tree boxSoundfile(Tree label, Tree chan);
 bool isBoxSoundfile(Tree s);
 bool isBoxSoundfile(Tree s, Tree& label, Tree& chan);
 
@@ -341,7 +344,7 @@ bool isBoxMetadata(Tree s, Tree& exp, Tree& mdlist);
 ******************************************************************************
 *****************************************************************************/
 
-// return the number of input
+// Return the number of inputs and outputs
 bool getBoxType(Tree box, int* inum, int* onum);
 
 #endif

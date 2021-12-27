@@ -54,7 +54,7 @@ dsp_factory_base* WASTCodeContainer::produceFactory()
 {
     return new text_dsp_factory_aux(
         fKlassName, "", "",
-        ((dynamic_cast<std::stringstream*>(fOut)) ? dynamic_cast<std::stringstream*>(fOut)->str() : ""), fHelper.str());
+        ((dynamic_cast<ostringstream*>(fOut)) ? dynamic_cast<ostringstream*>(fOut)->str() : ""), fHelper.str());
 }
 
 WASTCodeContainer::WASTCodeContainer(const string& name, int numInputs, int numOutputs, std::ostream* out,
@@ -87,9 +87,6 @@ CodeContainer* WASTCodeContainer::createContainer(const string& name, int numInp
 {
     CodeContainer* container;
 
-    if (gGlobal->gMemoryManager) {
-        throw faustexception("ERROR : -mem not supported for WebAssembly\n");
-    }
     if (gGlobal->gFloatSize == 3) {
         throw faustexception("ERROR : quad format not supported for WebAssembly\n");
     }
@@ -134,31 +131,18 @@ DeclareFunInst* WASTCodeContainer::generateInstanceInitFun(const string& name, c
         args.push_back(InstBuilder::genNamedTyped(obj, Typed::kObj_ptr));
     }
     args.push_back(InstBuilder::genNamedTyped("sample_rate", Typed::kInt32));
+    
     BlockInst* init_block = InstBuilder::genBlockInst();
-
     init_block->pushBackInst(MoveVariablesInFront3().getCode(fStaticInitInstructions));
-
     init_block->pushBackInst(MoveVariablesInFront3().getCode(fInitInstructions));
-
     init_block->pushBackInst(MoveVariablesInFront3().getCode(fPostInitInstructions));
-
     init_block->pushBackInst(MoveVariablesInFront3().getCode(fResetUserInterfaceInstructions));
-
     init_block->pushBackInst(MoveVariablesInFront3().getCode(fClearInstructions));
-
+    
     init_block->pushBackInst(InstBuilder::genRetInst());
 
     // Creates function
-    FunTyped* fun_type = InstBuilder::genFunTyped(args, InstBuilder::genVoidTyped(),
-                                                  (isvirtual) ? FunTyped::kVirtual : FunTyped::kDefault);
-    return InstBuilder::genDeclareFunInst(name, fun_type, init_block);
-}
-
-void WASTCodeContainer::produceInternal()
-{
-    // Fields generation
-    generateGlobalDeclarations(gGlobal->gWASTVisitor);
-    generateDeclarations(gGlobal->gWASTVisitor);
+    return InstBuilder::genVoidFunction(name, args, init_block, isvirtual);
 }
 
 void WASTCodeContainer::produceClass()
@@ -172,7 +156,7 @@ void WASTCodeContainer::produceClass()
     // Global declarations (mathematical functions, global variables...)
     gGlobal->gWASTVisitor->Tab(n + 1);
 
-    // Sub containers : before functions generation
+    // Sub containers are merged in the main module, before functions generation
     mergeSubContainers();
 
     // All mathematical functions (got from math library as variables) have to be first
@@ -213,9 +197,6 @@ void WASTCodeContainer::produceClass()
     gGlobal->gWASTVisitor->Tab(n + 1);
     generateDeclarations(gGlobal->gWASTVisitor);
 
-    // After field declaration
-    generateSubContainers();
-
     // Keep location of memory generation
     streampos begin_memory = fOutAux.tellp();
 
@@ -237,7 +218,7 @@ void WASTCodeContainer::produceClass()
         BlockInst* inlined = inlineSubcontainersFunCalls(fStaticInitInstructions);
         generateWASTBlock(inlined);
     }
-    tab(n + 1, fOutAux);
+    back(1, fOutAux);
     fOutAux << ")";
 
     tab(n + 1, fOutAux);
@@ -248,7 +229,7 @@ void WASTCodeContainer::produceClass()
         BlockInst* inlined = inlineSubcontainersFunCalls(fInitInstructions);
         generateWASTBlock(inlined);
     }
-    tab(n + 1, fOutAux);
+    back(1, fOutAux);
     fOutAux << ")";
 
     tab(n + 1, fOutAux);
@@ -259,7 +240,7 @@ void WASTCodeContainer::produceClass()
         // Rename 'sig' in 'dsp' and remove 'dsp' allocation
         generateWASTBlock(DspRenamer().getCode(fResetUserInterfaceInstructions));
     }
-    tab(n + 1, fOutAux);
+    back(1, fOutAux);
     fOutAux << ")";
 
     tab(n + 1, fOutAux);
@@ -270,7 +251,7 @@ void WASTCodeContainer::produceClass()
         // Rename 'sig' in 'dsp' and remove 'dsp' allocation
         generateWASTBlock(DspRenamer().getCode(fClearInstructions));
     }
-    tab(n + 1, fOutAux);
+    back(1, fOutAux);
     fOutAux << ")";
 
     gGlobal->gWASTVisitor->Tab(n + 1);
@@ -320,7 +301,7 @@ void WASTCodeContainer::produceClass()
     tab(n + 1, fOutAux);
     generateComputeFunctions(gGlobal->gWASTVisitor);
 
-    tab(n, fOutAux);
+    back(1, fOutAux);
     fOutAux << ")";
     tab(n, fOutAux);
 
@@ -452,7 +433,7 @@ void WASTCodeContainer::generateComputeAux2(BlockInst* compute_block, int n)
     block = CastRemover().getCode(block);
 
     block->accept(gGlobal->gWASTVisitor);
-    tab(n + 1, fOutAux);
+    back(1, fOutAux);
     fOutAux << ")";
 }
 
@@ -463,6 +444,9 @@ void WASTScalarCodeContainer::generateCompute(int n)
     // Loop 'i' variable is moved by bytes
     BlockInst* compute_block = InstBuilder::genBlockInst();
     compute_block->pushBackInst(fCurLoop->generateScalarLoop(fFullCount, gGlobal->gLoopVarInBytes));
+    
+    // Generates post DSP loop code
+    compute_block->pushBackInst(fPostComputeBlockInstructions);
 
     generateComputeAux2(compute_block, n);
 }

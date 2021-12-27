@@ -1,3 +1,38 @@
+/************************************************************************
+ 
+ IMPORTANT NOTE : this file contains two clearly delimited sections :
+ the ARCHITECTURE section (in two parts) and the USER section. Each section
+ is governed by its own copyright and license. Please check individually
+ each section for license and copyright information.
+ *************************************************************************/
+
+/*******************BEGIN ARCHITECTURE SECTION (part 1/2)****************/
+
+/************************************************************************
+ FAUST Architecture File
+ Copyright (C) 2004-2021 GRAME, Centre National de Creation Musicale
+ ---------------------------------------------------------------------
+ This Architecture section is free software; you can redistribute it
+ and/or modify it under the terms of the GNU Lesser General Public
+ License as published by the Free Software Foundation; either version 3
+ of the License, or (at your option) any later version.
+ 
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU Lesser General Public License for more details.
+ 
+ You should have received a copy of the GNU Lesser General Public License
+ along with this program; If not, see <http://www.gnu.org/licenses/>.
+ 
+ EXCEPTION : As a special exception, you may create a larger work
+ that contains this FAUST architecture section and distribute
+ that work under terms of your choice, so long as this FAUST
+ architecture section is not modified.
+ 
+ ************************************************************************
+ ************************************************************************/
+
 /*
  c++ -I. -O2 -fPIC -arch i386 -arch x86_64 -bundle audiothrudemo.cpp -o
  audiothrudemo.so
@@ -15,6 +50,18 @@
 #include "faust/dsp/dsp-tools.h"
 #include "faust/unity/AudioPluginInterface.h"
 
+// we require macro declarations
+#define FAUST_UIMACROS
+
+// but we will ignore most of them
+#define FAUST_ADDBUTTON(l,f)
+#define FAUST_ADDCHECKBOX(l,f)
+#define FAUST_ADDVERTICALSLIDER(l,f,i,a,b,s)
+#define FAUST_ADDHORIZONTALSLIDER(l,f,i,a,b,s)
+#define FAUST_ADDNUMENTRY(l,f,i,a,b,s)
+#define FAUST_ADDVERTICALBARGRAPH(l,f,a,b)
+#define FAUST_ADDHORIZONTALBARGRAPH(l,f,a,b)
+
 <<includeIntrinsic>>
 
 <<includeclass>>
@@ -24,6 +71,7 @@
 // implements the various Unity callbacks.
 //=============================================================================
 
+template <int INPUTS, int OUTPUTS>
 class unitydsp : public mydsp
 {
     
@@ -35,14 +83,15 @@ class unitydsp : public mydsp
         
     public:
         
-        unitydsp(UInt32 dspbuffersize = 0)
+        unitydsp(UInt32 buffer_size = 0)
         {
             buildUserInterface(&fUI);
-            fInputs = 0;
-            fOutputs = 0;
-            if (dspbuffersize > 0) {
-                fInputs = new AudioChannels(dspbuffersize, getNumInputs());
-                fOutputs = new AudioChannels(dspbuffersize, getNumOutputs());
+            if (buffer_size > 0) {
+                fInputs = (INPUTS > 0) ? new AudioChannels(buffer_size, INPUTS) : nullptr;
+                fOutputs = (OUTPUTS > 0) ? new AudioChannels(buffer_size, OUTPUTS) : nullptr;
+            } else {
+                fInputs = nullptr;
+                fOutputs = nullptr;
             }
         }
         
@@ -76,9 +125,9 @@ class unitydsp : public mydsp
         
         void unityProcess(float* inbuffer, float* outbuffer, unsigned int length, int inchannels, int outchannels)
         {
-            fInputs->interleavedRead(inbuffer, length, inchannels);
-            compute(length, fInputs->buffers(), fOutputs->buffers());
-            fOutputs->interleavedWrite(outbuffer, length, outchannels);
+            if (INPUTS > 0) fInputs->interleavedRead(inbuffer, length, inchannels);
+            compute(length, ((INPUTS > 0) ? fInputs->buffers() : nullptr), ((OUTPUTS > 0) ? fOutputs->buffers() : nullptr));
+            if (OUTPUTS > 0) fOutputs->interleavedWrite(outbuffer, length, outchannels);
         }
         
         void setParamValue(int pnum, float pval) { fUI.setParamValue(pnum, pval); }
@@ -91,10 +140,12 @@ class unitydsp : public mydsp
 // setParameter, getParameter, getFloatBuffer.
 //=============================================================================
 
+#define UNITY_DSP unitydsp<FAUST_INPUTS, FAUST_OUTPUTS>
+
 UNITY_AUDIODSP_RESULT UNITY_AUDIODSP_CALLBACK CreateCallback(UnityAudioEffectState* state)
 {
     std::cout << "Create()" << std::endl;
-    unitydsp* p = new unitydsp(state->dspbuffersize);
+    UNITY_DSP* p = new UNITY_DSP(state->dspbuffersize);
     if (p) {
         state->effectdata = p;
         return UNITY_AUDIODSP_OK;
@@ -107,16 +158,15 @@ UNITY_AUDIODSP_RESULT UNITY_AUDIODSP_CALLBACK CreateCallback(UnityAudioEffectSta
 UNITY_AUDIODSP_RESULT UNITY_AUDIODSP_CALLBACK ResetCallback(UnityAudioEffectState* state)
 {
     std::cout << "Reset()" << std::endl;
-    unitydsp* p = (unitydsp*)state->effectdata;
+    UNITY_DSP* p = (UNITY_DSP*)state->effectdata;
     if (p) p->init(state->samplerate);
-    
     return UNITY_AUDIODSP_OK;
 }
 
 UNITY_AUDIODSP_RESULT UNITY_AUDIODSP_CALLBACK ReleaseCallback(UnityAudioEffectState* state)
 {
     std::cout << "Release()" << std::endl;
-    unitydsp* p = (unitydsp*)state->effectdata;
+    UNITY_DSP* p = (UNITY_DSP*)state->effectdata;
     if (p) {
         delete p;
         state->effectdata = 0;
@@ -127,8 +177,7 @@ UNITY_AUDIODSP_RESULT UNITY_AUDIODSP_CALLBACK ReleaseCallback(UnityAudioEffectSt
 UNITY_AUDIODSP_RESULT UNITY_AUDIODSP_CALLBACK ProcessCallback(UnityAudioEffectState* state, float* inbuffer, float* outbuffer, unsigned int length, int inchannels, int outchannels)
 {
     if (inchannels != outchannels) return UNITY_AUDIODSP_ERR_UNSUPPORTED;
-    unitydsp* p = (unitydsp*)state->effectdata;
-    
+    UNITY_DSP* p = (UNITY_DSP*)state->effectdata;
     if (p) {
         p->unityProcess(inbuffer, outbuffer, length, inchannels, outchannels);
     } else {
@@ -139,8 +188,7 @@ UNITY_AUDIODSP_RESULT UNITY_AUDIODSP_CALLBACK ProcessCallback(UnityAudioEffectSt
 
 UNITY_AUDIODSP_RESULT UNITY_AUDIODSP_CALLBACK SetFloatParameterCallback(UnityAudioEffectState* state, int pnum, float pval)
 {
-    unitydsp* p = (unitydsp*)state->effectdata;
-    
+    UNITY_DSP* p = (UNITY_DSP*)state->effectdata;
     if (p) {
         p->setParamValue(pnum, pval);
     }
@@ -149,7 +197,7 @@ UNITY_AUDIODSP_RESULT UNITY_AUDIODSP_CALLBACK SetFloatParameterCallback(UnityAud
 
 UNITY_AUDIODSP_RESULT UNITY_AUDIODSP_CALLBACK GetFloatParameterCallback(UnityAudioEffectState* state, int pnum, float* pval, char*)
 {
-    unitydsp* p = (unitydsp*)state->effectdata;
+    UNITY_DSP* p = (UNITY_DSP*)state->effectdata;
     if (p) {
         *pval = p->getParamValue(pnum);
     }
@@ -188,7 +236,7 @@ extern "C" UNITY_AUDIODSP_EXPORT_API int UnityGetAudioEffectDefinitions(UnityAud
     definition.getfloatparameter = GetFloatParameterCallback;
     definition.getfloatbuffer = GetFloatBufferCallback;
     
-    unitydsp* d = new unitydsp();
+    UNITY_DSP* d = new UNITY_DSP();
     if (d) {
         d->ComputeUnityParameters(&definition);
         // unity plugins are either effects (n->n) or generators (0->n)
@@ -201,3 +249,5 @@ extern "C" UNITY_AUDIODSP_EXPORT_API int UnityGetAudioEffectDefinitions(UnityAud
     *definitionptr = definitionp;
     return 1;
 }
+
+/********************END ARCHITECTURE SECTION (part 2/2)****************/

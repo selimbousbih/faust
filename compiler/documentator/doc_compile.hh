@@ -94,7 +94,7 @@ class DocCompiler : public virtual Garbageable {
     /* Code generation. */
 
     string generateXtended(Tree sig, int priority);
-    string generateFixDelay(Tree sig, Tree arg, Tree size, int priority);
+    string generateDelay(Tree sig, Tree arg, Tree size, int priority);
     string generatePrefix(Tree sig, Tree x, Tree e, int priority);
     string generateIota(Tree sig, Tree arg);
     string generateBinOp(Tree sig, int opcode, Tree arg1, Tree arg2, int priority);
@@ -104,15 +104,12 @@ class DocCompiler : public virtual Garbageable {
     string generateInput(Tree sig, const string& idx);
     string generateOutput(Tree sig, const string& idx, const string& arg1);
 
-    //    string      generateDocReadOnlyTbl  (Tree sig, Tree size, Tree content, Tree ridx);
-    //    string      generateDocReadWriteTbl (Tree sig, Tree size, Tree content, Tree widx, Tree wsig, Tree ridx);
     string generateDocConstantTbl(Tree sig, Tree size, Tree content);
     string generateDocWriteTbl(Tree sig, Tree size, Tree content, Tree widx, Tree wsig);
     string generateDocAccessTbl(Tree sig, Tree tbl, Tree ridx);
 
     string generateSelect2(Tree sig, Tree sel, Tree s1, Tree s2, int priority);
-    string generateSelect3(Tree sig, Tree sel, Tree s1, Tree s2, Tree s3, int priority);
-
+   
     string generateRecProj(Tree sig, Tree exp, int i, int priority);
     void   generateRec(Tree sig, Tree var, Tree le, int priority);
 
@@ -128,7 +125,7 @@ class DocCompiler : public virtual Garbageable {
     string generateVBargraph(Tree sig, Tree label, Tree min, Tree max, const string& exp);
     string generateHBargraph(Tree sig, Tree label, Tree min, Tree max, const string& exp);
     string generateAttach(Tree sig, Tree x, Tree y, int priority);
-    string generateEnable(Tree sig, Tree arg1, Tree arg2, int priority);
+    string generateControl(Tree sig, Tree arg1, Tree arg2, int priority);
     string generateNumber(Tree sig, const string& exp);
     string generateFConst(Tree sig, const string& file, const string& name);
     string generateFVar(Tree sig, const string& file, const string& name);

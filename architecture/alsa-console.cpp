@@ -5,7 +5,7 @@
  each section for license and copyright information.
  *************************************************************************/
 
-/*******************BEGIN ARCHITECTURE SECTION (part 1/2)****************/
+/******************* BEGIN alsa-console.cpp ****************/
 
 /************************************************************************
  FAUST Architecture File
@@ -93,9 +93,11 @@
 
 /*******************BEGIN ARCHITECTURE SECTION (part 2/2)***************/
 
+using namespace std;
+
 dsp* DSP;
 
-std::list<GUI*> GUI::fGuiList;
+list<GUI*> GUI::fGuiList;
 ztimedmap GUI::gTimedZoneMap;
 
 //-------------------------------------------------------------------------
@@ -107,13 +109,13 @@ static bool hasMIDISync()
     JSONUI jsonui;
     mydsp* tmp_dsp = new mydsp();
     tmp_dsp->buildUserInterface(&jsonui);
-    std::string json = jsonui.JSON();
+    string json = jsonui.JSON();
     delete tmp_dsp;
 
-    return ((json.find("midi") != std::string::npos) &&
-            ((json.find("start") != std::string::npos) ||
-            (json.find("stop") != std::string::npos) ||
-            (json.find("clock") != std::string::npos)));
+    return ((json.find("midi") != string::npos) &&
+            ((json.find("start") != string::npos) ||
+            (json.find("stop") != string::npos) ||
+            (json.find("clock") != string::npos)));
 }
 
 int main(int argc, char *argv[] )
@@ -122,23 +124,22 @@ int main(int argc, char *argv[] )
     char rcfilename[256];
     char* home = getenv("HOME");
     int nvoices = 0;
-    mydsp_poly* dsp_poly = NULL;
     snprintf(rcfilename, 256, "%s/.%src", home, appname);
 
 #ifdef POLY2
     nvoices = lopt(argv, "--nvoices", nvoices);
     int group = lopt(argv, "--group", 1);
-    std::cout << "Started with " << nvoices << " voices\n";
-    dsp_poly = new mydsp_poly(new mydsp(), nvoices, true, group);
+    cout << "Started with " << nvoices << " voices\n";
+    DSP = new mydsp_poly(new mydsp(), nvoices, true, group);
 
 #if MIDICTRL
     if (hasMIDISync()) {
-        DSP = new timed_dsp(new dsp_sequencer(dsp_poly, new effect()));
+        DSP = new timed_dsp(new dsp_sequencer(DSP, new effect()));
     } else {
-        DSP = new dsp_sequencer(dsp_poly, new effect());
+        DSP = new dsp_sequencer(DSP, new effect());
     }
 #else
-    DSP = new dsp_sequencer(dsp_poly, new effect());
+    DSP = new dsp_sequencer(DSP, new effect());
 #endif
     
 #else
@@ -146,17 +147,13 @@ int main(int argc, char *argv[] )
     int group = lopt(argv, "--group", 1);
     
     if (nvoices > 0) {
-        std::cout << "Started with " << nvoices << " voices\n";
-        dsp_poly = new mydsp_poly(new mydsp(), nvoices, true, group);
+        cout << "Started with " << nvoices << " voices\n";
+        DSP = new mydsp_poly(new mydsp(), nvoices, true, group);
         
 #if MIDICTRL
         if (hasMIDISync()) {
-            DSP = new timed_dsp(dsp_poly);
-        } else {
-            DSP = dsp_poly;
+            DSP = new timed_dsp(DSP);
         }
-#else
-        DSP = dsp_poly;
 #endif
     } else {
 #if MIDICTRL
@@ -171,8 +168,8 @@ int main(int argc, char *argv[] )
     }
 #endif
     
-    if (DSP == 0) {
-        std::cerr << "Unable to allocate Faust DSP object" << std::endl;
+    if (!DSP) {
+        cerr << "Unable to allocate Faust DSP object" << endl;
         exit(1);
     }
 
@@ -183,16 +180,15 @@ int main(int argc, char *argv[] )
 
 #ifdef MIDICTRL
     rt_midi midi_handler(appname);
-    midi_handler.addMidiIn(dsp_poly);
     MidiUI midiinterface(&midi_handler);
     DSP->buildUserInterface(&midiinterface);
-    std::cout << "MIDI is on" << std::endl;
+    cout << "MIDI is on" << endl;
 #endif
 
 #ifdef HTTPCTRL
     httpdUI* httpdinterface = new httpdUI(appname, DSP->getNumInputs(), DSP->getNumOutputs(), argc, argv);
     DSP->buildUserInterface(httpdinterface);
-    std::cout << "HTTPD is on" << std::endl;
+    cout << "HTTPD is on" << endl;
 #endif
 
 #ifdef OSCCTRL
@@ -200,7 +196,7 @@ int main(int argc, char *argv[] )
     DSP->buildUserInterface(oscinterface);
 #endif
 
-    alsaaudio audio (argc, argv, DSP);
+    alsaaudio audio(argc, argv, DSP);
     audio.init(appname, DSP);
     finterface->recallState(rcfilename);
     audio.start();
@@ -214,7 +210,7 @@ int main(int argc, char *argv[] )
 #endif
 #ifdef MIDICTRL
     if (!midiinterface.run()) {
-        std::cerr << "MidiUI run error\n";
+        cerr << "MidiUI run error\n";
     }
 #endif
     interface->run();
@@ -239,4 +235,4 @@ int main(int argc, char *argv[] )
     return 0;
 }
 
-/********************END ARCHITECTURE SECTION (part 2/2)****************/
+/******************** END alsa-console.cpp ****************/

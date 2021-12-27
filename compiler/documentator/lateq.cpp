@@ -27,12 +27,12 @@
 
        Historique :
        -----------
-       17-10-2001 : (klass.cpp) implementation initiale (yo)
-       18-10-2001 : (klass.cpp) Ajout de getFreshID (yo)
-       02-11-2001 : (klass.cpp) Ajout de sous classes (yo)
-       06-11-2001 : (klass.cpp) modif impression des classes (yo)
-       16-08-2009 : (lateq.cpp) Creation de lateq depuis klass.cpp (kb)
-       2009-11-21 : (lateq.cpp) Remodelage et documentation doxygen (kb)
+       17-10-2001 : (klass.cpp) initiale implementation  (yo)
+       18-10-2001 : (klass.cpp) add getFreshID (yo)
+       02-11-2001 : (klass.cpp) add sub-classes (yo)
+       06-11-2001 : (klass.cpp) printing classes modification (yo)
+       16-08-2009 : (lateq.cpp) lateq creation from klass.cpp (kb)
+       2009-11-21 : (lateq.cpp) rework and doxygen documentation (kb)
 
 ***********************************************************************/
 
@@ -416,14 +416,13 @@ void Lateq::printHierarchy(const string& section, multimap<string, string>& fiel
 }
 
 /**
- * @brief Print formulas for select2, select3 and prefix signals.
+ * @brief Print formulas for select2 and prefix signals.
  *
  * @param[in]	section		The title to print for these formulas.
  * @param[in]	field		The list of LaTeX arrays (for braces with two lines).
  * @param[out]	docout		The LaTeX output file to print into.
  *
  * @see DocCompiler::generateSelect2
- * @see DocCompiler::generateSelect3
  * @see DocCompiler::generatePrefix
  */
 void Lateq::printMath(const string& section, list<string>& field, ostream& docout)

@@ -1,6 +1,6 @@
 /************************************************************************
  FAUST Architecture File
- Copyright (C) 2016 GRAME, Centre National de Creation Musicale
+ Copyright (C) 2016-2020 GRAME, Centre National de Creation Musicale
  ---------------------------------------------------------------------
  This Architecture section is free software; you can redistribute it
  and/or modify it under the terms of the GNU General Public License
@@ -63,7 +63,7 @@
 
 <<includeclass>>
 
-class FaustComponent : public AudioAppComponent, private Timer
+class FaustComponent : public juce::AudioAppComponent, private juce::Timer
 {
     public:
    
@@ -72,7 +72,6 @@ class FaustComponent : public AudioAppComponent, private Timer
             bool midi_sync = false;
             int nvoices = 0;
             bool group = true;
-            mydsp_poly* dsp_poly = nullptr;
             
             mydsp* tmp_dsp = new mydsp();
             MidiMeta::analyse(tmp_dsp, midi_sync, nvoices);
@@ -81,76 +80,70 @@ class FaustComponent : public AudioAppComponent, private Timer
         #ifdef POLY2
             assert(nvoices > 0);
             std::cout << "Started with " << nvoices << " voices\n";
-            dsp_poly = new mydsp_poly(new mydsp(), nvoices, true, group);
+            dsp* dsp = std::make_unique<mydsp_poly>(new mydsp(), nvoices, true, group);
                 
         #if MIDICTRL
             if (midi_sync) {
-                fDSP = new timed_dsp(new dsp_sequencer(dsp_poly, new effect()));
+                fDSP = std::make_unique<timed_dsp>(new dsp_sequencer(dsp, new effect()));
             } else {
-                fDSP = new dsp_sequencer(dsp_poly, new effect());
+                fDSP = std::make_unique<dsp_sequencer>(dsp, new effect());
             }
         #else
-            fDSP = new dsp_sequencer(dsp_poly, new effect());
+            fDSP = std::make_unique<dsp_sequencer>(dsp, new effect());
         #endif
                 
         #else
             if (nvoices > 0) {
                 std::cout << "Started with " << nvoices << " voices\n";
-                dsp_poly = new mydsp_poly(new mydsp(), nvoices, true, group);
+                dsp* dsp = new mydsp_poly(new mydsp(), nvoices, true, group);
                 
         #if MIDICTRL
                 if (midi_sync) {
-                    fDSP = new timed_dsp(dsp_poly);
+                    fDSP = std::make_unique<timed_dsp>(dsp);
                 } else {
-                    fDSP = dsp_poly;
+                    fDSP = std::make_unique<decorator_dsp>(dsp);
                 }
         #else
-                fDSP = dsp_poly;
+                fDSP = std::make_unique<decorator_dsp>(dsp);
         #endif
             } else {
         #if MIDICTRL
                 if (midi_sync) {
-                    fDSP = new timed_dsp(new mydsp());
+                    fDSP = std::make_unique<timed_dsp>(new mydsp());
                 } else {
-                    fDSP = new mydsp();
+                    fDSP = std::make_unique<mydsp>();
                 }
         #else
-                fDSP = new mydsp();
+                fDSP = std::make_unique<mydsp>();
         #endif
             }
-                
         #endif
 
             addAndMakeVisible(fJuceGUI);
-            
             fDSP->buildUserInterface(&fJuceGUI);
             
         #if defined(MIDICTRL)
-            fMIDIHandler = new juce_midi();
-            fMIDIHandler->addMidiIn(dsp_poly);
-            fMIDIUI = new MidiUI(fMIDIHandler);
-            fDSP->buildUserInterface(fMIDIUI);
+            fMIDIHandler = std::make_unique<juce_midi>();
+            fMIDIUI = std::make_unique<MidiUI>(fMIDIHandler.get());
+            fDSP->buildUserInterface(fMIDIUI.get());
             if (!fMIDIUI->run()) {
                 std::cerr << "JUCE MIDI handler cannot be started..." << std::endl;
             }
         #endif
         
         #if defined(OSCCTRL)
-            fOSCUI = new JuceOSCUI("127.0.0.1", 5510, 5511);
-            fDSP->buildUserInterface(fOSCUI);
+            fOSCUI = std::make_unique<JuceOSCUI>("127.0.0.1", 5510, 5511);
+            fDSP->buildUserInterface(fOSCUI.get());
             if (!fOSCUI->run()) {
                 std::cerr << "JUCE OSC handler cannot be started..." << std::endl;
             }
         #endif
             
         #if defined(SOUNDFILE)
-            auto file = File::getSpecialLocation(File::currentExecutableFile)
+            auto file = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
                 .getParentDirectory().getParentDirectory().getChildFile("Resources");
-            fSoundUI = new SoundUI(file.getFullPathName().toStdString());
-            // SoundUI has to be dispatched on all internal voices
-            if (dsp_poly) dsp_poly->setGroup(false);
-            fDSP->buildUserInterface(fSoundUI);
-            if (dsp_poly) dsp_poly->setGroup(group);
+            fSoundUI = std::make_unique<SoundUI>(file.getFullPathName().toStdString());
+            fDSP->buildUserInterface(fSoundUI.get());
         #endif
             
             recommendedSize = fJuceGUI.getSize();
@@ -174,15 +167,20 @@ class FaustComponent : public AudioAppComponent, private Timer
         //==============================================================================
         void prepareToPlay (int samplesPerBlockExpected, double sampleRate) override
         {
-            AudioIODevice* device = deviceManager.getCurrentAudioDevice();
-            const BigInteger activeInputChannels = device->getActiveInputChannels();
-            const BigInteger activeOutputChannels = device->getActiveOutputChannels();
+            juce::AudioIODevice* device = deviceManager.getCurrentAudioDevice();
+            const juce::BigInteger activeInputChannels = device->getActiveInputChannels();
+            const juce::BigInteger activeOutputChannels = device->getActiveOutputChannels();
             const int maxInputChannels = activeInputChannels.getHighestBit() + 1;
             const int maxOutputChannels = activeOutputChannels.getHighestBit() + 1;
             
-            // Possibly adapt DSP...
+            // Possible sample size adaptation
+            if (sizeof(FAUSTFLOAT) == 8) {
+                fDSP = std::make_unique<dsp_sample_adapter<FAUSTFLOAT, float>>(fDSP.release());
+            }
+            
+            // Possibly adapt DSP inputs/outputs number
             if (fDSP->getNumInputs() > maxInputChannels || fDSP->getNumOutputs() > maxOutputChannels) {
-                fDSP = new dsp_adapter(fDSP.release(), maxInputChannels, maxOutputChannels, 4096);
+                fDSP = std::make_unique<dsp_adapter>(fDSP.release(), maxInputChannels, maxOutputChannels, 4096);
             }
             
             fDSP->init(int(sampleRate));
@@ -191,9 +189,9 @@ class FaustComponent : public AudioAppComponent, private Timer
         void releaseResources() override
         {}
 
-        void getNextAudioBlock (const AudioSourceChannelInfo& bufferToFill) override
+        void getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferToFill) override
         {
-            AVOIDDENORMALS;
+            juce::ScopedNoDenormals noDenormals;
             
             const float** inputs = (const float**)alloca(fDSP->getNumInputs() * sizeof(float));
             for (int i = 0; i < fDSP->getNumInputs(); i++) {
@@ -209,9 +207,9 @@ class FaustComponent : public AudioAppComponent, private Timer
             fDSP->compute(-1, bufferToFill.numSamples, (float**)inputs, outputs);
         }
 
-        void paint (Graphics& g) override
+        void paint (juce::Graphics& g) override
         {
-            g.fillAll (Colour (Colours::white));
+            g.fillAll (juce::Colour (juce::Colours::white));
         }
 
         void resized() override
@@ -221,7 +219,7 @@ class FaustComponent : public AudioAppComponent, private Timer
 
         juce::Rectangle<int> getMinSize()
         {
-            return juce::Rectangle<int>(0, 0, jmin(recommendedSize.getWidth(), screenWidth), jmin(recommendedSize.getHeight(), screenHeight));
+            return juce::Rectangle<int>(0, 0, juce::jmin(recommendedSize.getWidth(), screenWidth), juce::jmin(recommendedSize.getHeight(), screenHeight));
         }
 
         juce::Rectangle<int> getRecommendedSize()
@@ -232,24 +230,24 @@ class FaustComponent : public AudioAppComponent, private Timer
     private:
     
     #if defined(MIDICTRL)
-        ScopedPointer<juce_midi> fMIDIHandler;
-        ScopedPointer<MidiUI> fMIDIUI;
+        std::unique_ptr<juce_midi> fMIDIHandler;
+        std::unique_ptr<MidiUI> fMIDIUI;
     #endif
     
     #if defined(OSCCTRL)
-        ScopedPointer<JuceOSCUI> fOSCUI;
+        std::unique_ptr<JuceOSCUI> fOSCUI;
     #endif
     
     #if defined(SOUNDFILE)
-        ScopedPointer<SoundUI> fSoundUI;
+        std::unique_ptr<SoundUI> fSoundUI;
     #endif
         
         JuceGUI fJuceGUI;
         
-        ScopedPointer<dsp> fDSP;
+        std::unique_ptr<dsp> fDSP;
     
         juce::Rectangle<int> recommendedSize;
-        juce::Rectangle<int> r = Desktop::getInstance().getDisplays().getMainDisplay().userArea;
+    juce::Rectangle<int> r = juce::Desktop::getInstance().getDisplays().getMainDisplay().userArea;
         int screenWidth = r.getWidth();
         int screenHeight = r.getHeight();
 
@@ -260,28 +258,27 @@ class FaustComponent : public AudioAppComponent, private Timer
 FaustComponent* createFaustComponent()     { return new FaustComponent(); }
 
 //==============================================================================
-class FaustAudioApplication : public JUCEApplication
+class FaustAudioApplication : public juce::JUCEApplication
 {
     
     public:
         //==============================================================================
         FaustAudioApplication() {}
         
-        const String getApplicationName() override       { return ProjectInfo::projectName; }
-        const String getApplicationVersion() override    { return ProjectInfo::versionString; }
+        const juce::String getApplicationName() override       { return ProjectInfo::projectName; }
+        const juce::String getApplicationVersion() override    { return ProjectInfo::versionString; }
         bool moreThanOneInstanceAllowed() override       { return true; }
         
         //==============================================================================
-        void initialise (const String& commandLine) override
+        void initialise (const juce::String& commandLine) override
         {
             // This method is where you should put your application's initialisation code..
-            mainWindow = new MainWindow (getApplicationName());
+            mainWindow = std::make_unique<MainWindow>(getApplicationName());
         }
         
         void shutdown() override
         {
             // Add your application's shutdown code here..
-            
             mainWindow = nullptr; // (deletes our window)
         }
         
@@ -293,7 +290,7 @@ class FaustAudioApplication : public JUCEApplication
             quit();
         }
         
-        void anotherInstanceStarted (const String& commandLine) override
+        void anotherInstanceStarted (const juce::String& commandLine) override
         {
             // When another instance of the app is launched while this one is running,
             // this method is invoked, and the commandLine parameter tells you what
@@ -306,23 +303,22 @@ class FaustAudioApplication : public JUCEApplication
          our FaustComponent class.
          */
         
-        class myViewport : public Viewport
+        class myViewport : public juce::Viewport
         {
             
             public:
             
-                myViewport(String name, int w, int h, int rW, int rH):
-                Viewport(name),
+                myViewport(juce::String name, int w, int h, int rW, int rH):
+                juce::Viewport(name),
                 minWidth(w),
                 minHeight(h),
                 recommendedWidth(rW),
                 recommendedHeight(rH)
-                {
-                    addAndMakeVisible(tooltipWindow);
-                }
+                {}
                 
-                virtual void resized() override {
-                    Viewport::resized();
+                virtual void resized() override
+                {
+                    juce::Viewport::resized();
                     getBounds().getWidth() < minWidth ? ((minWidth < recommendedWidth) ? width = minWidth
                                                          : width = recommendedWidth)
                     : width = getBounds().getWidth();
@@ -337,8 +333,9 @@ class FaustAudioApplication : public JUCEApplication
                 #endif
                 }
                 
-                void currentAreaChanged (int w, int h) {
-                    getViewedComponent()->setBounds(0, 0, jmax(getParentWidth(), w), jmax(getParentHeight(), h));
+                void currentAreaChanged (int w, int h)
+                {
+                    getViewedComponent()->setBounds(0, 0, juce::jmax(getParentWidth(), w), juce::jmax(getParentHeight(), h));
                     setSize(getParentWidth(), getParentHeight());
                 }
                 
@@ -347,18 +344,16 @@ class FaustAudioApplication : public JUCEApplication
                 int minWidth, minHeight;
                 int recommendedWidth, recommendedHeight;
                 int width, height;
-                TooltipWindow tooltipWindow;
-                int j = 0;
         };
         
-        class MainWindow : public DocumentWindow
+        class MainWindow : public juce::DocumentWindow
         {
             
             public:
             
-                MainWindow (String name) : DocumentWindow (name,
-                                                           Colours::lightgrey,
-                                                           DocumentWindow::allButtons)
+                MainWindow (juce::String name) : juce::DocumentWindow (name,
+                                                                       juce::Colours::lightgrey,
+                                                                       juce::DocumentWindow::allButtons)
                 {
                     setUsingNativeTitleBar (true);
                     
@@ -372,11 +367,11 @@ class FaustAudioApplication : public JUCEApplication
                     int recomWidth = fWindow->getRecommendedSize().getWidth();
                     int recomHeight = fWindow->getRecommendedSize().getHeight();
                     
-                    fViewport = new myViewport(name, minWidth, minHeight, recomWidth, recomHeight);
+                    fViewport = std::make_unique<myViewport>(name, minWidth, minHeight, recomWidth, recomHeight);
                     fViewport->setViewedComponent(fWindow);
                     fViewport->setSize(minWidth, minHeight);
                     
-                    setContentOwned(fViewport, true);
+                    setContentOwned(fViewport.get(), true);
                     centreWithSize (getWidth(), getHeight());
                     setResizable (true, false);
                     setVisible(true);
@@ -399,13 +394,13 @@ class FaustAudioApplication : public JUCEApplication
                 
             private:
             
-                ScopedPointer<myViewport> fViewport;
+                std::unique_ptr<myViewport> fViewport;
                 JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainWindow)
         };
         
     private:
     
-        ScopedPointer<MainWindow> mainWindow;
+        std::unique_ptr<MainWindow> mainWindow;
 };
 
 //==============================================================================

@@ -3,15 +3,21 @@
 #####################################################################
 #                                                                   #
 #               Compiles Faust programs to PortAudio and QT         #
-#               (c) Grame, 2009                                     #
+#               (c) Grame, 2009-2019                                #
 #                                                                   #
 #####################################################################
 
 . faustpath
 . faustoptflags
-CXXFLAGS=$MYGCCFLAGS
+. usage.sh
+
+CXXFLAGS+=" $MYGCCFLAGS"  # So that additional CXXFLAGS can be used
 
 ARCHFILE=$FAUSTARCH/pa-qt.cpp
+
+if [[ $(uname -s) != Darwin ]]; then
+	LFLAGS+="-no-pie"
+fi
 
 #-------------------------------------------------------------------------------
 # Search for qmake or qmake-qt4
@@ -38,15 +44,16 @@ do
     p=$1
 
     if [ $p = "-help" ] || [ $p = "-h" ]; then
-        echo "faust2paqt [-httpd] [-qrcode] [-poly] [-midi] [-osc] [-nodeploy] [additional Faust options (-vec -vs 8...)] <file.dsp>"
-        echo "Use '-httpd' to activate HTTP control"
-        echo "Use '-qrcode' to activate QR code generation"
-        echo "Use '-nvoices <num>' to produce a polyphonic self-contained DSP with <num> voices, ready to be used with MIDI or OSC"
-        echo "Use '-midi' to activate MIDI control"
-        echo "Use '-effect <effect.dsp>' to produce a polyphonic DSP connected to a global output effect, ready to be used with MIDI or OSC"
-        echo "Use '-effect auto' to produce a polyphonic DSP connected to a global output effect defined as 'effect' in <file.dsp>, ready to be used with MIDI or OSC"
-        echo "Use '-osc' to activate OSC control"
-        echo "Use '-nodeploy' to not create a self-contained application using 'macdeployqt'"
+        usage faust2paqt "[options] [Faust options] <file.dsp>"
+        require PortAudio, Qt
+        echo "Compiles Faust programs to  PortAudio and Qt"
+        option
+        options -httpd -osc -midi -qrcode
+        option "-nvoices <num>"
+        option "-effect <effect.dsp>"
+        option "-effect auto"
+        option -nodeploy
+        option "Faust options"
         exit
     fi
     
@@ -75,7 +82,7 @@ do
 		QRDEFS="DEFINES += QRCODECTRL"
 	elif [ ${p:0:1} = "-" ]; then
 	    OPTIONS="$OPTIONS $p"
-	elif [[ -f "$p" ]]; then
+	elif [[ -f "$p" ]] && [ ${p: -4} == ".dsp" ]; then
 	    FILES="$FILES $p"
 	else
 	    OPTIONS="$OPTIONS $p"        
@@ -135,7 +142,7 @@ EndOfCode
     # compile c++ to binary
     (
 	    cd "$TMP"
-        $QMAKE -project "QT += widgets printsupport" "INCLUDEPATH+=$CUR" "INCLUDEPATH+=$FAUSTINC /opt/local/include" "QMAKE_CXXFLAGS= $CXXFLAGS -Wno-unused-parameter $FAUSTTOOLSFLAGS" "QMAKE_INFO_PLIST=$FAUSTARCH/Info.plist" "LIBS+=$ARCHLIB $OSCLIBS $HTTPLIBS" "HEADERS+=$FAUSTINC/faust/gui/QTUI.h" "RESOURCES+=$FAUSTINC/faust/gui/Styles/Grey.qrc" "$OSCDEFS" "$HTTPDEFS" "$QRDEFS" "$POLYDEFS" "$MIDIDEFS"
+        $QMAKE -project "QT += widgets printsupport" "INCLUDEPATH+=$CUR" "INCLUDEPATH+=$FAUSTINC /opt/local/include" "QMAKE_CXXFLAGS= $CXXFLAGS -Wno-unused-parameter $FAUSTTOOLSFLAGS" "QMAKE_INFO_PLIST=$FAUSTARCH/Info.plist" "QMAKE_LFLAGS=$LFLAGS" "LIBS+=$ARCHLIB $OSCLIBS $HTTPLIBS" "HEADERS+=$FAUSTINC/faust/gui/QTUI.h" "RESOURCES+=$FAUSTINC/faust/gui/Styles/Grey.qrc" "$OSCDEFS" "$HTTPDEFS" "$QRDEFS" "$POLYDEFS" "$MIDIDEFS"
 	    $QMAKE $SPEC QMAKE_CFLAGS_ISYSTEM=-I
         make
     ) > /dev/null || exit
@@ -148,7 +155,10 @@ EndOfCode
     fi
 
     rm -rf "$SRCDIR/${f%.dsp}$EXT"
-    cp -r "$TMP/${f%.dsp}$EXT" "$SRCDIR/${f%.dsp}$EXT"
+    cp -a "$TMP/${f%.dsp}$EXT" "$SRCDIR/${f%.dsp}$EXT"
+    if [[ $(uname) == Darwin ]]; then
+        codesign --sign - --deep --force "$SRCDIR/${f%.dsp}$EXT"
+    fi
     rm -rf "$TDR"
     rm $p.json
 

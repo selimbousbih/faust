@@ -5,7 +5,7 @@
  each section for license and copyright information.
  *************************************************************************/
 
-/*******************BEGIN ARCHITECTURE SECTION (part 1/2)****************/
+/******************* BEGIN alsa-gtk.cpp ****************/
 
 /************************************************************************
  FAUST Architecture File
@@ -83,9 +83,11 @@
 
 #include "faust/dsp/poly-dsp.h"
 
+using namespace std;
+
 dsp* DSP;
 
-std::list<GUI*> GUI::fGuiList;
+list<GUI*> GUI::fGuiList;
 ztimedmap GUI::gTimedZoneMap;
 
 static bool hasMIDISync()
@@ -93,13 +95,13 @@ static bool hasMIDISync()
     JSONUI jsonui;
     mydsp* tmp_dsp = new mydsp();
     tmp_dsp->buildUserInterface(&jsonui);
-    std::string json = jsonui.JSON();
+    string json = jsonui.JSON();
     delete tmp_dsp;
     
-    return ((json.find("midi") != std::string::npos) &&
-            ((json.find("start") != std::string::npos) ||
-            (json.find("stop") != std::string::npos) ||
-            (json.find("clock") != std::string::npos)));
+    return ((json.find("midi") != string::npos) &&
+            ((json.find("start") != string::npos) ||
+            (json.find("stop") != string::npos) ||
+            (json.find("clock") != string::npos)));
 }
 
 //-------------------------------------------------------------------------
@@ -111,24 +113,18 @@ int main(int argc, char* argv[])
     char name[256];
     char rcfilename[256];
     char* home = getenv("HOME");
-    mydsp_poly* dsp_poly = NULL;
-
     snprintf(name, 256, "%s", basename(argv[0]));
     snprintf(rcfilename, 256, "%s/.%src", home, name);
 
 #ifdef POLY
     int poly = lopt(argv, "--poly", 4);
     int group = lopt(argv, "--group", 1);
-    dsp_poly = new mydsp_poly(new mydsp(), poly, true, group);
+    DSP = new mydsp_poly(new mydsp(), poly, true, group);
 
 #if MIDICTRL
     if (hasMIDISync()) {
-        DSP = new timed_dsp(dsp_poly);
-    } else {
-        DSP = dsp_poly;
+        DSP = new timed_dsp(DSP);
     }
-#else
-    DSP = dsp_poly;
 #endif
 
 #else
@@ -145,8 +141,8 @@ int main(int argc, char* argv[])
 
 #endif
      
-    if (DSP == 0) {
-        std::cerr << "Unable to allocate Faust DSP object" << std::endl;
+    if (!DSP) {
+        cerr << "Unable to allocate Faust DSP object" << endl;
         exit(1);
     }
 
@@ -157,16 +153,15 @@ int main(int argc, char* argv[])
 
 #ifdef MIDICTRL
     rt_midi midi_handler(name);
-    midi_handler.addMidiIn(dsp_poly);
     MidiUI midiinterface(&midi_handler);
     DSP->buildUserInterface(&midiinterface);
-    std::cout << "MIDI is on" << std::endl;
+    cout << "MIDI is on" << endl;
 #endif
 
 #ifdef HTTPCTRL
     httpdUI* httpdinterface = new httpdUI(name, DSP->getNumInputs(), DSP->getNumOutputs(), argc, argv);
     DSP->buildUserInterface(httpdinterface);
-    std::cout << "HTTPD is on" << std::endl;
+    cout << "HTTPD is on" << endl;
 #endif
 
 #ifdef OSCCTRL
@@ -188,7 +183,7 @@ int main(int argc, char* argv[])
 #endif
 #ifdef MIDICTRL
     if (!midiinterface.run()) {
-        std::cerr << "MidiUI run error\n";
+        cerr << "MidiUI run error\n";
     }
 #endif
     interface->run();
@@ -213,5 +208,5 @@ int main(int argc, char* argv[])
     return 0;
 }
 
-/********************END ARCHITECTURE SECTION (part 2/2)****************/
+/******************** END alsa-gtk.cpp ****************/
 

@@ -47,20 +47,20 @@ class ScalarCompiler : public Compiler {
     property<pair<string, string> > fStaticInitProperty;    // property added to solve 20101208 kjetil bug
     property<pair<string, string> > fInstanceInitProperty;  // property added to solve 20101208 kjetil bug
 
-    map<Tree, Tree> fConditionProperty;  // used with the new X,Y:enable --> sigEnable(X*Y,Y>0) primitive
+    map<Tree, Tree> fConditionProperty;  // used with the new X,Y:enable --> sigControl(X*Y,Y>0) primitive
 
     static map<string, int> fIDCounters;
     Tree                    fSharingKey;
     old_OccMarkup*          fOccMarkup;
-    bool                    fHasIota;
+    int                     fMaxIota;
 
    public:
     ScalarCompiler(const string& name, const string& super, int numInputs, int numOutputs)
-        : Compiler(name, super, numInputs, numOutputs, false), fOccMarkup(0), fHasIota(false)
+        : Compiler(name, super, numInputs, numOutputs, false), fOccMarkup(0), fMaxIota(-1)
     {
     }
 
-    ScalarCompiler(Klass* k) : Compiler(k), fOccMarkup(0), fHasIota(false) {}
+    ScalarCompiler(Klass* k) : Compiler(k), fOccMarkup(0), fMaxIota(-1) {}
 
     virtual void compileMultiSignal(Tree lsig);
     virtual void compileSingleSignal(Tree lsig);
@@ -97,14 +97,14 @@ class ScalarCompiler : public Compiler {
     // signal drawing
     /*
     SL : 28/09/17 : deactivated for now
-    void sigToGraph (Tree sig, ofstream& fout);
+    void sigToGraph(Tree sig, ofstream& fout);
     void recdraw(Tree sig, set<Tree>& drawn, ofstream& fout);
     */
 
     // code generation
 
     string         generateXtended(Tree sig);
-    virtual string generateFixDelay(Tree sig, Tree arg, Tree size);
+    virtual string generateDelay(Tree sig, Tree arg, Tree size);
     string         generatePrefix(Tree sig, Tree x, Tree e);
     string         generateIota(Tree sig, Tree arg);
     string         generateBinOp(Tree sig, int opcode, Tree arg1, Tree arg2);
@@ -123,8 +123,7 @@ class ScalarCompiler : public Compiler {
     string generateStaticSigGen(Tree sig, Tree content);
 
     string generateSelect2(Tree sig, Tree sel, Tree s1, Tree s2);
-    string generateSelect3(Tree sig, Tree sel, Tree s1, Tree s2, Tree s3);
-
+  
     string generateRecProj(Tree sig, Tree exp, int i);
     void   generateRec(Tree sig, Tree var, Tree le);
 
@@ -156,7 +155,7 @@ class ScalarCompiler : public Compiler {
 
     void declareWaveform(Tree sig, string& vname, int& size);
 
-    virtual string generateEnable(Tree sig, Tree x, Tree y);
+    virtual string generateControl(Tree sig, Tree x, Tree y);
 
     string cnf2code(Tree cc);
     string or2code(Tree oc);

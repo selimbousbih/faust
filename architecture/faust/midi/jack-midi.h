@@ -36,11 +36,10 @@
 
 class MapUI;
 
-//-----------------------------------------------
-// MIDI input/output handling using JACK library
-//-----------------------------------------------
-
-class jack_midi_handler : public midi_handler {
+/**
+ *  MIDI input/output handling using JACK library: https://jackaudio.org
+ */
+class jack_midi : public midi_handler {
         
     protected:
 
@@ -129,18 +128,18 @@ class jack_midi_handler : public midi_handler {
 
     public:
 
-        jack_midi_handler(const std::string& name = "JACKHandler")
+        jack_midi(const std::string& name = "JACKHandler")
             :midi_handler(name), fInputMidiPort(nullptr), fOutputMidiPort(nullptr)
         {
             fOutBuffer = ringbuffer_create(8192);
         }
-        virtual ~jack_midi_handler()
+        virtual ~jack_midi()
         {
             ringbuffer_free(fOutBuffer);
         }
     
         // To be used in polling mode
-        int getMessages(std::vector<MIDIMessage>* messages)
+        int recvMessages(std::vector<MIDIMessage>* messages)
         {
             int count = 0;
             jack_nframes_t first_time_stamp = 0;
@@ -157,11 +156,23 @@ class jack_midi_handler : public midi_handler {
                         mes.byte1 = event.buffer[1];
                         mes.byte2 = event.buffer[2];
                     } else {
-                        std::cerr << "getMessages : long messages are not supported yet\n";
+                        std::cerr << "recvMessages : long messages (" << event.size << ") are not supported yet\n";
                     }
                 }
             }
             return count;
+        }
+    
+        void sendMessages(std::vector<MIDIMessage>* messages, int count)
+        {
+            for (int i = 0; i < count; ++i) {
+                MIDIMessage message = (*messages)[i];
+                unsigned char buffer[3]
+                    = { static_cast<unsigned char>(message.byte0),
+                        static_cast<unsigned char>(message.byte1),
+                        static_cast<unsigned char>(message.byte2) };
+                writeMessage(0, buffer, 3);
+            }
         }
     
         // MIDI output API

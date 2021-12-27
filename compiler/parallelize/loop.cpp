@@ -26,7 +26,7 @@
 using namespace std;
 
 /**
- * Print a list of lines
+ * Print a list of lines.
  * @param n number of tabs of indentation
  * @param lines list of lines to be printed
  * @param fout output stream
@@ -71,7 +71,7 @@ static void printlines(int n, list<Statement>& lines, ostream& fout)
 }
 
 /**
- * Create a recursive loop
+ * Create a recursive loop.
  * @param recsymbol the recursive symbol defined in this loop
  * @param encl the enclosing loop
  * @param size the number of iterations of the loop
@@ -89,7 +89,7 @@ Loop::Loop(Tree recsymbol, Loop* encl, const string& size)
 }
 
 /**
- * Create a non recursive loop
+ * Create a non recursive loop.
  * @param encl the enclosing loop
  * @param size the number of iterations of the loop
  */
@@ -138,7 +138,7 @@ void Loop::addPreCode(const Statement& stmt)
 }
 
 /**
- * Add a line of exec code
+ * Add a line of exec code.
  */
 void Loop::addExecCode(const Statement& stmt)
 {
@@ -147,7 +147,7 @@ void Loop::addExecCode(const Statement& stmt)
 }
 
 /**
- * Add a line of post exec code (end of the loop)
+ * Add a line of post exec code (end of the loop).
  */
 void Loop::addPostCode(const Statement& stmt)
 {
@@ -163,6 +163,7 @@ void Loop::addPostCode(const Statement& stmt)
 void Loop::absorb(Loop* l)
 {
     // the loops must have the same number of iterations
+    //cerr << "Loop absorbtion : " << this << " absorb " << l << endl;
     faustassert(fSize == l->fSize);
     fRecSymbolSet = setUnion(fRecSymbolSet, l->fRecSymbolSet);
 
@@ -182,13 +183,31 @@ void Loop::absorb(Loop* l)
  */
 void Loop::println(int n, ostream& fout)
 {
-    for (list<Loop*>::const_iterator s = fExtraLoops.begin(); s != fExtraLoops.end(); s++) {
-        (*s)->println(n, fout);
+    for (Loop* l : fExtraLoops) {
+        l->println(n, fout);
     }
 
+    tab(n, fout);
+    fout << "// Extra loops  : ";
+    for (Loop* l : fExtraLoops) fout << l << " ";
+
+    tab(n, fout);
+    fout << "// Backward loops: ";
+    bool emptyflag = true;
+    for (Loop* l : fBackwardLoopDependencies) {
+        emptyflag = false;
+        fout << l << " ";
+    }  ///< Loops that must be computed before this one
+    if (emptyflag) fout << "WARNING EMPTY";
+
+    tab(n, fout);
+    fout << "// Forward loops : ";
+    for (Loop* l : fForwardLoopDependencies) fout << l << " ";
+
+    tab(n, fout);
+    fout << "// " << ((fIsRecursive) ? "Recursive" : "Vectorizable") << " loop " << this;
+
     if (fPreCode.size() + fExecCode.size() + fPostCode.size() > 0) {
-        tab(n, fout);
-        fout << "// " << ((fIsRecursive) ? "Recursive" : "Vectorizable") << " loop " << this;
         if (fPreCode.size() > 0) {
             tab(n, fout);
             fout << "// pre processing";
@@ -209,11 +228,13 @@ void Loop::println(int n, ostream& fout)
             printlines(n, fPostCode, fout);
         }
         tab(n, fout);
+    } else {
+        fout << "// empty loop " << this;
     }
 }
 
 /**
- * Print a parallel loop (unless it is empty). Should be called only for loop
+ * Print a parallel loop (unless it is empty). Should be called only for loop.
  * without pre and post processing
  * @param n number of tabs of indentation
  * @param fout output stream
@@ -271,7 +292,7 @@ void Loop::printParLoopln(int n, ostream& fout)
 }
 
 /**
- * Print a single loop (unless it is empty)
+ * Print a single loop (unless it is empty).
  * @param n number of tabs of indentation
  * @param fout output stream
  */

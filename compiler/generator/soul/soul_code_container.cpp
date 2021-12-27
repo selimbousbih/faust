@@ -29,18 +29,20 @@ using namespace std;
 
  - sub-containers are compiled as 'struct' with associated functions
  - classInit is a Processor method for now (waiting for the SOUL external model to be ready)
+ - 'faustpower' function fallbacks to regular 'pow' (see powprim.h)
  - 'boolean' type:
     - are casted to 'int' (for indexes...) and kept for tests (in SelectInst...).
     - 'int' results are casted to 'bool' for tests (in SelectInst...).
     - see the SOULInstVisitor fIntAsBool variable.
  - the 'fillXXX' function needs to generate the actual size of the table argument type. This is done using the
  TableSizeVisitor class.
+ - bargraphs use 'output event' type and are outputting values at 50 Hz. The code is conditionally generated.
 */
 
 dsp_factory_base* SOULCodeContainer::produceFactory()
 {
     return new text_dsp_factory_aux(
-        fKlassName, "", "", ((static_cast<stringstream*>(fOut)) ? static_cast<stringstream*>(fOut)->str() : ""), "");
+        fKlassName, "", "", ((static_cast<ostringstream*>(fOut)) ? static_cast<ostringstream*>(fOut)->str() : ""), "");
 }
 
 CodeContainer* SOULCodeContainer::createScalarContainer(const string& name, int sub_container_type)
@@ -84,7 +86,7 @@ void SOULCodeContainer::produceInternal()
     struct_visitor.Tab(n + 2);
     generateDeclarations(&struct_visitor);
 
-    tab(n + 1, *fOut);
+    back(1, *fOut);
     *fOut << "}" << endl;
 
     // Inits
@@ -97,7 +99,7 @@ void SOULCodeContainer::produceInternal()
     generateInit(&struct_visitor);
     generateResetUserInterface(&struct_visitor);
     generateClear(&struct_visitor);
-    tab(n + 1, *fOut);
+    back(1, *fOut);
     *fOut << "}";
 
     // Fill
@@ -106,7 +108,7 @@ void SOULCodeContainer::produceInternal()
     // Retrieves the table size kept in gTableSizeVisitor to generate the correct table type
     string fun_name = "fill" + fKlassName;
     // We possibly have to generate several versions of the function with a different table size
-    for (auto& it : gGlobal->gTableSizeVisitor->fSizeTable) {
+    for (const auto& it : gGlobal->gTableSizeVisitor->fSizeTable) {
         string fun_name_aux = it.first;
         int    table_size   = it.second;
         if (startWith(fun_name_aux, fun_name)) {
@@ -130,12 +132,11 @@ void SOULCodeContainer::produceInternal()
             generateComputeBlock(&struct_visitor);
             ForLoopInst* loop = fCurLoop->generateScalarLoop(counter);
             loop->accept(&struct_visitor);
-            tab(n + 1, *fOut);
+            back(1, *fOut);
             *fOut << "}";
         }
     }
 
-    tab(n + 1, *fOut);
     tab(n + 1, *fOut);
     *fOut << fKlassName << " new" << fKlassName << "() { " << fKlassName << " obj; return obj; }";
     tab(n + 1, *fOut);
@@ -146,11 +147,17 @@ void SOULCodeContainer::produceInternal()
 void SOULCodeContainer::produceInit(int tabs)
 {
     tab(tabs, *fOut);
-    *fOut << "void init (int sample_rate)";
+    *fOut << "void init ()";
     tab(tabs, *fOut);
     *fOut << "{";
     tab(tabs + 1, *fOut);
-    *fOut << "classInit (sample_rate);";
+    *fOut << "let sample_rate = int(processor.frequency);";
+    tab(tabs + 1, *fOut);
+    if (fUIVisitor.fHasBargraph) {
+        *fOut << "fControlSlice = int (processor.frequency) / 50;";
+        tab(tabs + 1, *fOut);
+    }
+    *fOut << "// classInit is not called here since the tables are actually not shared between instances";
     tab(tabs + 1, *fOut);
     *fOut << "instanceInit (sample_rate);";
     tab(tabs, *fOut);
@@ -161,6 +168,10 @@ void SOULCodeContainer::produceInit(int tabs)
     *fOut << "void instanceInit (int sample_rate)";
     tab(tabs, *fOut);
     *fOut << "{";
+    tab(tabs + 1, *fOut);
+    *fOut << "// classInit has to be called for each instance since the tables are actually not shared between instances";
+    tab(tabs + 1, *fOut);
+    *fOut << "classInit (sample_rate);";
     tab(tabs + 1, *fOut);
     *fOut << "instanceConstants (sample_rate);";
     tab(tabs + 1, *fOut);
@@ -175,11 +186,11 @@ void SOULCodeContainer::produceInit(int tabs)
 void SOULCodeContainer::produceClass()
 {
     int n = 0;
-
+   
     // Look for the "fillXXX" function
     generateStaticInit(gGlobal->gTableSizeVisitor);
     generateInit(gGlobal->gTableSizeVisitor);
-
+ 
     // Processor generation
     tab(n, *fOut);
     *fOut << "processor " << fKlassName;
@@ -212,24 +223,25 @@ void SOULCodeContainer::produceClass()
         tab(n + 1, *fOut);
     }
     
-    SOULInstUIVisitor ui_visitor(n + 1);
-    generateUserInterface(&ui_visitor);
-    *fOut << ui_visitor.fOut.str();
+    generateUserInterface(&fUIVisitor);
+    *fOut << fUIVisitor.fOut.str();
     generateDeclarations(&fCodeProducer);
   
     // Control
-    if (fComputeBlockInstructions->fCode.size() > 0) {
-        *fOut << "bool fUpdated; ";
+    *fOut << "bool fUpdated;";
+    tab(n + 1, *fOut);
+    if (fUIVisitor.fHasBargraph) {
+        *fOut << "int fControlSlice;";
         tab(n + 1, *fOut);
     }
-
+ 
     // For control computation
     if (fInt32ControlNum > 0) {
-        *fOut << "int32[" << fInt32ControlNum << "] icontrol;";
+        *fOut << "int32[" << fInt32ControlNum << "] iControl;";
         tab(n + 1, *fOut);
     }
     if (fRealControlNum > 0) {
-        *fOut << fCodeProducer.getTypeManager()->fTypeDirectTable[itfloat()] << "[" << fRealControlNum << "] fcontrol;";
+        *fOut << fCodeProducer.getTypeManager()->fTypeDirectTable[itfloat()] << "[" << fRealControlNum << "] fControl;";
     }
 
     // Global declarations
@@ -246,8 +258,26 @@ void SOULCodeContainer::produceClass()
         generateUserInterface(&fCodeProducer);
     }
     
+    /*
+    // Debug version
     if (gGlobal->gOutputLang == "soul-dsp") {
+        *fOut << "// Event handler used to call additional methods";
         tab(n + 1, *fOut);
+        *fOut << "event eventbuildUserInterface (int dummy) { console << \"eventbuildUserInterface\n\"; }";
+        tab(n + 1, *fOut);
+        *fOut << "event eventclassInit (int sample_rate) { console << \"eventclassInit\n\"; classInit(sample_rate); }";
+        tab(n + 1, *fOut);
+        *fOut << "event eventinstanceConstants (int sample_rate) { console << \"eventinstanceConstants\n\"; instanceConstants(sample_rate); }";
+        tab(n + 1, *fOut);
+        *fOut << "event eventinstanceResetUserInterface (int dummy) { console << \"eventinstanceResetUserInterface\n\"; instanceResetUserInterface(); }";
+        tab(n + 1, *fOut);
+        *fOut << "event eventinstanceClear (int dummy) { console << \"eventinstanceClear\n\"; instanceClear(); }";
+        tab(n + 1, *fOut);
+        tab(n + 1, *fOut);
+    }
+    */
+    
+    if (gGlobal->gOutputLang == "soul-dsp") {
         *fOut << "// Event handler used to call additional methods";
         tab(n + 1, *fOut);
         *fOut << "event eventbuildUserInterface (int dummy) {}";
@@ -260,10 +290,20 @@ void SOULCodeContainer::produceClass()
         tab(n + 1, *fOut);
         *fOut << "event eventinstanceClear (int dummy) { instanceClear(); }";
         tab(n + 1, *fOut);
+        tab(n + 1, *fOut);
     }
   
-    // Sub containers
+    // Generate gub containers
     generateSubContainers();
+    
+    // Missing math functions
+    tab(n + 1, *fOut);
+    if (gGlobal->gFloatSize == 1) {
+        *fOut << "float32 copysign(float32 x, float32 y) { return abs(x) * ((y < 0.0f) ? -1.0f : 1.0f); }";
+    } else if (gGlobal->gFloatSize == 2) {
+        *fOut << "float64 copysign(float64 x, float64 y) { return abs(x) * ((y < 0.0) ? -1.0 : 1.0); }";
+    }
+    tab(n + 1, *fOut);
 
     // inputs/outputs
     tab(n + 1, *fOut);
@@ -287,7 +327,7 @@ void SOULCodeContainer::produceClass()
         BlockInst* block2 = fill_funcall.getCode(fPostStaticInitInstructions);
         block2->accept(&fCodeProducer);
     }
-    tab(n + 1, *fOut);
+    back(1, *fOut);
     *fOut << "}";
     tab(n + 1, *fOut);
 
@@ -305,7 +345,7 @@ void SOULCodeContainer::produceClass()
         BlockInst* block2 = fill_funcall.getCode(fPostInitInstructions);
         block2->accept(&fCodeProducer);
     }
-    tab(n + 1, *fOut);
+    back(1, *fOut);
     *fOut << "}";
     tab(n + 1, *fOut);
 
@@ -316,14 +356,12 @@ void SOULCodeContainer::produceClass()
     tab(n + 2, *fOut);
 
     // Control
-    if (fComputeBlockInstructions->fCode.size() > 0) {
-        *fOut << "fUpdated = true;";
-        tab(n + 2, *fOut);
-    }
-
+    *fOut << "fUpdated = true;";
+    tab(n + 2, *fOut);
+ 
     fCodeProducer.Tab(n + 2);
     generateResetUserInterface(&fCodeProducer);
-    tab(n + 1, *fOut);
+    back(1, *fOut);
     *fOut << "}";
     tab(n + 1, *fOut);
 
@@ -334,7 +372,7 @@ void SOULCodeContainer::produceClass()
     tab(n + 2, *fOut);
     fCodeProducer.Tab(n + 2);
     generateClear(&fCodeProducer);
-    tab(n + 1, *fOut);
+    back(1, *fOut);
     *fOut << "}";
     tab(n + 1, *fOut);
 
@@ -342,19 +380,19 @@ void SOULCodeContainer::produceClass()
     produceInit(n + 1);
 
     // Control
-    if (fComputeBlockInstructions->fCode.size() > 0) {
-        tab(n + 1, *fOut);
-        *fOut << "void control()";
-        tab(n + 1, *fOut);
-        *fOut << "{";
-        tab(n + 2, *fOut);
-        fCodeProducer.Tab(n + 2);
-        // Generates local variables declaration and setup
-        generateComputeBlock(&fCodeProducer);
-        tab(n + 1, *fOut);
-        *fOut << "}" << endl;
-    }
-
+    tab(n + 1, *fOut);
+    *fOut << "void control()";
+    tab(n + 1, *fOut);
+    *fOut << "{";
+    tab(n + 2, *fOut);
+    // Debug code
+    //*fOut << "console << \"control\\n\";";
+    fCodeProducer.Tab(n + 2);
+    // Generates local variables declaration and setup
+    generateComputeBlock(&fCodeProducer);
+    back(1, *fOut);
+    *fOut << "}" << endl;
+ 
     // Compute
     generateCompute(n + 1);
     *fOut << "}" << endl;
@@ -367,27 +405,16 @@ void SOULScalarCodeContainer::generateCompute(int n)
     tab(n, *fOut);
     *fOut << "{";
     tab(n + 1, *fOut);
-    *fOut << "// 'init' called once before starting the DSP loop";
-    tab(n + 1, *fOut);
-    *fOut << "init (int(processor.frequency));";
-
-    tab(n + 1, *fOut);
-    tab(n + 1, *fOut);
     *fOut << "// DSP loop running forever...";
     tab(n + 1, *fOut);
     *fOut << "loop";
     tab(n + 1, *fOut);
     *fOut << "{";
     tab(n + 2, *fOut);
-
-    if (fComputeBlockInstructions->fCode.size() > 0) {
-        *fOut << "// Updates control only if needed";
-        tab(n + 2, *fOut);
-        *fOut << "if (fUpdated) { fUpdated = false; control(); }";
-        tab(n + 2, *fOut);
-        tab(n + 2, *fOut);
-    }
-
+    *fOut << "if (fUpdated) { fUpdated = false; control(); }";
+    tab(n + 2, *fOut);
+    tab(n + 2, *fOut);
+   
     // Generates one sample computation
     fCodeProducer.Tab(n + 2);
     *fOut << "// Computes one sample";
@@ -399,6 +426,12 @@ void SOULScalarCodeContainer::generateCompute(int n)
     generatePostComputeBlock(&fCodeProducer);
 
     tab(n + 2, *fOut);
+    if (fUIVisitor.fHasBargraph) {
+        *fOut << "// Updates fControlSlice once per sample";
+        tab(n + 2, *fOut);
+        *fOut << "if (fControlSlice-- == 0) { fControlSlice = int (processor.frequency) / 50; }";
+        tab(n + 2, *fOut);
+    }
     *fOut << "// Moves all streams forward by one 'tick'";
     tab(n + 2, *fOut);
     *fOut << "advance();";
@@ -428,14 +461,11 @@ void SOULVectorCodeContainer::generateCompute(int n)
     *fOut << "{";
     tab(n + 2, *fOut);
 
-    if (fComputeBlockInstructions->fCode.size() > 0) {
-        *fOut << "// Updates control only if needed";
-        tab(n + 2, *fOut);
-        *fOut << "if (fUpdated) { fUpdated = false; control(); }";
-        tab(n + 2, *fOut);
-        tab(n + 2, *fOut);
-    }
-
+    tab(n + 2, *fOut);
+    *fOut << "if (fUpdated) { fUpdated = false; control(); }";
+    tab(n + 2, *fOut);
+    tab(n + 2, *fOut);
+ 
     // TODO
     fCodeProducer.Tab(n + 2);
 
@@ -447,5 +477,5 @@ void SOULVectorCodeContainer::generateCompute(int n)
     *fOut << "}";
 
     tab(n, *fOut);
-    *fOut << "}" << endl;
+    *fOut << "}" << endl << endl;
 }

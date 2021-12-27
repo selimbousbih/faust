@@ -206,47 +206,7 @@ public:
     }
     
     // Constructor / Destuctor
-    uiCocoaItem(GUI* ui, float* zone, FIMainViewController* controller, const char* name)
-    : uiItem(ui, zone)
-    {
-        fName = [[NSString alloc] initWithString:[NSString stringWithCString:name encoding:NSASCIIStringEncoding]];
-        fLabel = nil;
-        fHidden = false;
-        fParent = NULL;
-        
-        fx = 0.f;
-        fy = 0.f;
-        fw = 0.f;
-        fh = 0.f;
-        
-        fAbstractX = 0.f;
-        fAbstractY = 0.f;
-        fAbstractW = 0.f;
-        fAbstractH = 0.f;
-        
-        fSelected = false;
-        
-        fInitAssignationType = kAssignationNone;
-        fInitAssignationCurve = kAssignationNone;
-        
-        fInitR = 0.f;
-        fInitG = 0.f;
-        fInitB = 1.f;
-        
-        fInitMinCurve = -100.f;
-        fInitMidCurve = 0.f;
-        fInitMaxCurve = 100.f;
-        
-        fHideOnGUI = false;
-        fInit = 0.f;
-        if (zone) {
-            fItemCount = gItemCount++;
-        } else {
-            fItemCount = -1;
-        }
-        
-        resetParameters();
-    }
+    uiCocoaItem(GUI* ui, float* zone, FIMainViewController* controller, const char* name);
     
     ~uiCocoaItem()
     {
@@ -350,9 +310,10 @@ public:
     int                     fBoxType;
     float                   fLastX;
     float                   fLastY;
+    static float            gDummy;
     
     uiBox(GUI* ui, FIMainViewController* controller, const char* name, int boxType)
-    : uiCocoaItem(ui, NULL, controller, name)
+    : uiCocoaItem(ui, &gDummy, controller, name)
     {
         float tabOffset = 0;
         fBoxType = boxType;
@@ -388,7 +349,7 @@ public:
         {
             fLabel = [[[UILabel alloc] init] autorelease];
             fLabel.font = [UIFont boldSystemFontOfSize:18];
-            fLabel.textAlignment = UITextAlignmentLeft;
+            fLabel.textAlignment = NSTextAlignmentLeft;
             fLabel.autoresizingMask = UIViewAutoresizingNone;
             fLabel.text = [NSString stringWithCString:name encoding:NSASCIIStringEncoding];
             fLabel.textColor = [UIColor colorWithWhite:1. alpha:1.];
@@ -575,10 +536,53 @@ public:
     }
 };
 
+// Constructor / Destuctor
+uiCocoaItem::uiCocoaItem(GUI* ui, float* zone, FIMainViewController* controller, const char* name)
+: uiItem(ui, zone)
+{
+    fName = [[NSString alloc] initWithString:[NSString stringWithCString:name encoding:NSASCIIStringEncoding]];
+    fLabel = nil;
+    fHidden = false;
+    fParent = NULL;
+    
+    fx = 0.f;
+    fy = 0.f;
+    fw = 0.f;
+    fh = 0.f;
+    
+    fAbstractX = 0.f;
+    fAbstractY = 0.f;
+    fAbstractW = 0.f;
+    fAbstractH = 0.f;
+    
+    fSelected = false;
+    
+    fInitAssignationType = kAssignationNone;
+    fInitAssignationCurve = kAssignationNone;
+    
+    fInitR = 0.f;
+    fInitG = 0.f;
+    fInitB = 1.f;
+    
+    fInitMinCurve = -100.f;
+    fInitMidCurve = 0.f;
+    fInitMaxCurve = 100.f;
+    
+    fHideOnGUI = false;
+    fInit = 0.f;
+    if (zone != &uiBox::gDummy) {
+        fItemCount = gItemCount++;
+    } else {
+        fItemCount = -1;
+    }
+    
+    resetParameters();
+}
+
 // -------------------------- Knob -----------------------------------
 
 class uiKnob : public uiCocoaItem
-{   
+{
     
 public :
     
@@ -590,7 +594,7 @@ public :
     {
         fLabel = [[[UILabel alloc] init] autorelease];
         fLabel.font = [UIFont boldSystemFontOfSize:12];
-        fLabel.textAlignment = UITextAlignmentCenter;
+        fLabel.textAlignment = NSTextAlignmentCenter;
         fLabel.text = [NSString stringWithCString:name encoding:NSASCIIStringEncoding];
         fLabel.textColor = [UIColor whiteColor];
         fLabel.backgroundColor = [UIColor clearColor];
@@ -727,8 +731,8 @@ public :
     {        
         fLabel = [[[UILabel alloc] init] autorelease];
         fLabel.font = [UIFont boldSystemFontOfSize:12];
-        if (horizontal) fLabel.textAlignment = UITextAlignmentRight;
-        else fLabel.textAlignment = UITextAlignmentCenter;
+        if (horizontal) fLabel.textAlignment = NSTextAlignmentRight;
+        else fLabel.textAlignment = NSTextAlignmentCenter;
         fLabel.text = [NSString stringWithCString:name encoding:NSASCIIStringEncoding];
         fLabel.textColor = [UIColor whiteColor];
         fLabel.backgroundColor = [UIColor clearColor];
@@ -1045,7 +1049,7 @@ public:
     {
         fLabel = [[[UILabel alloc] init] autorelease];
         fLabel.font = [UIFont boldSystemFontOfSize:12];
-        fLabel.textAlignment = UITextAlignmentCenter;
+        fLabel.textAlignment = NSTextAlignmentCenter;
         fLabel.text = [NSString stringWithCString:label encoding:NSASCIIStringEncoding];
         fLabel.textColor = [UIColor whiteColor];
         fLabel.backgroundColor = [UIColor clearColor];
@@ -1149,8 +1153,8 @@ public:
         fLed = false;
         fLabel = [[[UILabel alloc] init] autorelease];
         fLabel.font = [UIFont boldSystemFontOfSize:12];
-        if (horizontal) fLabel.textAlignment = UITextAlignmentRight;
-        else fLabel.textAlignment = UITextAlignmentCenter;
+        if (horizontal) fLabel.textAlignment = NSTextAlignmentRight;
+        else fLabel.textAlignment = NSTextAlignmentCenter;
         fLabel.text = [NSString stringWithCString:name encoding:NSASCIIStringEncoding];
         fLabel.textColor = [UIColor whiteColor];
         fLabel.backgroundColor = [UIColor blackColor];
@@ -1281,12 +1285,12 @@ public:
         
         if (led)
         {
-            fLabel.textAlignment = UITextAlignmentCenter;
+            fLabel.textAlignment = NSTextAlignmentCenter;
         }
         else
         {
-            if (fHorizontal) fLabel.textAlignment = UITextAlignmentRight;
-            else fLabel.textAlignment = UITextAlignmentCenter;
+            if (fHorizontal) fLabel.textAlignment = NSTextAlignmentRight;
+            else fLabel.textAlignment = NSTextAlignmentCenter;
         }
     }
     
@@ -1676,7 +1680,7 @@ public:
     {
         /* 
             29/11/18: used by startMotion to activate the accelerometer and/or gyroscope
-            correction bo make it work even if screen mode is activated
+            correction to make it work even if screen mode is activated
         */
         
         /*
@@ -2600,12 +2604,9 @@ public:
         insert(label, item);
     }
     
-    virtual void show()
-    {}
-    
     virtual bool run()
     {
-        return false;
+        return true;
     }
     
     virtual void declare(float* zone, const char* key, const char* value)

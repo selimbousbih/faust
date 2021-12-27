@@ -31,7 +31,7 @@ import("stdfaust.lib");
 // Keyboard
 midigate = button("gate");
 midifreq = nentry("freq[unit:Hz]", 440, 20, 20000, 1);
-midigain = nentry("gain", 0.5, 0, 0.5, 0.01);// MIDI KEYBOARD
+midigain = nentry("gain", 0.5, 0, 0.5, 0.01);	// MIDI KEYBOARD
 
 // pitchwheel
 bend = ba.semi2ratio(hslider("bend [midi:pitchwheel]",0,-2,2,0.01));
@@ -41,7 +41,7 @@ wfFade = hslider("waveform[midi:ctrl 70]",0.5,0,1,0.001):si.smoo;
 
 // VCF
 res = hslider("resonnance[midi:ctrl 71]",0.5,0,1,0.001):si.smoo;
-fr = hslider("fc[midi:ctrl 74]", 10, 15, 12000, 0.001):si.smoo;
+fr = hslider("fc[midi:ctrl 74]", 15, 15, 12000, 0.001):si.smoo;
 track = hslider("tracking[midi:ctrl 79]", 1, 0, 2, 0.001);
 envMod = hslider("envMod[midi:ctrl 75]",50,0,100,0.01):si.smoo; 
 

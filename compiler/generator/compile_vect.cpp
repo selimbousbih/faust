@@ -87,28 +87,28 @@ string VectorCompiler::CS(Tree sig)
 
         if (fClass->getLoopProperty(sig, ls)) {
             // sig has a loop property
-            // cerr << "CASE SH : fBackwardLoopDependencies.insert : " << tl << " --depend(A)son--> " << ls << endl;
+            //cerr << "CASE SH : fBackwardLoopDependencies.insert : " << tl << " --depend(A)son--> " << ls << endl;
             tl->fBackwardLoopDependencies.insert(ls);
 
-        } else if (isSigFixDelay(sig, x, d) && fClass->getLoopProperty(x, ls)) {
-            // cerr << "CASE DL : fBackwardLoopDependencies.insert : " << tl << " --depend(B)son--> " << ls << endl;
+        } else if (isSigDelay(sig, x, d) && fClass->getLoopProperty(x, ls)) {
+            //cerr << "CASE DL : fBackwardLoopDependencies.insert : " << tl << " --depend(B)son--> " << ls << endl;
             tl->fBackwardLoopDependencies.insert(ls);
 
-        } else if (isSigFixDelay(sig, x, d) && isProj(x, &i, r) && fClass->getLoopProperty(r, ls)) {
-            // cerr << "CASE DR : fBackwardLoopDependencies.insert : " << tl << " --depend(B)son--> " << ls << endl;
+        } else if (isSigDelay(sig, x, d) && isProj(x, &i, r) && fClass->getLoopProperty(r, ls)) {
+            //cerr << "CASE DR : fBackwardLoopDependencies.insert : " << tl << " --depend(B)son--> " << ls << endl;
             tl->fBackwardLoopDependencies.insert(ls);
 
         } else if (isProj(sig, &i, r) && fClass->getLoopProperty(r, ls)) {
-            // cerr << "CASE R* : fBackwardLoopDependencies.insert : " << tl << " --depend(B)son--> " << ls << endl;
+            //cerr << "CASE R* : fBackwardLoopDependencies.insert : " << tl << " --depend(B)son--> " << ls << endl;
             tl->fBackwardLoopDependencies.insert(ls);
 
         } else {
             if (isProj(sig, &i, r)) {
-                // cerr << "SYMBOL RECURSIF EN COURS ??? " << *r << endl;
+                //cerr << "SYMBOL RECURSIF EN COURS ??? " << *r << endl;
             } else if (getCertifiedSigType(sig)->variability() < kSamp) {
-                // cerr << "SLOW EXPRESSION " << endl;
+                //cerr << "SLOW EXPRESSION " << endl;
             } else {
-                // cerr << "Expression absorbée" << *sig << endl;
+                //cerr << "Expression absorbée" << *sig << endl;
             }
         }
     }
@@ -246,25 +246,33 @@ string VectorCompiler::generateCacheCode(Tree sig, const string& exp)
         // sample-rate signal
         if (d > 0) {
             // used delayed : we need a delay line
+            //cerr << "CHASING BUG 1 " << *sig << endl;
+            //cerr << "CHASING BUG T " << getCertifiedSigType(sig) << endl;
             getTypedNames(getCertifiedSigType(sig), "Yec", ctype, vname);
+            //cerr << "CHASING BUG N " << ctype << " " << vname << endl;
             generateDelayLine(ctype, vname, d, exp, getConditionCode(sig));
             setVectorNameProperty(sig, vname);
 
             if (verySimple(sig)) {
+                //cerr << "CHASING BUG 2 " << exp << endl;
                 return exp;
             } else {
                 if (d < gGlobal->gMaxCopyDelay) {
-                    return subst("$0[i]", vname);
+                    string sss = subst("$0[i]", vname);
+                    //cerr << "CHASING BUG 3 " << sss << endl;
+                    return sss;
                 } else {
                     // we use a ring buffer
                     string mask = T(pow2limit(d + gGlobal->gVecSize) - 1);
-                    return subst("$0[($0_idx+i) & $1]", vname, mask);
+                    string sss  = subst("$0[($0_idx+i) & $1]", vname, mask);
+                    //cerr << "CHASING BUG 4 " << sss << endl;
+                    return sss;
                 }
             }
         } else {
             // not delayed
             Tree x, y;
-            if (sharing > 1 && isSigFixDelay(sig, x, y) && verySimple(y)) {
+            if (sharing > 1 && isSigDelay(sig, x, y) && verySimple(y)) {
                 // cerr << "SPECIAL CASE NO CACHE NEEDED : " << ppsig(sig) << endl;
                 return exp;
             } else if (sharing > 1 && !verySimple(sig)) {
@@ -302,7 +310,7 @@ bool VectorCompiler::needSeparateLoop(Tree sig)
         b = true;
     } else if (verySimple(sig) || t->variability() < kSamp) {
         b = false;  // non sample computation never require a loop
-    } else if (isSigFixDelay(sig, x, y)) {
+    } else if (isSigDelay(sig, x, y)) {
         b = false;  //
     } else if (isProj(sig, &i, x)) {
         // cerr << "REC "; // recursive expressions require a separate loop
@@ -315,11 +323,13 @@ bool VectorCompiler::needSeparateLoop(Tree sig)
         // and not shared, doesn't require a separate loop.
         b = false;
     }
-    /*    if (b) {
-            cerr << "Separate Loop for " << ppsig(sig) << endl;
-        } else {
-            cerr << "Same Loop for " << ppsig(sig) << endl;
-        }*/
+    /*
+    if (b) {
+        cerr << "Separate Loop for " << ppsig(sig) << endl;
+    } else {
+        cerr << "Same Loop for " << ppsig(sig) << endl;
+    }
+    */
     return b;
 }
 
@@ -339,12 +349,12 @@ string VectorCompiler::generateVariableStore(Tree sig, const string& exp)
 
 /**
  * Generate code for accessing a delayed signal. The generated code depend of
- * the maximum delay attached to exp and the gLessTempSwitch.
+ * the maximum delay attached to exp.
  */
 
-string VectorCompiler::generateFixDelay(Tree sig, Tree exp, Tree delay)
+string VectorCompiler::generateDelay(Tree sig, Tree exp, Tree delay)
 {
-    // cerr << "VectorCompiler::generateFixDelay " << ppsig(sig) << endl;
+    // cerr << "VectorCompiler::generateDelay " << ppsig(sig) << endl;
 
     string code = CS(exp);  // ensure exp is compiled to have a vector name
     int    d, mxd = fOccMarkup->retrieve(exp)->getMaxDelay();
@@ -418,15 +428,6 @@ void VectorCompiler::generateDelayLine(const string& ctype, const string& vname,
         generateDlineLoop(ctype, vname, mxd, exp, ccs);
     }
 }
-
-#if 0
-static int pow2limit(int x)
-{
-    int n = 2;
-    while (n < x) { n = 2*n; }
-    return n;
-}
-#endif
 
 /**
  * Generate the code for a (short) delay line

@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "faust/dsp/dsp.h"
+#include "faust/dsp/libfaust-signal.h"
 #include "faust/gui/meta.h"
 
 /*!
@@ -139,14 +140,14 @@ wasm_dsp_factory* getWasmDSPFactoryFromSHAKey(const std::string& sha_key);
  * Create a Faust DSP factory from a DSP source code as a file. Note that the library keeps an internal cache of all
  * allocated factories so that the compilation of same DSP code (that is same source code and
  * same set of 'normalized' compilations options) will return the same (reference counted) factory pointer. You will
- * have to explicitly use deleteInterpreterDSPFactory to properly decrement reference counter when the factory is no
+ * have to explicitly use deleteWasmDSPFactory to properly decrement reference counter when the factory is no
  * more needed.
  *
  * @param filename - the DSP filename
  * @param argc - the number of parameters in argv array
  * @param argv - the array of parameters
  * @param error_msg - the error string to be filled
- * @param internal_memory - whether to use an internallay allocated memory block for wasm module
+ * @param internal_memory - whether to use an internally allocated memory block for wasm module
  *
  * @return a DSP factory on success, otherwise a null pointer.
  */
@@ -164,21 +165,29 @@ wasm_dsp_factory* createWasmDSPFactoryFromFile(const std::string& filename, int 
  * @param argc - the number of parameters in argv array
  * @param argv - the array of parameters
  * @param error_msg - the error string to be filled
- * @param internal_memory - whether to use an internallay allocated memory block for wasm module
+ * @param internal_memory - whether to use an internally allocated memory block for wasm module
  *
  * @return a DSP factory on success, otherwise a null pointer.
  */
 wasm_dsp_factory* createWasmDSPFactoryFromString(const std::string& name_app, const std::string& dsp_content, int argc,
                                                  const char* argv[], std::string& error_msg, bool internal_memory);
+
 /**
- * Delete a Faust DSP factory, that is decrements it's reference counter, possibly really deleting the internal pointer.
- * Possibly also delete DSP pointers associated with this factory, if they were not explicitly deleted.
- * Beware : all kept factories and DSP pointers (in local variables...) thus become invalid.
+ * Create a Faust DSP factory from a vector of output signals.
+ * It has to be used with the signal API defined in libfaust-signal.h.
  *
- * @param factory - the DSP factory
+ * @param name_app - the name of the Faust program
+ * @param signals - the vector of output signals
+ * @param argc - the number of parameters in argv array
+ * @param argv - the array of parameters
+ * @param error_msg - the error string to be filled
+ * @param internal_memory - whether to use an internally allocated memory block for wasm module
  *
- * @return true if the factory internal pointer was really deleted, and false if only 'decremented'.
+ * @return a DSP factory on success, otherwise a null pointer.
  */
+wasm_dsp_factory* createWasmDSPFactoryFromSignals(const std::string& name_app, tvec signals,
+                                                  int argc, const char* argv[], std::string& error_msg,
+                                                  bool internal_memory);
 
 /**
  * Delete a Faust DSP factory, that is decrements it's reference counter, possible really deleting the internal pointer.
@@ -295,4 +304,4 @@ EMSCRIPTEN_BINDINGS(CLASS_wasm_dsp)
 #endif
 
 #endif
-/**************************  END  wasm-dsp.h **************************/
+/************************** END wasm-dsp.h **************************/

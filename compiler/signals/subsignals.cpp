@@ -32,7 +32,7 @@
  * @return the number of subsignals
  */
 
-int getSubSignals(Tree sig, vector<Tree>& vsigs, bool visitgen)
+int getSubSignals(Tree sig, tvec& vsigs, bool visitgen)
 {
     vsigs.clear();
 
@@ -41,8 +41,8 @@ int getSubSignals(Tree sig, vector<Tree>& vsigs, bool visitgen)
     Tree   c, sel, x, y, z, u, v, var, le, label, id, ff, largs, type, name, file, sf;
 
     if (getUserData(sig)) {
-        for (int i = 0; i < sig->arity(); i++) {
-            vsigs.push_back(sig->branch(i));
+        for (int i1 = 0; i1 < sig->arity(); i1++) {
+            vsigs.push_back(sig->branch(i1));
         }
         return sig->arity();
     } else if (isSigInt(sig, &i)) {
@@ -53,8 +53,6 @@ int getSubSignals(Tree sig, vector<Tree>& vsigs, bool visitgen)
         vsigs = sig->branches();
         return int(vsigs.size());
     }
-
-    // else if (isSigWaveform(sig))                  { return 0; }
 
     else if (isSigInput(sig, &i)) {
         return 0;
@@ -68,7 +66,7 @@ int getSubSignals(Tree sig, vector<Tree>& vsigs, bool visitgen)
         return 1;
     }
 
-    else if (isSigFixDelay(sig, x, y)) {
+    else if (isSigDelay(sig, x, y)) {
         vsigs.push_back(x);
         vsigs.push_back(y);
         return 2;
@@ -135,12 +133,6 @@ int getSubSignals(Tree sig, vector<Tree>& vsigs, bool visitgen)
         vsigs.push_back(x);
         vsigs.push_back(y);
         return 3;
-    } else if (isSigSelect3(sig, sel, x, y, z)) {
-        vsigs.push_back(sel);
-        vsigs.push_back(x);
-        vsigs.push_back(y);
-        vsigs.push_back(z);
-        return 4;
     }
 
     else if (isSigGen(sig, x)) {
@@ -224,8 +216,17 @@ int getSubSignals(Tree sig, vector<Tree>& vsigs, bool visitgen)
         return 2;
     } else if (isNil(sig)) {
         return 0;
-    }
 
+    } else if (isSigAssertBounds(sig, x, y, z)) {
+        vsigs.push_back(x);
+        vsigs.push_back(y);
+        vsigs.push_back(z);
+        return 3;
+    } else if (isSigHighest(sig, x) || isSigLowest(sig, x)) {
+        vsigs.push_back(x);
+        return 1;
+    }
+    
     else {
         stringstream error;
         error << "ERROR : getSubSignals unrecognized signal : " << *sig << endl;

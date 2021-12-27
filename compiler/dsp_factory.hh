@@ -41,9 +41,13 @@
  or by reading an already compiled dsp (in LLVM IR, Interpreter or WebAssembly bytecode).
  */
 
-class dsp_factory_base {
-   public:
+struct dsp_factory_base {
+ 
     virtual ~dsp_factory_base() {}
+    
+    virtual void write(std::ostream* out, bool binary = false, bool compact = false) = 0;
+    
+    virtual void writeHelper(std::ostream* out, bool binary = false, bool compact = false) {}  // Helper functions
 
     virtual std::string getName()                        = 0;
     virtual void        setName(const std::string& name) = 0;
@@ -53,6 +57,8 @@ class dsp_factory_base {
 
     virtual std::string getDSPCode()                        = 0;
     virtual void        setDSPCode(const std::string& code) = 0;
+    
+    virtual std::string getCompileOptions() = 0;
 
     virtual dsp* createDSPInstance(dsp_factory* factory) = 0;
 
@@ -63,11 +69,7 @@ class dsp_factory_base {
     virtual void  destroy(void* ptr)    = 0;
 
     virtual void metadata(Meta* meta) = 0;
-
-    virtual void write(std::ostream* out, bool binary = false, bool small = false) = 0;
-
-    virtual void writeAux(std::ostream* out, bool binary = false, bool small = false) {}  // Helper functions
-
+   
     virtual std::string getBinaryCode() = 0;
 
     // Sub-classes will typically implement this method to create a factory from a stream
@@ -111,6 +113,8 @@ class dsp_factory_imp : public dsp_factory_base {
 
     std::string getDSPCode() { return fExpandedDSP; }
     void        setDSPCode(const std::string& code) { fExpandedDSP = code; }
+    
+    virtual std::string getCompileOptions() { return ""; };
 
     virtual dsp* createDSPInstance(dsp_factory* factory)
     {
@@ -142,7 +146,7 @@ class dsp_factory_imp : public dsp_factory_base {
   
     virtual void metadata(Meta* meta) { faustassert(false); }
 
-    virtual void write(std::ostream* out, bool binary = false, bool small = false) {}
+    virtual void write(std::ostream* out, bool binary = false, bool compact = false) {}
 
     virtual std::string getBinaryCode() { return ""; }
 };
@@ -160,19 +164,29 @@ class text_dsp_factory_aux : public dsp_factory_imp {
     {
     }
 
-    virtual void write(std::ostream* out, bool binary = false, bool small = false) { *out << fCode; }
+    virtual void write(std::ostream* out, bool binary = false, bool compact = false) { *out << fCode; }
 
-    virtual void writeAux(std::ostream* out, bool binary = false, bool small = false) { *out << fHelpers; }
+    virtual void writeHelper(std::ostream* out, bool binary = false, bool compact = false) { *out << fHelpers; }
 
     virtual std::string getBinaryCode() { return fCode; }
 };
 
-// Backend API
+// Backend API implemented in libcode.cpp
 
-dsp_factory_base* compileFaustFactory(int argc, const char* argv[], const char* name, const char* input,
-                                      std::string& error_msg, bool generate);
+class CTree;
+typedef CTree* Signal;
+typedef std::vector<Signal> tvec;
 
-std::string expandDSP(int argc, const char* argv[], const char* name, const char* input, std::string& sha_key,
+dsp_factory_base* createFactory(const char* name, const char* input,
+                                int argc, const char* argv[],
+                                std::string& error_msg, bool generate);
+
+dsp_factory_base* createFactory(const char* name, tvec signals,
+                                int argc, const char* argv[],
+                                std::string& error_msg);
+
+std::string expandDSP(int argc, const char* argv[], const char* name,
+                      const char* input, std::string& sha_key,
                       std::string& error_msg);
 
 #endif

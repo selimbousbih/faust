@@ -21,6 +21,9 @@ option ( LIBMICROHTTPD_LDFLAGS 	"Manual link flags for libmicrohttpd"	off )
 if (NOT DEFINED LIBDIR)
 	set (LIBDIR lib)
 endif()
+if (NOT DEFINED LIBSDIR)
+	set (LIBSDIR lib)
+endif()
 if (NOT DEFINED ROOT)
 	set (ROOT ../..)
 endif()
@@ -162,6 +165,7 @@ if (HTTPDYNAMIC)
 	elseif(MSYS)
 		target_link_libraries (httpdynamic ${LIBMICROHTTPD__LDFLAGS})
 	else()
+		target_link_libraries (httpdynamic microhttpd)
 		set_target_properties (httpdynamic PROPERTIES 
 			COMPILE_FLAGS  "${LIBMICROHTTPD__CFLAGS}"
 			LINK_FLAGS     "${LIBMICROHTTPD__LDFLAGS}")
@@ -190,9 +194,9 @@ if (PACK)
 endif()
 
 install ( TARGETS ${TARGETS}
-    RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/lib 
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}/lib 
-    LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/lib
+	RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX}/${LIBSDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/${LIBSDIR}
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_PREFIX}/${LIBSDIR}
     PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_PREFIX}/include/faust/gui
 )
 

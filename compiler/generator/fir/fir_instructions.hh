@@ -42,15 +42,7 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
     int               fTab;
     std::ostream*     fOut;
     bool              fFinishLine;
-    map<string, bool> gFunctionSymbolTable;
-
-   public:
-    FIRInstVisitor(std::ostream* out, int tab = 0)
-        : CStringTypeManager(FLOATMACRO, "*"), fTab(tab), fOut(out), fFinishLine(true)
-    {
-    }
-
-    virtual ~FIRInstVisitor() {}
+    map<string, bool> fFunctionSymbolTable;
 
     void Tab(int n) { fTab = n; }
 
@@ -60,6 +52,14 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
             tab(fTab, *fOut);
         }
     }
+    
+   public:
+    FIRInstVisitor(std::ostream* out, int tab = 0)
+        : CStringTypeManager(xfloat(), "*"), fTab(tab), fOut(out), fFinishLine(true)
+    {
+    }
+
+    virtual ~FIRInstVisitor() {}
 
     virtual string generateType(Typed* type)
     {
@@ -87,11 +87,6 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
                 return (array_typed->fSize == 0)
                            ? "\"" + fTypeDirectTable[basic_typed1->fType] + "*\""
                            : "\"" + fTypeDirectTable[basic_typed1->fType] + "[" + num_size + "]" + "\"";
-                /*
-                return (array_typed->fSize == 0)
-                    ? fTypeDirectTable[basic_typed1->fType]
-                    : fTypeDirectTable[basic_typed1->fType] + "[" + num_str.str() + "]";
-                */
             } else if (array_typed1) {
                 return generateType(array_typed1) + "[" + num_size + "]";
             } else if (named_typed1) {
@@ -109,7 +104,7 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
         } else if (struct_typed) {
             std::stringstream res;
             res << "StructType<\"" << struct_typed->fName << "\",";
-            for (auto& it : struct_typed->fFields) {
+            for (const auto& it : struct_typed->fFields) {
                 res << "(" << generateType(it) << ")";
             }
             res << ">";
@@ -134,7 +129,7 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
         } else if (named_typed) {
             // TODO : break code with subclasses
             // return named_typed->fName + generateType(named_typed->fType) + ", " + name;
-            return named_typed->fName + ", " + name;
+            return "\"" + named_typed->fName + "\", " + name;
         } else if (fun_typed) {
             return "Function type";
         } else if (array_typed) {
@@ -146,11 +141,6 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
                 return (array_typed->fSize == 0)
                            ? "\"" + fTypeDirectTable[basic_typed1->fType] + "*\", " + name
                            : "\"" + fTypeDirectTable[basic_typed1->fType] + "\", " + name + "[" + num_size + "]";
-                /*
-                 ? fTypeDirectTable[basic_typed1->fType] + "*, " + name
-                 : fTypeDirectTable[basic_typed1->fType] + ", " + name + "[" + num_str.str() + "]";
-                 */
-                //: "\"" + fTypeDirectTable[basic_typed1->fType] + "[" + num_str.str() + "]" + "\", " + name;
             } else if (array_typed1) {
                 return generateType(array_typed1) + "[" + num_size + "]";
             } else if (named_typed1) {
@@ -167,7 +157,7 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
         } else if (struct_typed) {
             std::stringstream res;
             res << "StructType<\"" << struct_typed->fName << "\",";
-            for (auto& it : struct_typed->fFields) {
+            for (const auto& it : struct_typed->fFields) {
                 res << "(" << generateType(it) << ")";
             }
             res << ">";
@@ -182,26 +172,26 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
     {
         *fOut << "AddMetaDeclareInst(" << inst->fZone << ", " << quote(inst->fKey) << ", " << quote(inst->fValue)
               << ")";
-        EndLine();
+        tab(fTab, *fOut);
     }
 
     virtual void visit(OpenboxInst* inst)
     {
         string name;
         switch (inst->fOrient) {
-            case 0:
+            case OpenboxInst::kVerticalBox:
                 name = "OpenVerticalBox(";
                 break;
-            case 1:
+            case OpenboxInst::kHorizontalBox:
                 name = "OpenHorizontalBox(";
                 break;
-            case 2:
+            case OpenboxInst::kTabBox:
                 name = "OpenTabBox(";
                 break;
         }
         *fOut << name << "\"" << inst->fName << "\"";
         *fOut << ")";
-        EndLine();
+        tab(fTab, *fOut);
     }
 
     virtual void visit(CloseboxInst* inst)
@@ -217,7 +207,7 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
             *fOut << "AddCheckButtonInst(" << quote(inst->fLabel) << inst->fZone;
         }
         *fOut << ")";
-        EndLine();
+        tab(fTab, *fOut);
     }
 
     virtual void visit(AddSliderInst* inst)
@@ -236,7 +226,7 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
         }
         *fOut << name << quote(inst->fLabel) << ", " << inst->fZone << ", " << checkReal(inst->fInit) << ", "
               << checkReal(inst->fMin) << ", " << checkReal(inst->fMax) << ", " << checkReal(inst->fStep) << ")";
-        EndLine();
+        tab(fTab, *fOut);
     }
 
     virtual void visit(AddBargraphInst* inst)
@@ -252,13 +242,13 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
         }
         *fOut << name << quote(inst->fLabel) << ", " << inst->fZone << ", " << checkReal(inst->fMin) << ", "
               << checkReal(inst->fMax) << ")";
-        EndLine();
+        tab(fTab, *fOut);
     }
 
     virtual void visit(AddSoundfileInst* inst)
     {
         *fOut << "AddSoundfile(" << quote(inst->fLabel) << ", " << quote(inst->fURL) << ", &" << inst->fSFZone << ")";
-        EndLine();
+        tab(fTab, *fOut);
     }
 
     virtual void visit(LabelInst* inst)
@@ -279,11 +269,22 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
         *fOut << ")";
         EndLine();
     }
+    
+    // For Rust backend
+    virtual void visit(DeclareBufferIterators* inst)
+    {
+        *fOut << "DeclareBufferIterators(";
+        *fOut << inst->fBufferName1 << " ";
+        *fOut << inst->fBufferName2 << " ";
+        *fOut << inst->fNumChannels << " ";
+        *fOut << inst->fMutable << ")";
+        EndLine();
+    }
 
     virtual void visit(DeclareStructTypeInst* inst)
     {
         *fOut << "DeclareStructTypeInst(" << generateType(inst->fType) << ")";
-        EndLine();
+        tab(fTab, *fOut);
     }
 
     virtual void visit(RetInst* inst)
@@ -309,10 +310,10 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
     virtual void visit(DeclareFunInst* inst)
     {
         // Already generated
-        if (gFunctionSymbolTable.find(inst->fName) != gFunctionSymbolTable.end()) {
+        if (fFunctionSymbolTable.find(inst->fName) != fFunctionSymbolTable.end()) {
             return;
         } else {
-            gFunctionSymbolTable[inst->fName] = true;
+            fFunctionSymbolTable[inst->fName] = true;
         }
 
         // If function is actually a method (that is "xx::name"), then keep "xx::name" in gSymbolGlobalsTable but print
@@ -330,7 +331,7 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
         if (size > 0) {  // Has more arguments...
             *fOut << ", ";
         }
-        for (auto& it : inst->fType->fArgsTypes) {
+        for (const auto& it : inst->fType->fArgsTypes) {
             *fOut << generateType(it);
             if (i++ < size - 1) *fOut << ", ";
         }
@@ -345,6 +346,7 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
             tab(fTab, *fOut);
             inst->fCode->accept(this);
             fTab--;
+            back(1, *fOut);
             *fOut << "EndDeclare";
             tab(fTab, *fOut);
         }
@@ -352,7 +354,7 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
 
     virtual void visit(NamedAddress* named)
     {
-        *fOut << "Address(" << named->fName << " " << Address::dumpString(named->fAccess) << ")";
+        *fOut << "Address(" << named->fName << ", " << Address::dumpString(named->fAccess) << ")";
     }
 
     virtual void visit(IndexedAddress* indexed)
@@ -367,6 +369,16 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
             indexed->fIndex->accept(this);
             *fOut << "]";
         }
+    }
+    
+    virtual void visit(NullValueInst* inst)
+    {
+        *fOut << "NullValueInst()";
+    }
+    
+    virtual void visit(NullStatementInst* inst)
+    {
+        *fOut << "NullStatementInst()";
     }
 
     virtual void visit(LoadVarInst* inst)
@@ -478,7 +490,7 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
 
         size_t size = inst->fArgs.size(), i = 0;
         if (size > 0) *fOut << ", ";
-        for (auto& it : inst->fArgs) {
+        for (const auto& it : inst->fArgs) {
             // Compile argument
             it->accept(this);
             if (i++ < size - 1) *fOut << ", ";
@@ -512,7 +524,22 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
             inst->fElse->accept(this);
             fTab--;
         }
-        *fOut << "EndIf";
+        back(1, *fOut);
+        *fOut << "EndIfInst";
+        tab(fTab, *fOut);
+    }
+    
+    virtual void visit(ControlInst* inst)
+    {
+        *fOut << "ControlInst ";
+        fTab++;
+        tab(fTab, *fOut);
+        inst->fCond->accept(this);
+        tab(fTab, *fOut);
+        inst->fStatement->accept(this);
+        fTab--;
+        back(1, *fOut);
+        *fOut << "EndControlInst";
         tab(fTab, *fOut);
     }
 
@@ -531,7 +558,41 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
         tab(fTab, *fOut);
         inst->fCode->accept(this);
         fTab--;
-        *fOut << "EndForLoop";
+        back(1, *fOut);
+        *fOut << "EndForLoopInst";
+        tab(fTab, *fOut);
+    }
+    
+    // For Rust backend
+    virtual void visit(SimpleForLoopInst* inst)
+    {
+        *fOut << "SimpleForLoopInst ";
+        fTab++;
+        tab(fTab, *fOut);
+        inst->fLowerBound->accept(this);
+        tab(fTab, *fOut);
+        inst->fUpperBound->accept(this);
+        tab(fTab, *fOut);
+        inst->fCode->accept(this);
+        fTab--;
+        back(1, *fOut);
+        *fOut << "EndSimpleForLoopInst";
+        tab(fTab, *fOut);
+    }
+    
+    virtual void visit(IteratorForLoopInst* inst)
+    {
+        *fOut << "IteratorForLoopInst ";
+        fTab++;
+        tab(fTab, *fOut);
+        for (const auto& it : inst->fIterators) {
+            it->accept(this);
+            tab(fTab, *fOut);
+        }
+        inst->fCode->accept(this);
+        fTab--;
+        back(1, *fOut);
+        *fOut << "EndIteratorForLoopInst";
         tab(fTab, *fOut);
     }
 
@@ -543,20 +604,26 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
         tab(fTab, *fOut);
         inst->fCode->accept(this);
         fTab--;
-        *fOut << "EndWhileLoop";
+        back(1, *fOut);
+        *fOut << "EndWhileLoopInst";
         tab(fTab, *fOut);
     }
 
     virtual void visit(BlockInst* inst)
     {
         *fOut << "BlockInst ";
-        fTab++;
-        tab(fTab, *fOut);
-        for (auto& it : inst->fCode) {
-            it->accept(this);
+        if (inst->fCode.size() > 0) {
+            fTab++;
+            tab(fTab, *fOut);
+            for (const auto& it : inst->fCode) {
+                it->accept(this);
+            }
+            fTab--;
+            back(1, *fOut);
+        } else {
+           tab(fTab, *fOut);
         }
-        fTab--;
-        *fOut << "EndBlock";
+        *fOut << "EndBlockInst";
         tab(fTab, *fOut);
     }
 
@@ -566,21 +633,25 @@ class FIRInstVisitor : public InstVisitor, public CStringTypeManager {
         inst->fCond->accept(this);
         fTab++;
         tab(fTab, *fOut);
-        for (auto& it : inst->fCode) {
-            if (it.first == -1) {  // -1 used to code "default" case
-                *fOut << "Default ";
-            } else {
-                *fOut << "Case " << it.first;
+        if (inst->fCode.size() > 0) {
+            for (const auto& it : inst->fCode) {
+                if (it.first == -1) {  // -1 used to code "default" case
+                    *fOut << "Default ";
+                } else {
+                    *fOut << "Case " << it.first;
+                }
+                fTab++;
+                tab(fTab, *fOut);
+                (it.second)->accept(this);
+                fTab--;
+                back(1, *fOut);
+                *fOut << "EndCase";
+                tab(fTab, *fOut);
             }
-            fTab++;
-            tab(fTab, *fOut);
-            (it.second)->accept(this);
-            *fOut << "EndCase";
             fTab--;
-            tab(fTab, *fOut);
+            back(1, *fOut);
         }
-        fTab--;
-        *fOut << "EndSWitch";
+        *fOut << "EndSwitchInst";
         tab(fTab, *fOut);
     }
 };

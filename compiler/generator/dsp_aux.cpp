@@ -27,6 +27,7 @@
 #include <sstream>
 
 #include "Text.hh"
+#include "sha_key.hh"
 #include "compatibility.hh"
 #include "dsp_aux.hh"
 #include "dsp_factory.hh"
@@ -40,7 +41,7 @@
 using namespace std;
 
 // Look for 'key' in 'options' and modify the parameter 'position' if found
-static bool parseKey(vector<string> options, const string& key, int& position)
+static bool parseKey(vector<string>& options, const string& key, int& position)
 {
     for (int i = 0; i < int(options.size()); i++) {
         if (key == options[i]) {
@@ -176,7 +177,7 @@ static vector<string> reorganizeCompilationOptionsAux(vector<string>& options)
     return newoptions;
 }
 
-static std::string extractCompilationOptions(const std::string& dsp_content)
+static string extractCompilationOptions(const string& dsp_content)
 {
     size_t pos1 = dsp_content.find(COMPILATION_OPTIONS_KEY);
 
@@ -209,6 +210,12 @@ string reorganizeCompilationOptions(int argc, const char* argv[])
     return quote(res3);
 }
 
+string sha1FromDSP(const string& name_app, const string& dsp_content, int argc, const char* argv[], string& sha_key)
+{
+    sha_key = generateSHA1(name_app + dsp_content + reorganizeCompilationOptions(argc, argv));
+    return dsp_content;
+}
+
 // External C++ libfaust API
 
 EXPORT string expandDSPFromFile(const string& filename, int argc, const char* argv[], string& sha_key,
@@ -236,8 +243,8 @@ EXPORT string expandDSPFromString(const string& name_app, const string& dsp_cont
             sha_key = generateSHA1(dsp_content);
             return dsp_content;
         } else {
-            // Otherwise add a new compilation options line, consider it as the new expanded code : generate SHA key and
-            // return it
+            // Otherwise add a new compilation options line, consider it as the new expanded code,
+            // generate SHA key and return it
             string new_dsp_content =
                 COMPILATION_OPTIONS + reorganizeCompilationOptions(argc, argv) + ";\n" + dsp_content;
             sha_key = generateSHA1(new_dsp_content);
@@ -283,8 +290,7 @@ EXPORT bool generateAuxFilesFromString(const string& name_app, const string& dsp
         }
         argv1[argc1] = nullptr;  // NULL terminated argv
 
-        dsp_factory_base* factory =
-            compileFaustFactory(argc1, argv1, name_app.c_str(), dsp_content.c_str(), error_msg, false);
+        dsp_factory_base* factory = createFactory(name_app.c_str(), dsp_content.c_str(), argc1, argv1, error_msg, false);
         // Factory is no more needed
         delete factory;
         return (factory != nullptr);
@@ -334,11 +340,6 @@ EXPORT bool generateCAuxFilesFromString(const char* name_app, const char* dsp_co
     bool   res = generateAuxFilesFromString(name_app, dsp_content, argc, argv, error_msg_aux);
     strncpy(error_msg, error_msg_aux.c_str(), 4096);
     return res;
-}
-
-EXPORT void generateCSHA1(const char* data, char* sha_key)
-{
-    strncpy(sha_key, generateSHA1(data).c_str(), 64);
 }
 
 EXPORT void freeCMemory(void* ptr)

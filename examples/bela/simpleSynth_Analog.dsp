@@ -43,7 +43,7 @@ wfFade = hslider("waveform[BELA: ANALOG_0]",0.5,0,1,0.001):si.smoo;
 
 // VCF
 res = hslider("resonnance[BELA: ANALOG_2]",0.5,0,1,0.001):si.smoo;
-fr = hslider("fc[BELA: ANALOG_1]", 10, 15, 12000, 0.001):si.smoo;
+fr = hslider("fc[BELA: ANALOG_1]", 15, 15, 12000, 0.001):si.smoo;
 track = hslider("tracking[midi:ctrl 79]", 1, 0, 2, 0.001);
 envMod = hslider("envMod[BELA: ANALOG_3]",50,0,100,0.01):si.smoo;
 
@@ -69,13 +69,13 @@ oscillo(f) = (os.sawtooth(f)*(1-wfFade))+(os.square(f)*wfFade);
 volume = midigain * env;
 
 // Enveloppe
-env	= en.adsre(att,dec,sust,rel,midigate);
+env = en.adsre(att, dec, sust, rel, midigate);
 
 // LFO
 LFO = os.lf_triangle(lfoFreq)*modwheel*10;
 
 // SYNTH ////////////////////////////////////////////////
-synth = (oscillo(allfreq) :ve.moog_vcf(res,cutoff)) * volume;
+synth = (oscillo(allfreq) : ve.moog_vcf(res,cutoff)) * volume;
 
 // PROCESS /////////////////////////////////////////////
 process = synth;

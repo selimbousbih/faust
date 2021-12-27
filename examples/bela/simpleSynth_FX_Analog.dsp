@@ -43,7 +43,7 @@ wfFade = hslider("waveform[BELA: ANALOG_0]",0.5,0,1,0.001):si.smoo;
 
 // VCF
 res = hslider("resonnance[BELA: ANALOG_2]",0.5,0,1,0.001):si.smoo;
-fr = hslider("fc[BELA: ANALOG_1]", 10, 15, 12000, 0.001):si.smoo;
+fr = hslider("fc[BELA: ANALOG_1]", 15, 15, 12000, 0.001):si.smoo;
 track = hslider("tracking[midi:ctrl 79]", 1, 0, 2, 0.001);
 envMod = hslider("envMod[BELA: ANALOG_3]",50,0,100,0.01):si.smoo; 
 
@@ -75,7 +75,7 @@ env	= en.adsre(att,dec,sust,rel,midigate);
 LFO = os.lf_triangle(lfoFreq)*modwheel*10;
 
 // SYNTH ////////////////////////////////////////////////
-synth = (oscillo(allfreq) :ve.moog_vcf(res,cutoff)) * volume;
+synth = (oscillo(allfreq) : ve.moog_vcf(res,cutoff)) * volume;
 
 //#################################################################################################//
 //##################################### EFFECT SECTION ############################################//
@@ -113,7 +113,7 @@ synth = (oscillo(allfreq) :ve.moog_vcf(res,cutoff)) * volume;
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 // VOLUME:
-volFX = hslider("volume[midi:ctrl 7]",1,0,1,0.001);// Should be 7 according to MIDI CC norm.
+volFX = hslider("volume[midi:ctrl 7]",1,0,1,0.001);	// Should be 7 according to MIDI CC norm.
 
 // EFFECTS /////////////////////////////////////////////
 drive = hslider("drive[BELA: ANALOG_4]",0.3,0,1,0.001);
@@ -125,15 +125,15 @@ fb = hslider("flangFeedback[midi:ctrl 94]",0.7,0,1,0.001);
 fldw = hslider("dryWetFlang[BELA: ANALOG_5]",0.5,0,1,0.001);
 flanger = efx
 	with {
-		fldel = (curdel + (os.lf_triangle(1) * 2) ) : min(10);
+		fldel = (curdel + (os.lf_triangle(1) * 2)) : min(10);
 		efx = _ <: _, pf.flanger_mono(10,fldel,1,fb,0) : dry_wet(fldw);
 	};
 
-// Pannoramique:
+// Panoramic:
 panno = _ : sp.panner(hslider("pan[midi:ctrl 10]",0.5,0,1,0.001)) : _,_;
 
 // REVERB (from freeverb_demo)
-reverb = _,_ <: (*(g)*fixedgain,*(g)*fixedgain :
+reverb = _,_ <: (*(g)*fixedgain, *(g)*fixedgain :
 	re.stereo_freeverb(combfeed, allpassfeed, damping, spatSpread)),
 	*(1-g), *(1-g) :> _,_
     with {

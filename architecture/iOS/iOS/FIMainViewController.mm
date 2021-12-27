@@ -57,6 +57,7 @@ ztimedmap GUI::gTimedZoneMap;
 audio* audio_device = NULL;
 CocoaUI* uiinterface = NULL;
 FUI* finterface = NULL;
+SaveLabelUI* saveinterface = NULL;
 
 #if SOUNDFILE
 SoundUI* soundinterface = NULL;
@@ -77,6 +78,7 @@ int sample_rate = 0;
 int buffer_size = 0;
 BOOL openWidgetPanel = YES;
 int uiCocoaItem::gItemCount = 0;
+float uiBox::gDummy = 0;
 
 - (void)didReceiveMemoryWarning
 {
@@ -103,7 +105,6 @@ int uiCocoaItem::gItemCount = 0;
     
     bool midi_sync = false;
     int nvoices = 0;
-    mydsp_poly* dsp_poly = NULL;
     
 #if MIDICTRL
     mydsp* tmp_dsp = new mydsp();
@@ -114,32 +115,28 @@ int uiCocoaItem::gItemCount = 0;
 #if POLY2
     bool group = true;
     std::cout << "Started with " << nvoices << " voices\n";
-    dsp_poly = new mydsp_poly(new mydsp(), nvoices, true, group);
+    DSP = new mydsp_poly(new mydsp(), nvoices, true, group);
     
     #if MIDICTRL
     if (midi_sync) {
-        DSP = new timed_dsp(new dsp_sequencer(dsp_poly, new effect()));
+        DSP = new timed_dsp(new dsp_sequencer(DSP, new effect()));
     } else {
-        DSP = new dsp_sequencer(dsp_poly, new effect());
+        DSP = new dsp_sequencer(DSP, new effect());
     }
     #else
-        DSP = new dsp_sequencer(dsp_poly, new effect());
+        DSP = new dsp_sequencer(DSP, new effect());
     #endif
 #else
     bool group = true;
     
     if (nvoices > 0) {
         std::cout << "Started with " << nvoices << " voices\n";
-        dsp_poly = new mydsp_poly(new mydsp(), nvoices, true, group);
+        DSP = new mydsp_poly(new mydsp(), nvoices, true, group);
         
     #if MIDICTRL
         if (midi_sync) {
-            DSP = new timed_dsp(dsp_poly);
-        } else {
-            DSP = dsp_poly;
+            DSP = new timed_dsp(DSP);
         }
-    #else
-        DSP = dsp_poly;
     #endif
     } else {
     #if MIDICTRL
@@ -171,9 +168,10 @@ int uiCocoaItem::gItemCount = 0;
     
     uiinterface = new CocoaUI([UIApplication sharedApplication].keyWindow, self, &metadata, DSP);
     finterface = new FUI();
+    saveinterface = new SaveLabelUI();
+    
 #if MIDICTRL
     midi_handler = new rt_midi(_name);
-    midi_handler->addMidiIn(dsp_poly);
     midiinterface = new MidiUI(midi_handler);
 #endif
       
@@ -198,14 +196,12 @@ int uiCocoaItem::gItemCount = 0;
     
     DSP->buildUserInterface(uiinterface);
     DSP->buildUserInterface(finterface);
+    DSP->buildUserInterface(saveinterface);
     
 #if SOUNDFILE
     // Use bundle path
     soundinterface = new SoundUI(SoundUI::getBinaryPath());
-    // SoundUI has to be dispatched on all internal voices
-    if (dsp_poly) dsp_poly->setGroup(false);
     DSP->buildUserInterface(soundinterface);
-    if (dsp_poly) dsp_poly->setGroup(group);
 #endif
     
 #if MIDICTRL
@@ -263,6 +259,7 @@ int uiCocoaItem::gItemCount = 0;
     _motionManager = nil;
     _selectedWidget = nil;
     [self loadWidgetsPreferences];
+    
     if (_assignatedWidgets.size() > 0 || uiinterface->isScreenUI()) [self startMotion];
 }
 
@@ -369,6 +366,7 @@ error:
     
     delete uiinterface;
     delete finterface;
+    delete saveinterface;
     
 #if SOUNDFILE
     delete soundinterface;
@@ -881,6 +879,9 @@ static inline const char* transmit_value(int num)
 - (void)setOSCParameters:(int)transmit output:(NSString*)outputIPText inputport:(NSString*)inputPortText outputport:(NSString*)outputPortText;
 {
 #if OSCCTRL
+    // Save current stare;
+    saveinterface->save();
+    
     delete oscinterface;
     const char* argv[9];
     argv[0] = (char*)_name;
@@ -892,14 +893,22 @@ static inline const char* transmit_value(int num)
     argv[6] = [inputPortText cStringUsingEncoding:[NSString defaultCStringEncoding]];
     argv[7] = "-outport";
     argv[8] = [outputPortText cStringUsingEncoding:[NSString defaultCStringEncoding]];
+    
     /*
     // Deactivated for now (sometimes crashing)
     argv[9] = "-bundle";
     argv[10] = "1";
     */
+    
+    // Start OSC interface
     oscinterface = new OSCUI(_name, 9, (char**)argv);
     DSP->buildUserInterface(oscinterface);
     audio_device->addControlCallback(osc_compute_callback, self);
+    
+    // Load current controller state
+    DSP->buildUserInterface(saveinterface);
+    
+    // Start OSC
     oscinterface->run();
 #endif
 }

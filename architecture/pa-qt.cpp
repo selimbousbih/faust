@@ -5,8 +5,7 @@
  each section for license and copyright information.
  *************************************************************************/
 
-/*******************BEGIN ARCHITECTURE SECTION (part 1/2)****************/
-
+/******************* BEGIN pa-qt.cpp ****************/
 /************************************************************************
  FAUST Architecture File
  Copyright (C) 2003-2019 GRAME, Centre National de Creation Musicale
@@ -111,7 +110,6 @@ int main(int argc, char* argv[])
     bool midi_sync = false;
     int nvoices = 0;
     bool control = true;
-    mydsp_poly* dsp_poly = NULL;
     
     mydsp* tmp_dsp = new mydsp();
     MidiMeta::analyse(tmp_dsp, midi_sync, nvoices);
@@ -135,16 +133,16 @@ int main(int argc, char* argv[])
     int group = lopt(argv, "--group", 1);
     
     std::cout << "Started with " << nvoices << " voices\n";
-    dsp_poly = new mydsp_poly(new mydsp(), nvoices, control, group);
+    DSP = new mydsp_poly(new mydsp(), nvoices, control, group);
     
 #if MIDICTRL
     if (midi_sync) {
-        DSP = new timed_dsp(new dsp_sequencer(dsp_poly, new effect()));
+        DSP = new timed_dsp(new dsp_sequencer(DSP, new effect()));
     } else {
-        DSP = new dsp_sequencer(dsp_poly, new effect());
+        DSP = new dsp_sequencer(DSP, new effect());
     }
 #else
-    DSP = new dsp_sequencer(dsp_poly, new effect());
+    DSP = new dsp_sequencer(DSP, new effect());
 #endif
     
 #else
@@ -155,15 +153,11 @@ int main(int argc, char* argv[])
     
     if (nvoices > 0) {
         std::cout << "Started with " << nvoices << " voices\n";
-        dsp_poly = new mydsp_poly(new mydsp(), nvoices, control, group);
+        DSP = new mydsp_poly(new mydsp(), nvoices, control, group);
 #if MIDICTRL
         if (midi_sync) {
-            DSP = new timed_dsp(dsp_poly);
-        } else {
-            DSP = dsp_poly;
+            DSP = new timed_dsp(DSP);
         }
-#else
-        DSP = dsp_poly;
 #endif
         
     } else {
@@ -188,7 +182,7 @@ int main(int argc, char* argv[])
     
 #endif
     
-    if (DSP == 0) {
+    if (!DSP) {
         std::cerr << "Unable to allocate Faust DSP object" << std::endl;
         exit(1);
     }
@@ -202,7 +196,6 @@ int main(int argc, char* argv[])
 
 #ifdef MIDICTRL
     rt_midi midi_handler(name, is_virtual);
-    midi_handler.addMidiIn(dsp_poly);
     MidiUI midiinterface(&midi_handler);
     DSP->buildUserInterface(&midiinterface);
     std::cout << "MIDI is on" << std::endl;
@@ -257,4 +250,4 @@ int main(int argc, char* argv[])
     return 0;
 }
 
-/********************END ARCHITECTURE SECTION (part 2/2)****************/
+/******************* END pa-qt.cpp ****************/

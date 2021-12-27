@@ -57,7 +57,7 @@ dsp_factory_base* WASMCodeContainer::produceFactory()
 {
     return new text_dsp_factory_aux(
         fKlassName, "", "",
-        ((dynamic_cast<std::stringstream*>(fOut)) ? dynamic_cast<std::stringstream*>(fOut)->str() : ""), fHelper.str());
+        ((dynamic_cast<ostringstream*>(fOut)) ? dynamic_cast<ostringstream*>(fOut)->str() : ""), fHelper.str());
 }
 
 WASMCodeContainer::WASMCodeContainer(const string& name, int numInputs, int numOutputs, std::ostream* out,
@@ -90,9 +90,6 @@ CodeContainer* WASMCodeContainer::createContainer(const string& name, int numInp
 {
     CodeContainer* container;
 
-    if (gGlobal->gMemoryManager) {
-        throw faustexception("ERROR : -mem not supported for WebAssembly\n");
-    }
     if (gGlobal->gFloatSize == 3) {
         throw faustexception("ERROR : quad format not supported for WebAssembly\n");
     }
@@ -215,16 +212,7 @@ DeclareFunInst* WASMCodeContainer::generateInstanceInitFun(const string& name, c
     init_block->pushBackInst(InstBuilder::genRetInst());
 
     // Creates function
-    FunTyped* fun_type = InstBuilder::genFunTyped(args, InstBuilder::genVoidTyped(),
-                                                  (isvirtual) ? FunTyped::kVirtual : FunTyped::kDefault);
-    return InstBuilder::genDeclareFunInst(name, fun_type, init_block);
-}
-
-void WASMCodeContainer::produceInternal()
-{
-    // Fields generation
-    generateGlobalDeclarations(gGlobal->gWASMVisitor);
-    generateDeclarations(gGlobal->gWASMVisitor);
+    return InstBuilder::genVoidFunction(name, args, init_block, isvirtual);
 }
 
 void WASMCodeContainer::produceClass()
@@ -232,11 +220,8 @@ void WASMCodeContainer::produceClass()
     // Module definition
     gGlobal->gWASMVisitor->generateModuleHeader();
 
-    // Sub containers : before functions generation
+    // Sub containers are merged in the main module, before functions generation
     mergeSubContainers();
-
-    // After field declaration...
-    generateSubContainers();
 
     // Mathematical functions and global variables are handled in a separated visitor that creates functions types and
     // global variable offset
@@ -273,6 +258,12 @@ void WASMCodeContainer::produceClass()
     // Functions
     int32_t functions_start = gGlobal->gWASMVisitor->startSection(BinaryConsts::Section::Code);
     fBinaryOut << U32LEB(14);  // num functions
+    
+    // TO REMOVE when 'soundfile' is implemented
+    {
+        // Generate UI: only to trigger exception when using 'soundfile' primitive
+        generateUserInterface(gGlobal->gWASMVisitor);
+    }
 
     // Internal functions in alphabetical order
 
@@ -455,6 +446,9 @@ void WASMScalarCodeContainer::generateCompute()
     // Loop 'i' variable is moved by bytes
     BlockInst* compute_block = InstBuilder::genBlockInst();
     compute_block->pushBackInst(fCurLoop->generateScalarLoop(fFullCount, gGlobal->gLoopVarInBytes));
+    
+    // Generates post DSP loop code
+    compute_block->pushBackInst(fPostComputeBlockInstructions);
 
     generateComputeAux(compute_block);
 }

@@ -30,15 +30,18 @@
 #include <fstream>
 #include <vector>
 #include <string>
+#include <string.h>
 #include <map>
 #include <algorithm>
 
-#include "faust/dsp/dsp.h"
-#include "faust/GUI/UI.h"
-#include "faust/GUI/JSONUIDecoder.h"
-#include "faust/dsp/libfaust.h"
+#include <soul/soul_patch.h>
+#include <soul/patch/helper_classes/soul_patch_Utilities.h>
 
-#include "soul/API/soul_patch.h"
+#include "faust/dsp/dsp.h"
+#include "faust/midi/midi.h"
+#include "faust/gui/UI.h"
+#include "faust/gui/JSONUIDecoder.h"
+#include "faust/dsp/libfaust.h"
 
 class soul_dsp_factory;
 
@@ -50,6 +53,17 @@ class soulpatch_dsp : public dsp {
     
     private:
     
+        /*
+        struct ConsolePrinter : public soul::patch::RefCountHelper<soul::patch::ConsoleMessageHandler, ConsolePrinter>
+        {
+            // Called when a message is sent to the console by the program.
+            void handleConsoleMessage(uint64_t sampleCount, const char* endpointName, const char* message)
+            {
+                std::cout << sampleCount << " " << endpointName << ": " << message << std::endl;
+            }
+        };
+        */
+
         bool startWith(const std::string& str, const std::string& prefix)
         {
             return (str.substr(0, prefix.size()) == prefix);
@@ -63,7 +77,7 @@ class soulpatch_dsp : public dsp {
         int countTotalBusChannels(soul::patch::Span<soul::patch::Bus> buses)
         {
             int res = 0;
-            for (auto& i : buses) {
+            for (const auto& i : buses) {
                 res += i.numChannels;
             }
             return res;
@@ -95,7 +109,7 @@ class soulpatch_dsp : public dsp {
         std::vector<ZoneParam*> fInputsControl;
         std::vector<ZoneParam*> fOutputsControl;
     
-        soul::patch::PatchPlayer::Ptr fPlayer;
+        soul::patch::PatchPlayer* fPlayer;
         soul::patch::PatchPlayerConfiguration fConfig;
         soul::patch::PatchPlayer::RenderContext fRenderContext;
     
@@ -106,8 +120,10 @@ class soulpatch_dsp : public dsp {
         soul::patch::Parameter::Ptr fInstanceClear;
         JSONUITemplatedDecoder* fDecoder;
     
+        // MIDI handling
         midi_handler* fMIDIHander;
-        std::vector<soul::patch::MIDIMessage> fMIDIMessages;
+        std::vector<soul::MIDIEvent> fMIDIInputMessages;
+        std::vector<soul::MIDIEvent> fMIDIOutputMessages;
     
     public:
 
@@ -116,10 +132,10 @@ class soulpatch_dsp : public dsp {
     
         virtual ~soulpatch_dsp()
         {
-            for (auto& i : fInputsControl) {
+            for (const auto& i : fInputsControl) {
                 delete i;
             }
-            for (auto& i : fOutputsControl) {
+            for (const auto& i : fOutputsControl) {
                 delete i;
             }
             delete fDecoder;
@@ -179,7 +195,7 @@ class soulpatch_dsp : public dsp {
                         for (int j = 0; j < names.size(); j++) {
                             std::string key = names[j];
                             if (key == "unit") {
-                                ui_interface->declare(zone, key.c_str(), params[i]->getProperty(names[j]));
+                                ui_interface->declare(zone, key.c_str(), params[i]->getProperty(names[j])->getCharPointer());
                             }
                         }
                         
@@ -191,6 +207,7 @@ class soulpatch_dsp : public dsp {
                                                               params[i]->maxValue, params[i]->step);
                         }
                     }
+                    
                     ui_interface->closeBox();
                 }
                 {
@@ -209,10 +226,10 @@ class soulpatch_dsp : public dsp {
                         for (int j = 0; j < names.size(); j++) {
                             std::string key = names[j];
                             if (key == "unit") {
-                                ui_interface->declare(zone, key.c_str(), params[i]->getProperty(names[j]));
+                                ui_interface->declare(zone, key.c_str(), params[i]->getProperty(names[j])->getCharPointer());
                             }
                         }
-                        if !(checkParam(params[i]->getPropertyNames(), "hidden")) {
+                        if (!(checkParam(params[i]->getPropertyNames(), "hidden"))) {
                             ui_interface->addVerticalBargraph(params[i]->name->getCharPointer(), zone, params[i]->minValue, params[i]->maxValue);
                         }
                     }
@@ -267,34 +284,55 @@ class soulpatch_dsp : public dsp {
         {
             // Update inputs control
             if (fDecoder) {
-                for (auto& i : fDecoder->getInputControls()) {
+                for (const auto& i : fDecoder->getInputControls()) {
                     i->reflectZone();
                 }
             } else {
-                for (auto& i : fInputsControl) {
+                for (const auto& i : fInputsControl) {
                     i->reflectZone();
                 }
             }
             
-            // MIDI handling
+            // MIDI input handling
             if (fMIDIHander) {
-                fRenderContext.numMIDIMessages = fMIDIHander->getMessages(reinterpret_cast<std::vector<MIDIMessage>*>(&fMIDIMessages));
-                fRenderContext.incomingMIDI = std::addressof(fMIDIMessages[0]);
+                fRenderContext.numMIDIMessagesIn = fMIDIHander->recvMessages(reinterpret_cast<std::vector<MIDIMessage>*>(&fMIDIInputMessages));
+                if (fRenderContext.numMIDIMessagesIn > 1024) {
+                    std::cerr << "MIDI input overflow\n";
+                }
+                fRenderContext.incomingMIDI = std::addressof(fMIDIInputMessages[0]);
+                fRenderContext.outgoingMIDI = std::addressof(fMIDIOutputMessages[0]);
+                fRenderContext.maximumMIDIMessagesOut = (uint32_t)fMIDIOutputMessages.size();
+                fRenderContext.numMIDIMessagesOut = 0;
+            } else {
+                fRenderContext.incomingMIDI = nullptr;
+                fRenderContext.incomingMIDI = nullptr;
+                fRenderContext.numMIDIMessagesIn = 0;
             }
         
-            // DSP compute
-            fRenderContext.inputChannels = (const float**)inputs;
+            // Setup audio buffers
+            fRenderContext.inputChannels = (const FAUSTFLOAT**)inputs;
             fRenderContext.outputChannels = outputs;
             fRenderContext.numFrames = count;
+            
+            // DSP compute
             fPlayer->render(fRenderContext);
+            
+            // MIDI output handling
+            if (fMIDIHander && fRenderContext.numMIDIMessagesOut != 0) {
+                if (fRenderContext.numMIDIMessagesOut > fRenderContext.maximumMIDIMessagesOut) {
+                    std::cerr << "MIDI output overflow\n";
+                }
+                int numMessagesOut = std::min(fRenderContext.numMIDIMessagesOut, fRenderContext.maximumMIDIMessagesOut);
+                fMIDIHander->sendMessages(reinterpret_cast<std::vector<MIDIMessage>*>(&fMIDIOutputMessages), numMessagesOut);
+            }
             
             // Update outputs control
             if (fDecoder) {
-                for (auto& i : fDecoder->getOutputControls()) {
+                for (const auto& i : fDecoder->getOutputControls()) {
                     i->modifyZone();
                 }
             } else {
-                for (auto& i : fOutputsControl) {
+                for (const auto& i : fOutputsControl) {
                     i->modifyZone();
                 }
             }
@@ -316,28 +354,25 @@ class soul_dsp_factory : public dsp_factory {
     
         struct FaustSOULFile : public soul::patch::VirtualFile {
             
-            virtual soul::patch::String::Ptr getName() { return {}; }
+            virtual soul::patch::String* getName() { return {}; }
             
-            virtual soul::patch::String::Ptr getAbsolutePath() { return {}; }
+            virtual soul::patch::String* getAbsolutePath() { return {}; }
             
-            virtual soul::patch::VirtualFile::Ptr getParent() { return {}; }
+            virtual soul::patch::VirtualFile* getParent() { return {}; }
             
-            virtual soul::patch::VirtualFile::Ptr getChildFile (const char* subPath) { return {}; }
-            
-            virtual bool isFolder() { return false; }
+            virtual soul::patch::VirtualFile* getChildFile (const char* subPath) { return {}; }
             
             virtual int64_t getSize() { return 0; }
             
             virtual int64_t getLastModificationTime() { return 0; }
             
             virtual int64_t read (uint64_t startPositionInFile, void* targetBuffer, uint64_t bytesToRead) { return 0; }
-            
-            virtual uint64_t findChildFiles (const char* wildcard, soul::patch::FileSearchCallback* callback) { return 0; }
+      
         };
     
         struct FaustSourceFilePreprocessor : public soul::patch::SourceFilePreprocessor {
             
-            virtual soul::patch::VirtualFile::Ptr preprocessSourceFile (soul::patch::VirtualFile& inputFile) override
+            virtual soul::patch::VirtualFile* preprocessSourceFile (soul::patch::VirtualFile& inputFile) override
             {
                 return {};
             }
@@ -346,7 +381,7 @@ class soul_dsp_factory : public dsp_factory {
     
         std::string fPath;
         soul::patch::PatchInstance::Ptr fPatch;
-        soul::patch::Description fDescription;
+        soul::patch::Description* fDescription;
         FaustSourceFilePreprocessor::Ptr fProcessor;
     
     public:
@@ -356,19 +391,32 @@ class soul_dsp_factory : public dsp_factory {
             fPath = path;
             std::string filename = "/usr/local/lib/" + std::string(soul::patch::SOULPatchLibrary::getLibraryFileName());
             soul::patch::SOULPatchLibrary library(filename.c_str());
-            
+         
             if (!library.loadedSuccessfully()) {
                 error_msg = "cannot load SOUL_PatchLoader.dylib\n";
                 throw std::bad_alloc();
             }
             
             fPatch = library.createPatchFromFileBundle(fPath.c_str());
+            if (!fPatch) {
+                error_msg = "cannot load SOUL patch : " + path + "\n";
+                throw std::bad_alloc();
+            }
+            
             fDescription = fPatch->getDescription();
+            /*
+            std::cout << "name \"" << fDescription.name->getCharPointer() << "\"" << std::endl;
+            std::cout << "description \"" << fDescription.description->getCharPointer() << "\"" << std::endl;
+            std::cout << "category \"" << fDescription.category->getCharPointer() << "\"" << std::endl;
+            std::cout << "manufacturer \"" << fDescription.manufacturer->getCharPointer() << "\"" << std::endl;
+            std::cout << "URL \"" << fDescription.URL->getCharPointer() << "\"" << std::endl;
+            std::cout << "isInstrument " << fDescription.isInstrument << "\"" << std::endl;
+            */
         }
     
         virtual ~soul_dsp_factory() {}
         
-        virtual std::string getName() { return fDescription.name; }
+        virtual std::string getName() { return fDescription->name; }
         virtual std::string getSHAKey() { return ""; }
         virtual std::string getDSPCode() { return ""; }
         virtual std::string getCompileOptions() { return ""; }
@@ -391,6 +439,7 @@ soulpatch_dsp::soulpatch_dsp(soul_dsp_factory* factory, std::string& error_msg)
     fFactory = factory;
     fDecoder = nullptr;
     fMIDIHander = nullptr;
+    memset(&fRenderContext, 0, sizeof(fRenderContext));
     
     fConfig.sampleRate = 44100;
     fConfig.maxFramesPerBlock = 4096;
@@ -400,7 +449,7 @@ soulpatch_dsp::soulpatch_dsp(soul_dsp_factory* factory, std::string& error_msg)
         error_msg = "getCompileError";
         for (int i = 0; i < errors.size(); i++) {
             error_msg += " ";
-            error_msg += std::string(errors[i].fullMessage->getCharPointer());
+            error_msg += errors[i].getFullMessage();
         }
         error_msg += "\n";
         throw std::bad_alloc();
@@ -415,7 +464,8 @@ void soulpatch_dsp::init(int sample_rate)
 {
     fConfig.sampleRate = double(sample_rate);
     fPlayer = fFactory->fPatch->compileNewPlayer(fConfig, nullptr, fFactory->fProcessor.get(), nullptr);
-    fMIDIMessages.resize(1024);
+    fMIDIInputMessages.resize(1024);
+    fMIDIOutputMessages.resize(1024);
     
     // FAUST soul code has additional functions
     soul::patch::Span<soul::patch::Parameter::Ptr> params = fPlayer->getParameters();
@@ -461,6 +511,7 @@ soul_dsp_factory* createSOULDSPFactoryFromFile(const std::string& filename,
 {
     try {
         soul_dsp_factory* factory = new soul_dsp_factory(filename, error_msg);
+        // Check that SOUL patch compilation works
         soulpatch_dsp dummy(factory, error_msg);
         return factory;
     } catch (...) {
@@ -489,7 +540,7 @@ class faust_soul_parser  {
     
     private:
         
-        std::map <std::string, std::string> extractFaustBlocks(std::istream* in, std::stringstream& res_file)
+        std::map <std::string, std::string> extractFaustBlocks(std::istream& in, std::stringstream& res_file)
         {
             std::string line;
             std::stringstream faust_block;
@@ -498,7 +549,7 @@ class faust_soul_parser  {
             std::map <std::string, std::string> faust_blocks;     // name, code
             std::map <std::string, std::string>::iterator cur_faust_block;
             
-            while (getline(*in, line)) {
+            while (getline(in, line)) {
                 
                 std::stringstream line_reader(line);
                 std::string token1, token2, token3;
@@ -518,7 +569,7 @@ class faust_soul_parser  {
                         brackets++;
                         continue;
                     } else {
-                        faust_block << line;
+                        faust_block << line << "\n";
                     }
                     continue;
                 } else {
@@ -536,28 +587,32 @@ class faust_soul_parser  {
             
             return faust_blocks;
         }
-        
-        std::string generateSOULBlock(const std::string& name, const std::string& code)
+    
+        std::string generateSOULBlock(const std::string& name, const std::string& code, int argc, const char* argv[])
         {
-            int argc = 0;
-            const char* argv[16];
-            argv[argc++] = "-lang";
-            argv[argc++] = "soul";
-            argv[argc++] = "-cn";
-            argv[argc++] = name.c_str();
-            argv[argc++] = "-o";
-            argv[argc++] = "/var/tmp/exp.soul";
-            argv[argc] = nullptr;  // NULL terminated argv
+            int argc1 = 0;
+            const char* argv1[64];
+            argv1[argc1++] = "-lang";
+            //argv1[argc1++] = "soul";
+            argv1[argc1++] = "soul-hybrid";
+            argv1[argc1++] = "-cn";
+            argv1[argc1++] = name.c_str();
+            argv1[argc1++] = "-o";
+            argv1[argc1++] = "/var/tmp/exp.soul";
+            for (int i = 0; i < argc; i++) {
+                argv1[argc1++] = argv[i];
+            }
+            argv1[argc1] = nullptr;  // NULL terminated argv
             
             std::string error_msg;
-            bool res = generateAuxFilesFromString("FaustDSP", code, argc, argv, error_msg);
+            bool res = generateAuxFilesFromString(name, code, argc1, argv1, error_msg);
             
             if (res) {
                 std::ifstream soul_file("/var/tmp/exp.soul");
                 std::string soul_string((std::istreambuf_iterator<char>(soul_file)), std::istreambuf_iterator<char>());
                 return soul_string;
             } else {
-                std::cerr << "ERROR : generateAuxFilesFromFile " << error_msg << std::endl;
+                std::cerr << "ERROR : generateAuxFilesFromFile " << error_msg;
                 return "";
             }
         }
@@ -567,21 +622,26 @@ class faust_soul_parser  {
         faust_soul_parser()
         {}
     
-        bool parse(const std::string& inputfile, const std::string& outputfile)
+        ~faust_soul_parser()
+        {}
+ 
+        bool parseSOULFile(const std::string& input, const std::string& output, int argc, const char* argv[])
         {
-            std::ifstream reader(inputfile.c_str());
+            std::ifstream reader(input.c_str());
             if (reader.is_open()) {
                 
                 // Open SOUL output file
-                std::ofstream output_file(outputfile);
+                std::ofstream output_file(output);
           
                 // Extract the Faust blocks and returns the input file without them
                 std::stringstream soul_file;
-                std::map <std::string, std::string> faust_blocks = extractFaustBlocks(&reader, soul_file);
+                std::map<std::string, std::string> faust_blocks = extractFaustBlocks(reader, soul_file);
                 
                 // Write all Faust blocks translated to SOUL
-                for (auto& it : faust_blocks) {
-                    output_file << generateSOULBlock(it.first, it.second);
+                for (const auto& it : faust_blocks) {
+                    std::string block = generateSOULBlock(it.first, it.second, argc, argv);
+                    if (block == "") return false;
+                    output_file << block;
                 }
                 
                 // Write the SOUL part
@@ -594,11 +654,50 @@ class faust_soul_parser  {
             }
         }
     
-        virtual ~faust_soul_parser()
-        {}
+        bool generateSOULFile(const std::string& input, const std::string& output, int argc, const char* argv[])
+        {
+            int argc1 = 0;
+            const char* argv1[64];
+            argv1[argc1++] = "-lang";
+            argv1[argc1++] = "soul";
+            argv1[argc1++] = "-o";
+            argv1[argc1++] = output.c_str();
+            for (int i = 0; i < argc; i++) {
+                argv1[argc1++] = argv[i];
+            }
+            argv1[argc1] = nullptr;  // NULL terminated argv
+            
+            std::string error_msg;
+            bool res = generateAuxFilesFromFile(input, argc1, argv1, error_msg);
+            if (!res) {
+                std::cerr << "ERROR : generateAuxFilesFromFile " << error_msg;
+            }
+            return res;
+        }
     
+        void createSOULPatch(const std::string& soul_file)
+        {
+            // Generate "soulpatch" file
+            std::string soulpatch_file = soul_file + "patch";
+            std::ofstream patch_file(soulpatch_file);
+            patch_file << "{" << std::endl;
+                patch_file << "\t\"soulPatchV1\":" << std::endl;
+                patch_file << "\t{" << std::endl;
+                patch_file << "\t\t\"ID\": \"grame.soul.hybrid\"," << std::endl;
+                patch_file << "\t\t\"version\": \"1.0\"," << std::endl;
+                patch_file << "\t\t\"name\": \"hybrid\"," << std::endl;
+                patch_file << "\t\t\"description\": \"SOUL example\"," << std::endl;
+                patch_file << "\t\t\"category\": \"synth\"," << std::endl;
+                patch_file << "\t\t\"manufacturer\": \"GRAME\"," << std::endl;
+                patch_file << "\t\t\"website\": \"https://faust.grame.fr\"," << std::endl;
+                patch_file << "\t\t\"isInstrument\": true," << std::endl;
+                patch_file << "\t\t\"source\": "; patch_file << "\"" << soul_file << "\"" << std::endl;
+                patch_file << "\t}" << std::endl;
+            patch_file << "}";
+            patch_file.close();
+        }
+   
 };
 
-
 #endif
-/**************************  END  soulpatch-dsp.h **************************/
+/************************** END soulpatch-dsp.h **************************/

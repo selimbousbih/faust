@@ -28,12 +28,14 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <functional>
 
 #include "exception.hh"
 #include "fbc_executor.hh"
 #include "interpreter_bytecode.hh"
 
 /*
+ Interpreter using 'computed goto' technique: https://eli.thegreenplace.net/2012/07/12/computed-goto-for-efficient-dispatch-tables
 
  Trace mode: only check 'non-optimized' interpreter operations, since the code is not optimized in this case.
 
@@ -46,31 +48,67 @@
 */
 
 #define INTEGER_OVERFLOW -1
-#define DIV_BY_ZERO -2
+#define DIV_BY_ZERO_REAL -2
+#define DIV_BY_ZERO_INT -3
+#define CAST_INT_OVERFLOW -4
 #define DUMMY_REAL 0.12233344445555
 #define DUMMY_INT 1223334444
 
 //#define assertInterp(exp) faustassert(exp)
 #define assertInterp(exp)
 
-template <class T, int TRACE>
+template <class REAL, int TRACE>
 struct interpreter_dsp_factory_aux;
 
 // FBC interpreter
-template <class T, int TRACE>
-class FBCInterpreter : public FBCExecutor<T> {
+template <class REAL, int TRACE>
+class FBCInterpreter : public FBCExecutor<REAL> {
    protected:
-    interpreter_dsp_factory_aux<T, TRACE>* fFactory;
+
+    typedef std::function<void(double)> ReflectFunction;
+    typedef std::function<double()> ModifyFunction;
+
+    struct ZoneParam {
+        
+        FAUSTFLOAT fZone;
+        ReflectFunction fReflect;
+        ModifyFunction fModify;
+        
+    #if defined(TARGET_OS_IPHONE) || defined(WIN32)
+        ZoneParam(ReflectFunction reflect = nullptr, ModifyFunction modify = nullptr)
+        :fReflect(reflect), fModify(modify)
+        {}
+        void reflectZone() { if (fReflect) fReflect(fZone); }
+        void modifyZone() { if (fModify) fZone = fModify(); }
+    #else
+        ZoneParam(ReflectFunction reflect = [](REAL value) {}, ModifyFunction modify = []() { return REAL(-1); })
+        :fReflect(reflect), fModify(modify)
+        {}
+        void reflectZone() { fReflect(fZone); }
+        void modifyZone() { fZone = fModify(); }
+    #endif
+        
+        void setReflectZoneFun(ReflectFunction reflect) { fReflect = reflect; }
+        void setModifyZoneFun(ModifyFunction modify) { fModify = modify; }
+        
+    };
+    
+    typedef std::map<int, ZoneParam*> controlMap;
+    
+    controlMap fPathInputTable;     // [path, ZoneParam]
+    controlMap fPathOutputTable;    // [path, ZoneParam]
+    
+    interpreter_dsp_factory_aux<REAL, TRACE>* fFactory;
 
     int*        fIntHeap;
-    T*          fRealHeap;
+    REAL*       fRealHeap;
     Soundfile** fSoundHeap;
 
-    T** fInputs;
-    T** fOutputs;
+    REAL** fInputs;
+    REAL** fOutputs;
 
-    std::map<int, long long> fRealStats;
-
+    std::map<int, int64_t> fRealStats;
+    
     /*
      Keeps the latest TRACE_STACK_SIZE executed instructions, to be displayed when an error occurs.
      */
@@ -80,7 +118,7 @@ class FBCInterpreter : public FBCExecutor<T> {
         std::vector<std::string> fExecTrace;
         int                      fWriteIndex;
         std::stringstream        fMessage;
-
+   
         InterpreterTrace()
         {
             for (int i = 0; i < TRACE_STACK_SIZE; i++) {
@@ -111,15 +149,26 @@ class FBCInterpreter : public FBCExecutor<T> {
             push(fMessage.str());
             fMessage.str("");
         }
+        
+        void traceInstruction(InstructionIT it, int int_value, REAL real_value)
+        {
+            (*it)->write(&fMessage, false, false, false);  // Last param = false means no recursion in branches
+            push(fMessage.str());
+            push("Stack [Int: " + std::to_string(int_value) + " ] [REAL: " + std::to_string(real_value) + " ]\n");
+            fMessage.str("");
+        }
     };
 
     InterpreterTrace fTraceContext;
 
     inline void traceInstruction(InstructionIT it)
     {
-        if (TRACE >= 4) {
-            fTraceContext.traceInstruction(it);
-        }
+        fTraceContext.traceInstruction(it);
+    }
+    
+    inline void traceInstruction(InstructionIT it, int int_value, REAL real_value)
+    {
+        fTraceContext.traceInstruction(it, int_value, real_value);
     }
 
     void printStats()
@@ -136,7 +185,9 @@ class FBCInterpreter : public FBCExecutor<T> {
             }
             if (TRACE >= 3) {
                 std::cout << "INTEGER_OVERFLOW: " << fRealStats[INTEGER_OVERFLOW] << std::endl;
-                std::cout << "DIV_BY_ZERO: " << fRealStats[DIV_BY_ZERO] << std::endl;
+                std::cout << "DIV_BY_ZERO_REAL: " << fRealStats[DIV_BY_ZERO_REAL] << std::endl;
+                std::cout << "DIV_BY_ZERO_INT: " << fRealStats[DIV_BY_ZERO_INT] << std::endl;
+                std::cout << "CAST_INT_OVERFLOW: " << fRealStats[CAST_INT_OVERFLOW] << std::endl;
             }
             std::cout << "-------------------------------" << std::endl;
         }
@@ -157,24 +208,63 @@ class FBCInterpreter : public FBCExecutor<T> {
             std::cout << "-------- Interpreter 'Overflow' warning trace end --------\n\n";
         }
     }
-
-    inline void checkDivZero(InstructionIT it, T val)
+    
+    inline REAL checkCastIntOverflow(InstructionIT it, REAL val)
+    {
+        if (val > std::numeric_limits<int>::max() || val < std::numeric_limits<int>::min()) {
+            
+            if (TRACE >= 3) {
+                fRealStats[CAST_INT_OVERFLOW]++;
+            }
+             
+            if (TRACE >= 4) {
+                std::cout << "-------- Interpreter 'CastIntOverflow' trace start --------" << std::endl;
+                traceInstruction(it);
+                fTraceContext.write(&std::cout);
+                std::cout << "-------- Interpreter 'CastIntOverflow' trace end --------\n\n";
+                // Fails at first error...
+                if (TRACE == 4) {
+                    throw faustexception("Interpreter exit\n");
+                }
+            }
+        }
+    
+        return val;
+    }
+ 
+    inline void checkDivZero(InstructionIT it, REAL val)
     {
         if (TRACE >= 6) return;
 
-        if ((TRACE >= 3) && (val == T(0))) {
-            fRealStats[DIV_BY_ZERO]++;
+        if ((TRACE >= 3) && (val == REAL(0))) {
+            fRealStats[DIV_BY_ZERO_REAL]++;
         }
 
-        if ((TRACE >= 4) && (val == T(0))) {
-            std::cout << "-------- Interpreter 'div by zero' trace start --------" << std::endl;
+        if ((TRACE >= 4) && (val == REAL(0))) {
+            std::cout << "-------- Interpreter 'REAL div by zero' trace start --------" << std::endl;
             traceInstruction(it);
             fTraceContext.write(&std::cout);
-            std::cout << "-------- Interpreter 'div by zero' trace end ----------\n\n";
+            std::cout << "-------- Interpreter 'REAL div by zero' trace end ----------\n\n";
+        }
+    }
+    
+    inline void checkDivZero(InstructionIT it, int val)
+    {
+        if (TRACE >= 6) return;
+        
+        if ((TRACE >= 3) && (val == 0)) {
+            fRealStats[DIV_BY_ZERO_INT]++;
+        }
+        
+        if ((TRACE >= 4) && (val == 0)) {
+            std::cout << "-------- Interpreter 'Int div by zero' trace start --------" << std::endl;
+            traceInstruction(it);
+            fTraceContext.write(&std::cout);
+            std::cout << "-------- Interpreter 'Int div by zero' trace end ----------\n\n";
         }
     }
 
-    inline T checkRealAux(InstructionIT it, T val)
+    inline REAL checkRealAux(InstructionIT it, REAL val)
     {
         if (TRACE >= 6) return val;
 
@@ -233,18 +323,18 @@ class FBCInterpreter : public FBCExecutor<T> {
         return index;
     }
 
-    inline int assertIntHeap(InstructionIT it, int index, int size = -1)
+    inline int assertStoreIntHeap(InstructionIT it, int index, int size = -1)
     {
         if (TRACE >= 4 &&
             ((index < 0) || (index >= fFactory->fIntHeapSize) || (size > 0 && (index >= ((*it)->fOffset1 + size))))) {
             std::cout << "-------- Interpreter crash trace start --------" << std::endl;
             if (size > 0) {
-                std::cout << "assertIntHeap array: fIntHeapSize ";
+                std::cout << "assertStoreIntHeap array: fIntHeapSize ";
                 std::cout << fFactory->fIntHeapSize << " index " << (index - (*it)->fOffset1);
                 std::cout << " size " << size;
                 std::cout << " name " << (*it)->fName << std::endl;
             } else {
-                std::cout << "assertIntHeap scalar: fIntHeapSize ";
+                std::cout << "assertStoreIntHeap scalar: fIntHeapSize ";
                 std::cout << fFactory->fIntHeapSize << " index " << index;
                 std::cout << " name " << (*it)->fName << std::endl;
             }
@@ -257,18 +347,18 @@ class FBCInterpreter : public FBCExecutor<T> {
         return index;
     }
 
-    inline int assertRealHeap(InstructionIT it, int index, int size = -1)
+    inline int assertStoreRealHeap(InstructionIT it, int index, int size = -1)
     {
         if (TRACE >= 4 &&
             ((index < 0) || (index >= fFactory->fRealHeapSize) || (size > 0 && (index >= ((*it)->fOffset1 + size))))) {
             std::cout << "-------- Interpreter crash trace start --------" << std::endl;
             if (size > 0) {
-                std::cout << "assertRealHeap array: fIntHeapSize ";
+                std::cout << "assertStoreRealHeap array: fIntHeapSize ";
                 std::cout << fFactory->fRealHeapSize << " index " << (index - (*it)->fOffset1);
                 std::cout << " size " << size;
                 std::cout << " name " << (*it)->fName << std::endl;
             } else {
-                std::cout << "assertRealHeap scalar: fIntHeapSize ";
+                std::cout << "assertStoreRealHeap scalar: fIntHeapSize ";
                 std::cout << fFactory->fRealHeapSize << " index " << index;
                 std::cout << " name " << (*it)->fName << std::endl;
             }
@@ -309,6 +399,7 @@ class FBCInterpreter : public FBCExecutor<T> {
                 std::cout << "assertLoadIntHeap array: fIntHeapSize ";
                 std::cout << fFactory->fIntHeapSize << " index " << (index - (*it)->fOffset1);
                 std::cout << " size " << size;
+                std::cout << " value " << fIntHeap[index];
                 std::cout << " name " << (*it)->fName << std::endl;
             } else {
                 std::cout << "assertLoadIntHeap scalar: fIntHeapSize ";
@@ -330,15 +421,16 @@ class FBCInterpreter : public FBCExecutor<T> {
             ((index < 0)
              || (index >= fFactory->fRealHeapSize)
              || (size > 0 && (index >= ((*it)->fOffset1 + size)))
-             || (fRealHeap[index] == T(DUMMY_REAL)))) {
+             || (fRealHeap[index] == REAL(DUMMY_REAL)))) {
             std::cout << "-------- Interpreter crash trace start --------" << std::endl;
             if (size > 0) {
-                std::cout << "assertLoadRealHeap array: fIntHeapSize ";
+                std::cout << "assertLoadRealHeap array: fRealHeapSize ";
                 std::cout << fFactory->fRealHeapSize << " index " << (index - (*it)->fOffset1);
                 std::cout << " size " << size;
+                std::cout << " value " << fRealHeap[index];
                 std::cout << " name " << (*it)->fName << std::endl;
             } else {
-                std::cout << "assertLoadRealHeap scalar: fIntHeapSize ";
+                std::cout << "assertLoadRealHeap scalar: fRealHeapSize ";
                 std::cout << fFactory->fRealHeapSize << " index " << index;
                 std::cout << " name " << (*it)->fName << std::endl;
             }
@@ -365,7 +457,21 @@ class FBCInterpreter : public FBCExecutor<T> {
         }
     }
 
-    inline T checkReal(InstructionIT it, T val) { return (TRACE > 0) ? checkRealAux(it, val) : val; }
+    inline REAL checkReal(InstructionIT it, REAL val) { return (TRACE > 0) ? checkRealAux(it, val) : val; }
+
+    void updateInputControls()
+    {
+        for (const auto& i : fPathInputTable) {
+            i.second->reflectZone();
+        }
+        
+    }
+    void updateOutputControls()
+    {
+        for (const auto& i : fPathOutputTable) {
+            i.second->modifyZone();
+        }
+    }
 
 #define pushInt(val) (int_stack[int_stack_index++] = val)
 #define popInt() (int_stack[--int_stack_index])
@@ -378,10 +484,39 @@ class FBCInterpreter : public FBCExecutor<T> {
 
 #define pushAddr_(addr) (address_stack[addr_stack_index++] = addr)
 #define popAddr_() (address_stack[--addr_stack_index])
-
-    virtual void ExecuteBuildUserInterface(FIRUserInterfaceBlockInstruction<T>* block, UITemplate* glue)
+    
+    ZoneParam* getZoneParam(controlMap& map, ZoneParam* cur_param, int offset)
     {
-        for (auto& it : block->fInstructions) {
+        if (cur_param) {
+            map[offset] = cur_param;
+            return cur_param;
+        } else if (map.find(offset) == map.end()) {
+            ZoneParam* param = new ZoneParam();
+            map[offset] = param;
+            return param;
+        } else {
+             return map[offset];
+        }
+    }
+    
+    ZoneParam* getZoneParam(int offset)
+    {
+        if (fPathInputTable.find(offset) != fPathInputTable.end()) {
+            return fPathInputTable[offset];
+        } else if (fPathOutputTable.find(offset) != fPathOutputTable.end()) {
+            return fPathOutputTable[offset];
+        } else {
+            return new ZoneParam();
+        }
+    }
+
+    void ExecuteBuildUserInterface(FIRUserInterfaceBlockInstruction<REAL>* block, UITemplate* glue)
+    {
+        // UI may have to be adapted if REAL and FAUSTFLOAT size do not match
+        bool need_proxy = (sizeof(REAL) == 8 && reinterpret_cast<UI*>(glue->fCPPInterface)->sizeOfFAUSTFLOAT() == 4);
+        ZoneParam* cur_param = nullptr;
+        
+        for (const auto& it : block->fInstructions) {
             // it->write(&std::cout);
 
             switch (it->fOpcode) {
@@ -402,26 +537,64 @@ class FBCInterpreter : public FBCExecutor<T> {
                     break;
 
                 case FBCInstruction::kAddButton:
-                    glue->addButton(it->fLabel.c_str(), &fRealHeap[it->fOffset]);
+                    if (need_proxy) {
+                        ZoneParam* param = getZoneParam(fPathInputTable, cur_param, it->fOffset);
+                        param->setReflectZoneFun([=](REAL value) { fRealHeap[it->fOffset] = value; });
+                        glue->addButton(it->fLabel.c_str(), &param->fZone);
+                        cur_param = nullptr;
+                    } else {
+                        glue->addButton(it->fLabel.c_str(), &fRealHeap[it->fOffset]);
+                    }
                     break;
 
                 case FBCInstruction::kAddCheckButton:
-                    glue->addCheckButton(it->fLabel.c_str(), &fRealHeap[it->fOffset]);
+                    if (need_proxy) {
+                        ZoneParam* param = getZoneParam(fPathInputTable, cur_param, it->fOffset);
+                        param->setReflectZoneFun([=](REAL value) { fRealHeap[it->fOffset] = value; });
+                        glue->addCheckButton(it->fLabel.c_str(), &param->fZone);
+                        cur_param = nullptr;
+                    } else {
+                        glue->addCheckButton(it->fLabel.c_str(), &fRealHeap[it->fOffset]);
+                    }
                     break;
 
                 case FBCInstruction::kAddHorizontalSlider:
-                    glue->addHorizontalSlider(it->fLabel.c_str(), &fRealHeap[it->fOffset], it->fInit, it->fMin,
-                                              it->fMax, it->fStep);
+                    if (need_proxy) {
+                        ZoneParam* param = getZoneParam(fPathInputTable, cur_param, it->fOffset);
+                        param->setReflectZoneFun([=](REAL value) { fRealHeap[it->fOffset] = value; });
+                        glue->addHorizontalSlider(it->fLabel.c_str(), &param->fZone,
+                                                  it->fInit, it->fMin,it->fMax, it->fStep);
+                        cur_param = nullptr;
+                    } else {
+                        glue->addHorizontalSlider(it->fLabel.c_str(), &fRealHeap[it->fOffset],
+                                                  it->fInit, it->fMin,it->fMax, it->fStep);
+                    }
                     break;
 
                 case FBCInstruction::kAddVerticalSlider:
-                    glue->addVerticalSlider(it->fLabel.c_str(), &fRealHeap[it->fOffset], it->fInit, it->fMin, it->fMax,
-                                            it->fStep);
+                    if (need_proxy) {
+                        ZoneParam* param = getZoneParam(fPathInputTable, cur_param, it->fOffset);
+                        param->setReflectZoneFun([=](REAL value) { fRealHeap[it->fOffset] = value; });
+                        glue->addVerticalSlider(it->fLabel.c_str(), &param->fZone,
+                                                  it->fInit, it->fMin,it->fMax, it->fStep);
+                        cur_param = nullptr;
+                    } else {
+                        glue->addVerticalSlider(it->fLabel.c_str(), &fRealHeap[it->fOffset],
+                                                it->fInit, it->fMin, it->fMax, it->fStep);
+                    }
                     break;
 
                 case FBCInstruction::kAddNumEntry:
-                    glue->addNumEntry(it->fLabel.c_str(), &fRealHeap[it->fOffset], it->fInit, it->fMin, it->fMax,
-                                      it->fStep);
+                    if (need_proxy) {
+                        ZoneParam* param = getZoneParam(fPathInputTable, cur_param, it->fOffset);
+                        param->setReflectZoneFun([=](REAL value) { fRealHeap[it->fOffset] = value; });
+                        glue->addNumEntry(it->fLabel.c_str(), &param->fZone,
+                                          it->fInit, it->fMin,it->fMax, it->fStep);
+                        cur_param = nullptr;
+                    } else {
+                        glue->addNumEntry(it->fLabel.c_str(), &fRealHeap[it->fOffset],
+                                          it->fInit, it->fMin, it->fMax, it->fStep);
+                    }
                     break;
 
                 case FBCInstruction::kAddSoundfile:
@@ -429,19 +602,38 @@ class FBCInterpreter : public FBCExecutor<T> {
                     break;
 
                 case FBCInstruction::kAddHorizontalBargraph:
-                    glue->addHorizontalBargraph(it->fLabel.c_str(), &fRealHeap[it->fOffset], it->fMin, it->fMax);
+                    if (need_proxy) {
+                        ZoneParam* param = getZoneParam(fPathOutputTable, cur_param, it->fOffset);
+                        param->setModifyZoneFun([=]() { return fRealHeap[it->fOffset]; });
+                        glue->addHorizontalBargraph(it->fLabel.c_str(), &param->fZone, it->fMin, it->fMax);
+                        cur_param = nullptr;
+                    } else {
+                        glue->addHorizontalBargraph(it->fLabel.c_str(), &fRealHeap[it->fOffset], it->fMin, it->fMax);
+                    }
                     break;
 
                 case FBCInstruction::kAddVerticalBargraph:
-                    glue->addVerticalBargraph(it->fLabel.c_str(), &fRealHeap[it->fOffset], it->fMin, it->fMax);
+                    if (need_proxy) {
+                        ZoneParam* param = getZoneParam(fPathOutputTable, cur_param, it->fOffset);
+                        param->setModifyZoneFun([=]() { return fRealHeap[it->fOffset]; });
+                        glue->addVerticalBargraph(it->fLabel.c_str(), &param->fZone, it->fMin, it->fMax);
+                        cur_param = nullptr;
+                    } else {
+                        glue->addVerticalBargraph(it->fLabel.c_str(), &fRealHeap[it->fOffset], it->fMin, it->fMax);
+                    }
                     break;
 
                 case FBCInstruction::kDeclare:
                     // Special case for "0" zone
                     if (it->fOffset == -1) {
-                        glue->declare(static_cast<T*>(NULL), it->fKey.c_str(), it->fValue.c_str());
+                        glue->declare(static_cast<REAL*>(nullptr), it->fKey.c_str(), it->fValue.c_str());
                     } else {
-                        glue->declare(&fRealHeap[it->fOffset], it->fKey.c_str(), it->fValue.c_str());
+                        if (need_proxy) {
+                            if (!cur_param) cur_param = getZoneParam(it->fOffset);
+                            glue->declare(&cur_param->fZone, it->fKey.c_str(), it->fValue.c_str());
+                        } else {
+                            glue->declare(&fRealHeap[it->fOffset], it->fKey.c_str(), it->fValue.c_str());
+                        }
                     }
                     break;
 
@@ -450,8 +642,1957 @@ class FBCInterpreter : public FBCExecutor<T> {
             }
         }
     }
-
-    virtual void ExecuteBlock(FBCBlockInstruction<T>* block, bool compile = false)
+   
+#if defined(_WIN32)
+    void ExecuteBlock(FBCBlockInstruction<REAL>* block, bool compile = false)
+    {
+        int real_stack_index  = 0;
+        int int_stack_index   = 0;
+        int sound_stack_index = 0;
+        int addr_stack_index  = 0;
+        
+        REAL          real_stack[512];
+        int           int_stack[512];
+        Soundfile*    sound_stack[512];
+        InstructionIT address_stack[64];
+        
+        memset(real_stack, 0, sizeof(REAL)*512);
+        memset(int_stack, 0, sizeof(int)*512);
+        memset(sound_stack, 0, sizeof(Soundfile*)*512);
+        memset(address_stack, 0, sizeof(InstructionIT)*64);
+        
+        if (TRACE > 0) {
+            // Check block coherency
+            block->check();
+        }
+        
+#define dispatchFirstScal() \
+    {                       \
+        goto loop;          \
+    }
+#define dispatchNextScal()    \
+    {                         \
+        if (TRACE >= 4) {     \
+            traceInstruction(it, int_stack[int_stack_index], real_stack[real_stack_index]); \
+        }                     \
+        it++;                 \
+        dispatchFirstScal()   \
+    }
+        
+#define dispatchBranch1Scal()                        \
+    {                                                \
+        it = (*it)->fBranch1->fInstructions.begin(); \
+        dispatchFirstScal();                         \
+    }
+#define dispatchBranch2Scal()                        \
+    {                                                \
+        it = (*it)->fBranch2->fInstructions.begin(); \
+        dispatchFirstScal();                         \
+    }
+        
+#define pushBranch1Scal()                                  \
+    {                                                      \
+        pushAddr_((*it)->fBranch1->fInstructions.begin()); \
+    }
+#define pushBranch2Scal()                                  \
+    {                                                      \
+        pushAddr_((*it)->fBranch2->fInstructions.begin()); \
+    }
+        
+#define dispatchReturnScal() \
+    {                        \
+        it = popAddr_();     \
+        dispatchFirstScal(); \
+    }
+#define saveReturnScal()   \
+    {                      \
+        pushAddr_(it + 1); \
+    }
+#define emptyReturnScal() (addr_stack_index == 0)
+        
+        InstructionIT it = block->fInstructions.begin();
+    
+        loop:
+            // (*it)->write(&std::cout);
+            switch ((*it)->fOpcode) {
+                    
+                // Number operations
+                case FBCInstruction::kRealValue : {
+                    pushReal(it, (*it)->fRealValue);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kInt32Value : {
+                    pushInt((*it)->fIntValue);
+                    dispatchNextScal();
+                }
+                    
+                // Memory operations
+                case FBCInstruction::kLoadReal : {
+                    if (TRACE > 0) {
+                        pushReal(it, fRealHeap[assertLoadRealHeap(it, (*it)->fOffset1)]);
+                    } else {
+                        pushReal(it, fRealHeap[(*it)->fOffset1]);
+                    }
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLoadInt : {
+                    if (TRACE > 0) {
+                        pushInt(fIntHeap[assertLoadIntHeap(it, (*it)->fOffset1)]);
+                    } else {
+                        pushInt(fIntHeap[(*it)->fOffset1]);
+                    }
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLoadSound : {
+                    if (TRACE > 0) {
+                        pushSound(fSoundHeap[assertSoundHeap(it, (*it)->fOffset1)]);
+                    } else {
+                        pushSound(fSoundHeap[(*it)->fOffset1]);
+                    }
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLoadSoundField : {
+                    // TODO
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kStoreReal : {
+                    if (TRACE > 0) {
+                        fRealHeap[assertStoreRealHeap(it, (*it)->fOffset1)] = popReal(it);
+                    } else {
+                        fRealHeap[(*it)->fOffset1] = popReal(it);
+                    }
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kStoreInt : {
+                    if (TRACE > 0) {
+                        fIntHeap[assertStoreIntHeap(it, (*it)->fOffset1)] = popInt();
+                    } else {
+                        fIntHeap[(*it)->fOffset1] = popInt();
+                    }
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kStoreSound : {
+                    // TODO
+                    dispatchNextScal();
+                }
+                    
+                // Directly store a value
+                case FBCInstruction::kStoreRealValue : {
+                    if (TRACE > 0) {
+                        fRealHeap[assertStoreRealHeap(it, (*it)->fOffset1)] = (*it)->fRealValue;
+                    } else {
+                        fRealHeap[(*it)->fOffset1] = (*it)->fRealValue;
+                    }
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kStoreIntValue : {
+                    if (TRACE > 0) {
+                        fIntHeap[assertStoreIntHeap(it, (*it)->fOffset1)] = (*it)->fIntValue;
+                    } else {
+                        fIntHeap[(*it)->fOffset1] = (*it)->fIntValue;
+                    }
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLoadIndexedReal : {
+                    int offset = popInt();
+                    if (TRACE > 0) {
+                        // DEBUG
+                        // assertIndex(it, offset, (*it)->fOffset2);
+                        pushReal(it, fRealHeap[assertLoadRealHeap(it, (*it)->fOffset1 + offset, (*it)->fOffset2)]);
+                    } else {
+                        pushReal(it, fRealHeap[(*it)->fOffset1 + offset]);
+                    }
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLoadIndexedInt : {
+                    int offset = popInt();
+                    if (TRACE > 0) {
+                        // DEBUG
+                        // assertIndex(it, offset, (*it)->fOffset2);
+                        pushInt(fIntHeap[assertLoadIntHeap(it, (*it)->fOffset1 + offset, (*it)->fOffset2)]);
+                    } else {
+                        pushInt(fIntHeap[(*it)->fOffset1 + offset]);
+                    }
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kStoreIndexedReal : {
+                    int offset = popInt();
+                    if (TRACE > 0) {
+                        // DEBUG
+                        // assertIndex(it, offset, (*it)->fOffset2);
+                        fRealHeap[assertStoreRealHeap(it, (*it)->fOffset1 + offset, (*it)->fOffset2)] = popReal(it);
+                    } else {
+                        fRealHeap[(*it)->fOffset1 + offset] = popReal(it);
+                    }
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kStoreIndexedInt : {
+                    int offset = popInt();
+                    if (TRACE > 0) {
+                        // DEBUG
+                        // assertIndex(it, offset, (*it)->fOffset2);
+                        fIntHeap[assertStoreIntHeap(it, (*it)->fOffset1 + offset, (*it)->fOffset2)] = popInt();
+                    } else {
+                        fIntHeap[(*it)->fOffset1 + offset] = popInt();
+                    }
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kBlockStoreReal : {
+                    FIRBlockStoreRealInstruction<REAL>* inst = static_cast<FIRBlockStoreRealInstruction<REAL>*>(*it);
+                    assertInterp(inst);
+                    for (int i = 0; i < inst->fOffset2; i++) {
+                        fRealHeap[inst->fOffset1 + i] = inst->fNumTable[i];
+                    }
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kBlockStoreInt : {
+                    FIRBlockStoreIntInstruction<REAL>* inst = static_cast<FIRBlockStoreIntInstruction<REAL>*>(*it);
+                    assertInterp(inst);
+                    for (int i = 0; i < inst->fOffset2; i++) {
+                        fIntHeap[inst->fOffset1 + i] = inst->fNumTable[i];
+                    }
+                    dispatchNextScal();
+                }
+                   
+                case FBCInstruction::kMoveReal : {
+                    fRealHeap[(*it)->fOffset1] = fRealHeap[(*it)->fOffset2];
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMoveInt : {
+                    fIntHeap[(*it)->fOffset1] = fIntHeap[(*it)->fOffset2];
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kPairMoveReal : {
+                    fRealHeap[(*it)->fOffset1] = fRealHeap[(*it)->fOffset1 - 1];
+                    fRealHeap[(*it)->fOffset2] = fRealHeap[(*it)->fOffset2 - 1];
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kPairMoveInt : {
+                    fIntHeap[(*it)->fOffset1] = fIntHeap[(*it)->fOffset1 - 1];
+                    fIntHeap[(*it)->fOffset2] = fIntHeap[(*it)->fOffset2 - 1];
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kBlockPairMoveReal : {
+                    for (int i = (*it)->fOffset1; i < (*it)->fOffset2; i += 2) {
+                        fRealHeap[i + 1] = fRealHeap[i];
+                    }
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kBlockPairMoveInt : {
+                    for (int i = (*it)->fOffset1; i < (*it)->fOffset2; i += 2) {
+                        fIntHeap[i + 1] = fIntHeap[i];
+                    }
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kBlockShiftReal : {
+                    for (int i = (*it)->fOffset1; i > (*it)->fOffset2; i -= 1) {
+                        fRealHeap[i] = fRealHeap[i - 1];
+                    }
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kBlockShiftInt : {
+                    for (int i = (*it)->fOffset1; i > (*it)->fOffset2; i -= 1) {
+                        fIntHeap[i] = fIntHeap[i - 1];
+                    }
+                    dispatchNextScal();
+                }
+                    
+                // Input/output access
+                case FBCInstruction::kLoadInput : {
+                    if (TRACE > 0) {
+                        pushReal(it, fInputs[(*it)->fOffset1][assertAudioBuffer(it, popInt())]);
+                    } else {
+                        /*
+                         int index = popInt();
+                         pushReal(it, fInputs[(*it)->fOffset1][index]);
+                         std::cout << "do_kLoadInput " << index << std::endl;
+                         */
+                        pushReal(it, fInputs[(*it)->fOffset1][popInt()]);
+                    }
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kStoreOutput : {
+                    if (TRACE > 0) {
+                        fOutputs[(*it)->fOffset1][assertAudioBuffer(it, popInt())] = popReal(it);
+                    } else {
+                        /*
+                         int index = popInt();
+                         std::cout << "do_kStoreOutput " << index << std::endl;
+                         fOutputs[(*it)->fOffset1][index] = popReal(it);
+                         */
+                        fOutputs[(*it)->fOffset1][popInt()] = popReal(it);
+                    }
+                    dispatchNextScal();
+                }
+                    
+                // Cast operations
+                case FBCInstruction::kCastReal : {
+                    pushReal(it, REAL(popInt()));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kCastRealHeap : {
+                    pushReal(it, REAL(fIntHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kCastInt : {
+                    if (TRACE >= 3) {
+                        pushInt(int(checkCastIntOverflow(it, popReal(it))));
+                    } else {
+                        pushInt(int(popReal(it)));
+                    }
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kCastIntHeap : {
+                    if (TRACE >= 3) {
+                        pushInt(int(checkCastIntOverflow(it, fRealHeap[(*it)->fOffset1])));
+                    } else {
+                        pushInt(int(fRealHeap[(*it)->fOffset1]));
+                    }
+                    dispatchNextScal();
+                }
+                    
+                // Bitcast operations
+                case FBCInstruction::kBitcastInt : {
+                    REAL v1 = popReal(it);
+                    int  v2 = *reinterpret_cast<int*>(&v1);
+                    pushInt(v2);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kBitcastReal : {
+                    int  v1 = popInt();
+                    REAL v2 = *reinterpret_cast<REAL*>(&v1);
+                    pushReal(it, v2);
+                    dispatchNextScal();
+                }
+                    
+                //-------------------------------------------------------
+                // Standard math operations : 'stack' OP 'stack' version
+                //-------------------------------------------------------
+                    
+                case FBCInstruction::kAddReal : {
+                    REAL v1 = popReal(it);
+                    REAL v2 = popReal(it);
+                    pushReal(it, v1 + v2);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kAddInt : {
+                    int v1 = popInt();
+                    int v2 = popInt();
+                    if (TRACE > 0) {
+                        int res;
+                        if (__builtin_sadd_overflow(v1, v2, &res)) {
+                            warningOverflow(it);
+                        }
+                        pushInt(res);
+                    } else {
+                        pushInt(v1 + v2);
+                    }
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kSubReal : {
+                    REAL v1 = popReal(it);
+                    REAL v2 = popReal(it);
+                    pushReal(it, v1 - v2);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kSubInt : {
+                    int v1 = popInt();
+                    int v2 = popInt();
+                    if (TRACE > 0) {
+                        int res;
+                        if (__builtin_ssub_overflow(v1, v2, &res)) {
+                            warningOverflow(it);
+                        }
+                        pushInt(res);
+                    } else {
+                        pushInt(v1 - v2);
+                    }
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kMultReal : {
+                    REAL v1 = popReal(it);
+                    REAL v2 = popReal(it);
+                    pushReal(it, v1 * v2);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMultInt : {
+                    int v1 = popInt();
+                    int v2 = popInt();
+                    if (TRACE > 0) {
+                        int res;
+                        if (__builtin_smul_overflow(v1, v2, &res)) {
+                            warningOverflow(it);
+                        }
+                        pushInt(res);
+                    } else {
+                        pushInt(v1 * v2);
+                    }
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kDivReal : {
+                    REAL v1 = popReal(it);
+                    REAL v2 = popReal(it);
+                    if (TRACE > 0) {
+                        checkDivZero(it, v2);
+                    }
+                    pushReal(it, v1 / v2);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kDivInt : {
+                    int v1 = popInt();
+                    int v2 = popInt();
+                    if (TRACE > 0) {
+                        checkDivZero(it, v2);
+                    }
+                    pushInt(v1 / v2);
+                    dispatchNextScal();
+                    dispatchNextScal();
+                }
+                    
+                //-------------------------------------------------------
+                // Standard math operations : 'stack' OP 'stack' version
+                //-------------------------------------------------------
+            
+                case FBCInstruction::kRemReal : {
+                    REAL v1 = popReal(it);
+                    REAL v2 = popReal(it);
+                    if (TRACE > 0) {
+                        checkDivZero(it, v2);
+                    }
+                    pushReal(it, std::remainder(v1, v2));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kRemInt : {
+                    int v1 = popInt();
+                    int v2 = popInt();
+                    if (TRACE > 0) {
+                        checkDivZero(it, v2);
+                    }
+                    pushInt(v1 % v2);
+                    dispatchNextScal();
+                }
+                    
+                // Shift operation
+                case FBCInstruction::kLshInt : {
+                    int v1 = popInt();
+                    int v2 = popInt();
+                    pushInt(v1 << v2);
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kARshInt : {
+                    int v1 = popInt();
+                    int v2 = popInt();
+                    pushInt(v1 >> v2);
+                    dispatchNextScal();
+                }
+                
+               case FBCInstruction::kLRshInt : {
+                    // TODO
+                    int v1 = popInt();
+                    int v2 = popInt();
+                    pushInt(v1 >> v2);
+                    dispatchNextScal();
+                }
+                    
+                // Comparaison Int
+                case FBCInstruction::kGTInt : {
+                    int v1 = popInt();
+                    int v2 = popInt();
+                    pushInt(v1 > v2);
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kLTInt : {
+                    int v1 = popInt();
+                    int v2 = popInt();
+                    pushInt(v1 < v2);
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kGEInt : {
+                    int v1 = popInt();
+                    int v2 = popInt();
+                    pushInt(v1 >= v2);
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kLEInt : {
+                    int v1 = popInt();
+                    int v2 = popInt();
+                    pushInt(v1 <= v2);
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kEQInt : {
+                    int v1 = popInt();
+                    int v2 = popInt();
+                    pushInt(v1 == v2);
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kNEInt : {
+                    int v1 = popInt();
+                    int v2 = popInt();
+                    pushInt(v1 != v2);
+                    dispatchNextScal();
+                }
+                    
+                // Comparaison Real
+                case FBCInstruction::kGTReal : {
+                    REAL v1 = popReal(it);
+                    REAL v2 = popReal(it);
+                    pushInt(v1 > v2);
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kLTReal : {
+                    REAL v1 = popReal(it);
+                    REAL v2 = popReal(it);
+                    pushInt(v1 < v2);
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kGEReal : {
+                    REAL v1 = popReal(it);
+                    REAL v2 = popReal(it);
+                    pushInt(v1 >= v2);
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kLEReal : {
+                    REAL v1 = popReal(it);
+                    REAL v2 = popReal(it);
+                    pushInt(v1 <= v2);
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kEQReal : {
+                    REAL v1 = popReal(it);
+                    REAL v2 = popReal(it);
+                    pushInt(v1 == v2);
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kNEReal : {
+                    REAL v1 = popReal(it);
+                    REAL v2 = popReal(it);
+                    pushInt(v1 != v2);
+                    dispatchNextScal();
+                }
+                
+                // Logical operations
+                case FBCInstruction::kANDInt : {
+                    int v1 = popInt();
+                    int v2 = popInt();
+                    pushInt(v1 & v2);
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kORInt : {
+                    int v1 = popInt();
+                    int v2 = popInt();
+                    pushInt(v1 | v2);
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kXORInt : {
+                    int v1 = popInt();
+                    int v2 = popInt();
+                    pushInt(v1 ^ v2);
+                    dispatchNextScal();
+                }
+                    
+                //-----------------------------------------------------
+                // Standard math operations : 'heap' OP 'heap' version
+                //-----------------------------------------------------
+                    
+                case FBCInstruction::kAddRealHeap : {
+                    pushReal(it, fRealHeap[(*it)->fOffset1] + fRealHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kAddIntHeap : {
+                    pushInt(fIntHeap[(*it)->fOffset1] + fIntHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kSubRealHeap : {
+                    pushReal(it, fRealHeap[(*it)->fOffset1] - fRealHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kSubIntHeap : {
+                    pushInt(fIntHeap[(*it)->fOffset1] - fIntHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kMultRealHeap : {
+                    pushReal(it, fRealHeap[(*it)->fOffset1] * fRealHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kMultIntHeap : {
+                    pushInt(fIntHeap[(*it)->fOffset1] * fIntHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kDivRealHeap : {
+                    pushReal(it, fRealHeap[(*it)->fOffset1] / fRealHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kDivIntHeap : {
+                    pushInt(fIntHeap[(*it)->fOffset1] / fIntHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kRemRealHeap : {
+                    pushReal(it, std::remainder(fRealHeap[(*it)->fOffset1], fRealHeap[(*it)->fOffset2]));
+                    dispatchNextScal();
+                }
+                
+                case FBCInstruction::kRemIntHeap : {
+                    pushInt(fIntHeap[(*it)->fOffset1] % fIntHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                    
+                // Shift operation
+                case FBCInstruction::kLshIntHeap : {
+                    pushInt(fIntHeap[(*it)->fOffset1] << fIntHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kARshIntHeap : {
+                    pushInt(fIntHeap[(*it)->fOffset1] >> fIntHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLRshIntHeap : {
+                    // TODO
+                    pushInt(fIntHeap[(*it)->fOffset1] >> fIntHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                    
+                // Comparaison Int
+                case FBCInstruction::kGTIntHeap : {
+                    pushInt(fIntHeap[(*it)->fOffset1] > fIntHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLTIntHeap : {
+                    pushInt(fIntHeap[(*it)->fOffset1] < fIntHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kGEIntHeap : {
+                    pushInt(fIntHeap[(*it)->fOffset1] >= fIntHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLEIntHeap : {
+                    pushInt(fIntHeap[(*it)->fOffset1] <= fIntHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kEQIntHeap : {
+                    pushInt(fIntHeap[(*it)->fOffset1] == fIntHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kNEIntHeap : {
+                    pushInt(fIntHeap[(*it)->fOffset1] != fIntHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                    
+                // Comparaison Real
+                case FBCInstruction::kGTRealHeap : {
+                    pushInt(fRealHeap[(*it)->fOffset1] > fRealHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLTRealHeap : {
+                    pushInt(fRealHeap[(*it)->fOffset1] < fRealHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kGERealHeap : {
+                    pushInt(fRealHeap[(*it)->fOffset1] >= fRealHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLERealHeap : {
+                    pushInt(fRealHeap[(*it)->fOffset1] <= fRealHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kEQRealHeap : {
+                    pushInt(fRealHeap[(*it)->fOffset1] == fRealHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kNERealHeap : {
+                    pushInt(fRealHeap[(*it)->fOffset1] != fRealHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                    
+                // Logical operations
+                case FBCInstruction::kANDIntHeap : {
+                    pushInt(fIntHeap[(*it)->fOffset1] & fIntHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kORIntHeap : {
+                    pushInt(fIntHeap[(*it)->fOffset1] | fIntHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kXORIntHeap : {
+                    pushInt(fIntHeap[(*it)->fOffset1] ^ fIntHeap[(*it)->fOffset2]);
+                    dispatchNextScal();
+                }
+                    
+                //------------------------------------------------------
+                // Standard math operations : 'stack' OP 'heap' version
+                //------------------------------------------------------
+                    
+                case FBCInstruction::kAddRealStack : {
+                    REAL v1 = popReal(it);
+                    pushReal(it, fRealHeap[(*it)->fOffset1] + v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kAddIntStack : {
+                    int v1 = popInt();
+                    pushInt(fIntHeap[(*it)->fOffset1] + v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kSubRealStack : {
+                    REAL v1 = popReal(it);
+                    pushReal(it, fRealHeap[(*it)->fOffset1] - v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kSubIntStack : {
+                    int v1 = popInt();
+                    pushInt(fIntHeap[(*it)->fOffset1] - v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMultRealStack : {
+                    REAL v1 = popReal(it);
+                    pushReal(it, fRealHeap[(*it)->fOffset1] * v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMultIntStack : {
+                    int v1 = popInt();
+                    pushInt(fIntHeap[(*it)->fOffset1] * v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kDivRealStack : {
+                    REAL v1 = popReal(it);
+                    pushReal(it, fRealHeap[(*it)->fOffset1] / v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kDivIntStack : {
+                    int v1 = popInt();
+                    pushInt(fIntHeap[(*it)->fOffset1] / v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kRemRealStack : {
+                    REAL v1 = popReal(it);
+                    pushReal(it, std::remainder(fRealHeap[(*it)->fOffset1], v1));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kRemIntStack : {
+                    int v1 = popInt();
+                    pushInt(fIntHeap[(*it)->fOffset1] % v1);
+                    dispatchNextScal();
+                }
+                    
+                // Shift operation
+                case FBCInstruction::kLshIntStack : {
+                    int v1 = popInt();
+                    pushInt(fIntHeap[(*it)->fOffset1] << v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kARshIntStack : {
+                    int v1 = popInt();
+                    pushInt(fIntHeap[(*it)->fOffset1] >> v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLRshIntStack : {
+                    // TODO
+                    int v1 = popInt();
+                    pushInt(fIntHeap[(*it)->fOffset1] >> v1);
+                    dispatchNextScal();
+                }
+                    
+                // Comparaison Int
+                case FBCInstruction::kGTIntStack : {
+                    int v1 = popInt();
+                    pushInt(fIntHeap[(*it)->fOffset1] > v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLTIntStack : {
+                    int v1 = popInt();
+                    pushInt(fIntHeap[(*it)->fOffset1] < v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kGEIntStack : {
+                    int v1 = popInt();
+                    pushInt(fIntHeap[(*it)->fOffset1] >= v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLEIntStack : {
+                    int v1 = popInt();
+                    pushInt(fIntHeap[(*it)->fOffset1] <= v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kEQIntStack : {
+                    int v1 = popInt();
+                    pushInt(fIntHeap[(*it)->fOffset1] == v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kNEIntStack : {
+                    int v1 = popInt();
+                    pushInt(fIntHeap[(*it)->fOffset1] != v1);
+                    dispatchNextScal();
+                }
+                    
+                // Comparaison Real
+                case FBCInstruction::kGTRealStack : {
+                    REAL v1 = popReal(it);
+                    pushInt(fRealHeap[(*it)->fOffset1] > v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLTRealStack : {
+                    REAL v1 = popReal(it);
+                    pushInt(fRealHeap[(*it)->fOffset1] < v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kGERealStack : {
+                    REAL v1 = popReal(it);
+                    pushInt(fRealHeap[(*it)->fOffset1] >= v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLERealStack : {
+                    REAL v1 = popReal(it);
+                    pushInt(fRealHeap[(*it)->fOffset1] <= v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kEQRealStack : {
+                    REAL v1 = popReal(it);
+                    pushInt(fRealHeap[(*it)->fOffset1] == v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kNERealStack : {
+                    REAL v1 = popReal(it);
+                    pushInt(fRealHeap[(*it)->fOffset1] != v1);
+                    dispatchNextScal();
+                }
+                    
+                // Logical operations
+                case FBCInstruction::kANDIntStack : {
+                    int v1 = popInt();
+                    pushInt(fIntHeap[(*it)->fOffset1] & v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kORIntStack : {
+                    int v1 = popInt();
+                    pushInt(fIntHeap[(*it)->fOffset1] | v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kXORIntStack : {
+                    int v1 = popInt();
+                    pushInt(fIntHeap[(*it)->fOffset1] ^ v1);
+                    dispatchNextScal();
+                }
+                    
+                //-------------------------------------------------------
+                // Standard math operations : 'stack' OP 'value' version
+                //-------------------------------------------------------
+                    
+                case FBCInstruction::kAddRealStackValue : {
+                    REAL v1 = popReal(it);
+                    pushReal(it, (*it)->fRealValue + v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kAddIntStackValue : {
+                    int v1 = popInt();
+                    pushInt((*it)->fIntValue + v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kSubRealStackValue : {
+                    REAL v1 = popReal(it);
+                    pushReal(it, (*it)->fRealValue - v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kSubIntStackValue : {
+                    int v1 = popInt();
+                    pushInt((*it)->fIntValue - v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMultRealStackValue : {
+                    REAL v1 = popReal(it);
+                    pushReal(it, (*it)->fRealValue * v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMultIntStackValue : {
+                    int v1 = popInt();
+                    pushInt((*it)->fIntValue * v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kDivRealStackValue : {
+                    REAL v1 = popReal(it);
+                    pushReal(it, (*it)->fRealValue / v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kDivIntStackValue : {
+                    int v1 = popInt();
+                    pushInt((*it)->fIntValue / v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kRemRealStackValue : {
+                    REAL v1 = popReal(it);
+                    pushReal(it, std::remainder((*it)->fRealValue, v1));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kRemIntStackValue : {
+                    int v1 = popInt();
+                    pushInt((*it)->fIntValue % v1);
+                    dispatchNextScal();
+                }
+                    
+                // Shift operation
+                case FBCInstruction::kLshIntStackValue : {
+                    int v1 = popInt();
+                    pushInt((*it)->fIntValue << v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kARshIntStackValue : {
+                    int v1 = popInt();
+                    pushInt((*it)->fIntValue >> v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLRshIntStackValue : {
+                    // TODO
+                    int v1 = popInt();
+                    pushInt((*it)->fIntValue >> v1);
+                    dispatchNextScal();
+                }
+                    
+                // Comparaison Int
+                case FBCInstruction::kGTIntStackValue : {
+                    int v1 = popInt();
+                    pushInt((*it)->fIntValue > v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLTIntStackValue : {
+                    int v1 = popInt();
+                    pushInt((*it)->fIntValue < v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kGEIntStackValue : {
+                    int v1 = popInt();
+                    pushInt((*it)->fIntValue >= v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLEIntStackValue : {
+                    int v1 = popInt();
+                    pushInt((*it)->fIntValue <= v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kEQIntStackValue : {
+                    int v1 = popInt();
+                    pushInt((*it)->fIntValue == v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kNEIntStackValue : {
+                    int v1 = popInt();
+                    pushInt((*it)->fIntValue != v1);
+                    dispatchNextScal();
+                }
+                    
+                // Comparaison Real
+                case FBCInstruction::kGTRealStackValue : {
+                    REAL v1 = popReal(it);
+                    pushInt((*it)->fRealValue > v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLTRealStackValue : {
+                    REAL v1 = popReal(it);
+                    pushInt((*it)->fRealValue < v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kGERealStackValue : {
+                    REAL v1 = popReal(it);
+                    pushInt((*it)->fRealValue >= v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLERealStackValue : {
+                    REAL v1 = popReal(it);
+                    pushInt((*it)->fRealValue <= v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kEQRealStackValue : {
+                    REAL v1 = popReal(it);
+                    pushInt((*it)->fRealValue == v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kNERealStackValue : {
+                    REAL v1 = popReal(it);
+                    pushInt((*it)->fRealValue != v1);
+                    dispatchNextScal();
+                }
+                    
+                // Logical operations
+                case FBCInstruction::kANDIntStackValue : {
+                    int v1 = popInt();
+                    pushInt((*it)->fIntValue & v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kORIntStackValue : {
+                    int v1 = popInt();
+                    pushInt((*it)->fIntValue | v1);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kXORIntStackValue : {
+                    int v1 = popInt();
+                    pushInt((*it)->fIntValue ^ v1);
+                    dispatchNextScal();
+                }
+                    
+                //------------------------------------------------------
+                // Standard math operations : 'value' OP 'heap' version
+                //------------------------------------------------------
+                    
+                case FBCInstruction::kAddRealValue : {
+                    pushReal(it, (*it)->fRealValue + fRealHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kAddIntValue : {
+                    pushInt((*it)->fIntValue + fIntHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kSubRealValue : {
+                    pushReal(it, (*it)->fRealValue - fRealHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kSubIntValue : {
+                    pushInt((*it)->fIntValue - fIntHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMultRealValue : {
+                    pushReal(it, (*it)->fRealValue * fRealHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMultIntValue : {
+                    pushInt((*it)->fIntValue * fIntHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kDivRealValue : {
+                    pushReal(it, (*it)->fRealValue / fRealHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kDivIntValue : {
+                    pushInt((*it)->fIntValue / fIntHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kRemRealValue : {
+                    pushReal(it, std::remainder((*it)->fRealValue, fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kRemIntValue : {
+                    pushInt((*it)->fIntValue % fIntHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                // Shift operation
+                case FBCInstruction::kLshIntValue : {
+                    pushInt((*it)->fIntValue << fIntHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kARshIntValue : {
+                    pushInt((*it)->fIntValue >> fIntHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLRshIntValue : {
+                    // TODO
+                    pushInt((*it)->fIntValue >> fIntHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                // Comparaison Int
+                case FBCInstruction::kGTIntValue : {
+                    pushInt((*it)->fIntValue > fIntHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLTIntValue : {
+                    pushInt((*it)->fIntValue < fIntHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kGEIntValue : {
+                    pushInt((*it)->fIntValue >= fIntHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLEIntValue : {
+                    pushInt((*it)->fIntValue <= fIntHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kEQIntValue : {
+                    pushInt((*it)->fIntValue == fIntHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kNEIntValue : {
+                    pushInt((*it)->fIntValue != fIntHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                // Comparaison Real
+                case FBCInstruction::kGTRealValue : {
+                    pushInt((*it)->fRealValue > fRealHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLTRealValue : {
+                    pushInt((*it)->fRealValue < fRealHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kGERealValue : {
+                    pushInt((*it)->fRealValue >= fRealHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLERealValue : {
+                    pushInt((*it)->fRealValue <= fRealHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kEQRealValue : {
+                    pushInt((*it)->fRealValue == fRealHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kNERealValue : {
+                    pushInt((*it)->fRealValue != fRealHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                // Logical operations
+                case FBCInstruction::kANDIntValue : {
+                    pushInt((*it)->fIntValue & fIntHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kORIntValue : {
+                    pushInt((*it)->fIntValue | fIntHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kXORIntValue : {
+                    pushInt((*it)->fIntValue ^ fIntHeap[(*it)->fOffset1]);
+                    dispatchNextScal();
+                }
+                    
+                //----------------------------------------------------
+                // Standard math operations : Value inverted version
+                // (non commutative operations)
+                //----------------------------------------------------
+                    
+                case FBCInstruction::kSubRealValueInvert : {
+                    pushReal(it, fRealHeap[(*it)->fOffset1] - (*it)->fRealValue);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kSubIntValueInvert : {
+                    pushInt(fIntHeap[(*it)->fOffset1] - (*it)->fIntValue);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kDivRealValueInvert : {
+                    pushReal(it, fRealHeap[(*it)->fOffset1] / (*it)->fRealValue);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kDivIntValueInvert : {
+                    pushInt(fIntHeap[(*it)->fOffset1] / (*it)->fIntValue);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kRemRealValueInvert : {
+                    pushReal(it, std::remainder(fRealHeap[(*it)->fOffset1], (*it)->fRealValue));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kRemIntValueInvert : {
+                    pushInt(fIntHeap[(*it)->fOffset1] % (*it)->fIntValue);
+                    dispatchNextScal();
+                }
+                    
+                // Shift operation
+                case FBCInstruction::kLshIntValueInvert : {
+                    pushInt(fIntHeap[(*it)->fOffset1] << (*it)->fIntValue);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kARshIntValueInvert : {
+                    pushInt(fIntHeap[(*it)->fOffset1] >> (*it)->fIntValue);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLRshIntValueInvert : {
+                    // TODO
+                    pushInt(fIntHeap[(*it)->fOffset1] >> (*it)->fIntValue);
+                    dispatchNextScal();
+                }
+                    
+                // Comparaison Int
+                case FBCInstruction::kGTIntValueInvert : {
+                    pushInt(fIntHeap[(*it)->fOffset1] > (*it)->fIntValue);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLTIntValueInvert : {
+                    pushInt(fIntHeap[(*it)->fOffset1] < (*it)->fIntValue);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kGEIntValueInvert : {
+                    pushInt(fIntHeap[(*it)->fOffset1] >= (*it)->fIntValue);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLEIntValueInvert : {
+                    pushInt(fIntHeap[(*it)->fOffset1] <= (*it)->fIntValue);
+                    dispatchNextScal();
+                }
+                    
+                // Comparaison Real
+                case FBCInstruction::kGTRealValueInvert : {
+                    pushInt(fRealHeap[(*it)->fOffset1] > (*it)->fRealValue);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLTRealValueInvert : {
+                    pushInt(fRealHeap[(*it)->fOffset1] < (*it)->fRealValue);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kGERealValueInvert : {
+                    pushInt(fRealHeap[(*it)->fOffset1] >= (*it)->fRealValue);
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLERealValueInvert : {
+                    pushInt(fRealHeap[(*it)->fOffset1] <= (*it)->fRealValue);
+                    dispatchNextScal();
+                }
+                    
+                //---------------------
+                // Extended unary math
+                //---------------------
+                    
+                case FBCInstruction::kAbs : {
+                    int v = popInt();
+                    pushInt(std::abs(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kAbsf : {
+                    REAL v = popReal(it);
+                    pushReal(it, std::fabs(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kAcosf : {
+                    REAL v = popReal(it);
+                    pushReal(it, std::acos(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kAcoshf : {
+                    REAL v = popReal(it);
+                    pushReal(it, std::acosh(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kAsinf : {
+                    REAL v = popReal(it);
+                    pushReal(it, std::asin(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kAsinhf : {
+                    REAL v = popReal(it);
+                    pushReal(it, std::asinh(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kAtanf : {
+                    REAL v = popReal(it);
+                    pushReal(it, std::atan(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kAtanhf : {
+                    REAL v = popReal(it);
+                    pushReal(it, std::atanh(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kCeilf : {
+                    REAL v = popReal(it);
+                    pushReal(it, std::ceil(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kCosf : {
+                    REAL v = popReal(it);
+                    pushReal(it, std::cos(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kCoshf : {
+                    REAL v = popReal(it);
+                    pushReal(it, std::cosh(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kExpf : {
+                    REAL v = popReal(it);
+                    pushReal(it, std::exp(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kFloorf : {
+                    REAL v = popReal(it);
+                    pushReal(it, std::floor(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLogf : {
+                    REAL v = popReal(it);
+                    pushReal(it, std::log(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLog10f : {
+                    REAL v = popReal(it);
+                    pushReal(it, std::log10(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kRintf : {
+                    REAL v = popReal(it);
+                    pushReal(it, std::rint(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kRoundf : {
+                    REAL v = popReal(it);
+                    pushReal(it, std::round(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kSinf : {
+                    REAL v = popReal(it);
+                    pushReal(it, std::sin(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kSinhf : {
+                    REAL v = popReal(it);
+                    pushReal(it, std::sinh(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kSqrtf : {
+                    REAL v = popReal(it);
+                    pushReal(it, std::sqrt(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kTanf : {
+                    REAL v = popReal(it);
+                    pushReal(it, std::tan(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kTanhf : {
+                    REAL v = popReal(it);
+                    pushReal(it, std::tanh(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kIsnanf : {
+                    REAL v = popReal(it);
+                    pushInt(std::isnan(v));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kIsinff : {
+                    REAL v = popReal(it);
+                    pushInt(std::isinf(v));
+                    dispatchNextScal();
+                }
+                 
+                //------------------------------------
+                // Extended unary math (heap version)
+                //------------------------------------
+                    
+                case FBCInstruction::kAbsHeap : {
+                    pushInt(std::abs(fIntHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kAbsfHeap : {
+                    pushReal(it, std::fabs(fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kAcosfHeap : {
+                    pushReal(it, std::acos(fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kAcoshfHeap : {
+                    pushReal(it, std::acosh(fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kAsinfHeap : {
+                    pushReal(it, std::asin(fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kAsinhfHeap : {
+                    pushReal(it, std::asinh(fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kAtanfHeap : {
+                    pushReal(it, std::atan(fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kAtanhfHeap : {
+                    pushReal(it, std::atanh(fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kCeilfHeap : {
+                    pushReal(it, std::ceil(fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kCosfHeap : {
+                    pushReal(it, std::cos(fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kCoshfHeap : {
+                    pushReal(it, std::cosh(fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kExpfHeap : {
+                    pushReal(it, std::exp(fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kFloorfHeap : {
+                    pushReal(it, std::floor(fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLogfHeap : {
+                    pushReal(it, std::log(fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kLog10fHeap : {
+                    pushReal(it, std::log10(fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kRintfHeap : {
+                    pushReal(it, std::rint(fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kRoundfHeap : {
+                    pushReal(it, std::round(fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kSinfHeap : {
+                    pushReal(it, std::sin(fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kSinhfHeap : {
+                    pushReal(it, std::sinh(fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kSqrtfHeap : {
+                    pushReal(it, std::sqrt(fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kTanfHeap : {
+                    pushReal(it, std::tan(fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kTanhfHeap : {
+                    pushReal(it, std::tanh(fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                //----------------------
+                // Extended binary math
+                //----------------------
+                    
+                case FBCInstruction::kAtan2f : {
+                    REAL v1 = popReal(it);
+                    REAL v2 = popReal(it);
+                    pushReal(it, std::atan2(v1, v2));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kFmodf : {
+                    REAL v1 = popReal(it);
+                    REAL v2 = popReal(it);
+                    pushReal(it, std::fmod(v1, v2));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kPowf : {
+                    REAL v1 = popReal(it);
+                    REAL v2 = popReal(it);
+                    pushReal(it, std::pow(v1, v2));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMax : {
+                    int v1 = popInt();
+                    int v2 = popInt();
+                    pushInt(std::max(v1, v2));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMaxf : {
+                    REAL v1 = popReal(it);
+                    REAL v2 = popReal(it);
+                    pushReal(it, std::max(v1, v2));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMin : {
+                    int v1 = popInt();
+                    int v2 = popInt();
+                    pushInt(std::min(v1, v2));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMinf : {
+                    REAL v1 = popReal(it);
+                    REAL v2 = popReal(it);
+                    pushReal(it, std::min(v1, v2));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kCopysignf : {
+                    REAL v1 = popReal(it);
+                    REAL v2 = popReal(it);
+                    pushReal(it, std::copysign(v1, v2));
+                    dispatchNextScal();
+                }
+                    
+                //-------------------------------------
+                // Extended binary math (heap version)
+                //-------------------------------------
+                    
+                case FBCInstruction::kAtan2fHeap : {
+                    pushReal(it, std::atan2(fRealHeap[(*it)->fOffset1], fRealHeap[(*it)->fOffset2]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kFmodfHeap : {
+                    pushReal(it, std::fmod(fRealHeap[(*it)->fOffset1], fRealHeap[(*it)->fOffset2]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kPowfHeap : {
+                    pushReal(it, std::pow(fRealHeap[(*it)->fOffset1], fRealHeap[(*it)->fOffset2]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMaxHeap : {
+                    pushInt(std::max(fIntHeap[(*it)->fOffset1], fIntHeap[(*it)->fOffset2]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMaxfHeap : {
+                    pushReal(it, std::max(fRealHeap[(*it)->fOffset1], fRealHeap[(*it)->fOffset2]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMinHeap : {
+                    pushInt(std::min(fIntHeap[(*it)->fOffset1], fIntHeap[(*it)->fOffset2]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMinfHeap : {
+                    pushReal(it, std::min(fRealHeap[(*it)->fOffset1], fRealHeap[(*it)->fOffset2]));
+                    dispatchNextScal();
+                }
+                    
+                //--------------------------------------
+                // Extended binary math (stack version)
+                //--------------------------------------
+                    
+                case FBCInstruction::kAtan2fStack : {
+                    REAL v1 = popReal(it);
+                    pushReal(it, std::atan2(fRealHeap[(*it)->fOffset1], v1));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kFmodfStack : {
+                    REAL v1 = popReal(it);
+                    pushReal(it, std::fmod(fRealHeap[(*it)->fOffset1], v1));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kPowfStack : {
+                    REAL v1 = popReal(it);
+                    pushReal(it, std::pow(fRealHeap[(*it)->fOffset1], v1));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMaxStack : {
+                    int v1 = popInt();
+                    pushInt(std::max(fIntHeap[(*it)->fOffset1], v1));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMaxfStack : {
+                    REAL v1 = popReal(it);
+                    pushReal(it, std::max(fRealHeap[(*it)->fOffset1], v1));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMinStack : {
+                    int v1 = popInt();
+                    pushInt(std::min(fIntHeap[(*it)->fOffset1], v1));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMinfStack : {
+                    REAL v1 = popReal(it);
+                    pushReal(it, std::min(fRealHeap[(*it)->fOffset1], v1));
+                    dispatchNextScal();
+                }
+                    
+                //--------------------------------------------
+                // Extended binary math (stack/value version)
+                //--------------------------------------------
+                    
+                case FBCInstruction::kAtan2fStackValue : {
+                    REAL v1 = popReal(it);
+                    pushReal(it, std::atan2((*it)->fRealValue, v1));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kFmodfStackValue : {
+                    REAL v1 = popReal(it);
+                    pushReal(it, std::fmod((*it)->fRealValue, v1));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kPowfStackValue : {
+                    REAL v1 = popReal(it);
+                    pushReal(it, std::pow((*it)->fRealValue, v1));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMaxStackValue : {
+                    int v1 = popInt();
+                    pushInt(std::max((*it)->fIntValue, v1));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMaxfStackValue : {
+                    REAL v1 = popReal(it);
+                    pushReal(it, std::max((*it)->fRealValue, v1));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMinStackValue : {
+                    int v1 = popInt();
+                    pushInt(std::min((*it)->fIntValue, v1));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMinfStackValue : {
+                    REAL v1 = popReal(it);
+                    pushReal(it, std::min((*it)->fRealValue, v1));
+                    dispatchNextScal();
+                }
+                    
+                //-------------------------------------
+                // Extended binary math (Value version)
+                //-------------------------------------
+                    
+                case FBCInstruction::kAtan2fValue : {
+                    pushReal(it, std::atan2((*it)->fRealValue, fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kFmodfValue : {
+                    pushReal(it, std::fmod((*it)->fRealValue, fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kPowfValue : {
+                    pushReal(it, std::pow((*it)->fRealValue, fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMaxValue : {
+                    pushInt(std::max((*it)->fIntValue, fIntHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMaxfValue : {
+                    pushReal(it, std::max((*it)->fRealValue, fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMinValue : {
+                    pushInt(std::min((*it)->fIntValue, fIntHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kMinfValue : {
+                    pushReal(it, std::min((*it)->fRealValue, fRealHeap[(*it)->fOffset1]));
+                    dispatchNextScal();
+                }
+                    
+                //-------------------------------------------------------------------
+                // Extended binary math (Value version) : non commutative operations
+                //-------------------------------------------------------------------
+                    
+                case FBCInstruction::kAtan2fValueInvert : {
+                    pushReal(it, std::atan2(fRealHeap[(*it)->fOffset1], (*it)->fRealValue));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kFmodfValueInvert : {
+                    pushReal(it, std::fmod(fRealHeap[(*it)->fOffset1], (*it)->fRealValue));
+                    dispatchNextScal();
+                }
+                    
+                case FBCInstruction::kPowfValueInvert : {
+                    pushReal(it, std::pow(fRealHeap[(*it)->fOffset1], (*it)->fRealValue));
+                    dispatchNextScal();
+                }
+                    
+                //---------
+                // Control
+                //---------
+                    
+                case FBCInstruction::kReturn : {
+                    // Empty addr stack = end of computation
+                    if (emptyReturnScal()) {
+                        goto end;
+                    } else {
+                        dispatchReturnScal();
+                    }
+                }
+                    
+                case FBCInstruction::kIf : {
+                    // Keep next instruction
+                    saveReturnScal();
+                    
+                    if (popInt()) {
+                        // Execute new block
+                        assertInterp((*it)->fBranch1);
+                        dispatchBranch1Scal();
+                        // No value (If)
+                    } else {
+                        // Execute new block
+                        assertInterp((*it)->fBranch2);
+                        dispatchBranch2Scal();
+                        // No value (If)
+                    }
+                }
+                    
+                case FBCInstruction::kSelectReal : {
+                    // Keep next instruction
+                    saveReturnScal();
+                    
+                    if (popInt()) {
+                        // Execute new block
+                        assertInterp((*it)->fBranch1);
+                        dispatchBranch1Scal();
+                        // Real value
+                    } else {
+                        // Execute new block
+                        assertInterp((*it)->fBranch2);
+                        dispatchBranch2Scal();
+                        // Real value
+                    }
+                }
+                    
+                case FBCInstruction::kSelectInt : {
+                    // Keep next instruction
+                    saveReturnScal();
+                    
+                    if (popInt()) {
+                        // Execute new block
+                        assertInterp((*it)->fBranch1);
+                        dispatchBranch1Scal();
+                        // Int value
+                    } else {
+                        // Execute new block
+                        assertInterp((*it)->fBranch2);
+                        dispatchBranch2Scal();
+                        // Int value
+                    }
+                }
+                    
+                case FBCInstruction::kCondBranch : {
+                    // If condition is true, just branch back on the block beginning
+                    if (popInt()) {
+                        assertInterp((*it)->fBranch1);
+                        dispatchBranch1Scal();
+                    } else {
+                        // Just continue after 'loop block' (do the final 'return')
+                        dispatchNextScal();
+                    }
+                }
+                    
+                case FBCInstruction::kLoop : {
+                    // Keep next instruction
+                    saveReturnScal();
+                    
+                    // Push branch2 (loop content)
+                    assertInterp((*it)->fBranch2);
+                    pushBranch2Scal();
+                    
+                    // And start branch1 loop variable declaration block
+                    assertInterp((*it)->fBranch1);
+                    dispatchBranch1Scal();
+                }
+                    
+                default:
+                    faustassert(false);
+                    break;
+            }
+        
+    end:
+        // Check stack coherency
+        assertInterp(real_stack_index == 0 && int_stack_index == 0 && sound_stack_index == 0);
+    }
+   #else
+    void ExecuteBlock(FBCBlockInstruction<REAL>* block, bool compile = false)
     {
         static void* fDispatchTable[] = {
 
@@ -470,21 +2611,21 @@ class FBCInterpreter : public FBCExecutor<T> {
 
             // Standard math (stack OP stack)
             &&do_kAddReal, &&do_kAddInt, &&do_kSubReal, &&do_kSubInt, &&do_kMultReal, &&do_kMultInt, &&do_kDivReal,
-            &&do_kDivInt, &&do_kRemReal, &&do_kRemInt, &&do_kLshInt, &&do_kRshInt, &&do_kGTInt, &&do_kLTInt,
+            &&do_kDivInt, &&do_kRemReal, &&do_kRemInt, &&do_kLshInt, &&do_kARshInt, &&do_kLRshInt, &&do_kGTInt, &&do_kLTInt,
             &&do_kGEInt, &&do_kLEInt, &&do_kEQInt, &&do_kNEInt, &&do_kGTReal, &&do_kLTReal, &&do_kGEReal, &&do_kLEReal,
             &&do_kEQReal, &&do_kNEReal, &&do_kANDInt, &&do_kORInt, &&do_kXORInt,
 
             // Standard math (heap OP heap)
             &&do_kAddRealHeap, &&do_kAddIntHeap, &&do_kSubRealHeap, &&do_kSubIntHeap, &&do_kMultRealHeap,
             &&do_kMultIntHeap, &&do_kDivRealHeap, &&do_kDivIntHeap, &&do_kRemRealHeap, &&do_kRemIntHeap,
-            &&do_kLshIntHeap, &&do_kRshIntHeap, &&do_kGTIntHeap, &&do_kLTIntHeap, &&do_kGEIntHeap, &&do_kLEIntHeap,
+            &&do_kLshIntHeap, &&do_kARshIntHeap, &&do_kLRshIntHeap, &&do_kGTIntHeap, &&do_kLTIntHeap, &&do_kGEIntHeap, &&do_kLEIntHeap,
             &&do_kEQIntHeap, &&do_kNEIntHeap, &&do_kGTRealHeap, &&do_kLTRealHeap, &&do_kGERealHeap, &&do_kLERealHeap,
             &&do_kEQRealHeap, &&do_kNERealHeap, &&do_kANDIntHeap, &&do_kORIntHeap, &&do_kXORIntHeap,
 
             // Standard math (heap OP stack)
             &&do_kAddRealStack, &&do_kAddIntStack, &&do_kSubRealStack, &&do_kSubIntStack, &&do_kMultRealStack,
             &&do_kMultIntStack, &&do_kDivRealStack, &&do_kDivIntStack, &&do_kRemRealStack, &&do_kRemIntStack,
-            &&do_kLshIntStack, &&do_kRshIntStack, &&do_kGTIntStack, &&do_kLTIntStack, &&do_kGEIntStack,
+            &&do_kLshIntStack, &&do_kARshIntStack, &&do_kLRshIntStack, &&do_kGTIntStack, &&do_kLTIntStack, &&do_kGEIntStack,
             &&do_kLEIntStack, &&do_kEQIntStack, &&do_kNEIntStack, &&do_kGTRealStack, &&do_kLTRealStack,
             &&do_kGERealStack, &&do_kLERealStack, &&do_kEQRealStack, &&do_kNERealStack, &&do_kANDIntStack,
             &&do_kORIntStack, &&do_kXORIntStack,
@@ -492,7 +2633,7 @@ class FBCInterpreter : public FBCExecutor<T> {
             // Standard math (value OP stack)
             &&do_kAddRealStackValue, &&do_kAddIntStackValue, &&do_kSubRealStackValue, &&do_kSubIntStackValue,
             &&do_kMultRealStackValue, &&do_kMultIntStackValue, &&do_kDivRealStackValue, &&do_kDivIntStackValue,
-            &&do_kRemRealStackValue, &&do_kRemIntStackValue, &&do_kLshIntStackValue, &&do_kRshIntStackValue,
+            &&do_kRemRealStackValue, &&do_kRemIntStackValue, &&do_kLshIntStackValue, &&do_kARshIntStackValue, &&do_kLRshIntStackValue,
             &&do_kGTIntStackValue, &&do_kLTIntStackValue, &&do_kGEIntStackValue, &&do_kLEIntStackValue,
             &&do_kEQIntStackValue, &&do_kNEIntStackValue, &&do_kGTRealStackValue, &&do_kLTRealStackValue,
             &&do_kGERealStackValue, &&do_kLERealStackValue, &&do_kEQRealStackValue, &&do_kNERealStackValue,
@@ -501,14 +2642,14 @@ class FBCInterpreter : public FBCExecutor<T> {
             // Standard math (value OP heap)
             &&do_kAddRealValue, &&do_kAddIntValue, &&do_kSubRealValue, &&do_kSubIntValue, &&do_kMultRealValue,
             &&do_kMultIntValue, &&do_kDivRealValue, &&do_kDivIntValue, &&do_kRemRealValue, &&do_kRemIntValue,
-            &&do_kLshIntValue, &&do_kRshIntValue, &&do_kGTIntValue, &&do_kLTIntValue, &&do_kGEIntValue,
+            &&do_kLshIntValue, &&do_kARshIntValue, &&do_kLRshIntValue, &&do_kGTIntValue, &&do_kLTIntValue, &&do_kGEIntValue,
             &&do_kLEIntValue, &&do_kEQIntValue, &&do_kNEIntValue, &&do_kGTRealValue, &&do_kLTRealValue,
             &&do_kGERealValue, &&do_kLERealValue, &&do_kEQRealValue, &&do_kNERealValue, &&do_kANDIntValue,
             &&do_kORIntValue, &&do_kXORIntValue,
 
             // Standard math (value OP heap) : non commutative operations
             &&do_kSubRealValueInvert, &&do_kSubIntValueInvert, &&do_kDivRealValueInvert, &&do_kDivIntValueInvert,
-            &&do_kRemRealValueInvert, &&do_kRemIntValueInvert, &&do_kLshIntValueInvert, &&do_kRshIntValueInvert,
+            &&do_kRemRealValueInvert, &&do_kRemIntValueInvert, &&do_kLshIntValueInvert, &&do_kARshIntValueInvert, &&do_kLRshIntValueInvert,
             &&do_kGTIntValueInvert, &&do_kLTIntValueInvert, &&do_kGEIntValueInvert, &&do_kLEIntValueInvert,
             &&do_kGTRealValueInvert, &&do_kLTRealValueInvert, &&do_kGERealValueInvert, &&do_kLERealValueInvert,
 
@@ -516,7 +2657,7 @@ class FBCInterpreter : public FBCExecutor<T> {
             &&do_kAbs, &&do_kAbsf, &&do_kAcosf, &&do_kAcoshf, &&do_kAsinf, &&do_kAsinhf, &&do_kAtanf, &&do_kAtanhf, &&do_kCeilf,
             &&do_kCosf, &&do_kCoshf,
             &&do_kExpf, &&do_kFloorf, &&do_kLogf, &&do_kLog10f, &&do_kRintf, &&do_kRoundf, &&do_kSinf, &&do_kSinhf, &&do_kSqrtf,
-            &&do_kTanf, &&do_kTanhf,
+            &&do_kTanf, &&do_kTanhf, &&do_kIsnanf, &&do_kIsinff,
 
             // Extended unary math (heap OP heap)
             &&do_kAbsHeap, &&do_kAbsfHeap, &&do_kAcosfHeap, &&do_kAcoshfHeap, &&do_kAsinfHeap, &&do_kAsinhfHeap, &&do_kAtanfHeap, &&do_kAtanhfHeap,
@@ -525,7 +2666,7 @@ class FBCInterpreter : public FBCExecutor<T> {
             &&do_kRintfHeap, &&do_kRoundfHeap, &&do_kSinfHeap, &&do_kSinhfHeap, &&do_kSqrtfHeap, &&do_kTanfHeap, &&do_kTanhfHeap,
 
             // Extended binary math
-            &&do_kAtan2f, &&do_kFmodf, &&do_kPowf, &&do_kMax, &&do_kMaxf, &&do_kMin, &&do_kMinf,
+            &&do_kAtan2f, &&do_kFmodf, &&do_kPowf, &&do_kMax, &&do_kMaxf, &&do_kMin, &&do_kMinf, &&do_kCopysignf,
 
             // Extended binary math (heap version)
             &&do_kAtan2fHeap, &&do_kFmodfHeap, &&do_kPowfHeap, &&do_kMaxHeap, &&do_kMaxfHeap, &&do_kMinHeap,
@@ -559,22 +2700,30 @@ class FBCInterpreter : public FBCExecutor<T> {
         int sound_stack_index = 0;
         int addr_stack_index  = 0;
 
-        T             real_stack[512];
+        REAL          real_stack[512];
         int           int_stack[512];
         Soundfile*    sound_stack[512];
         InstructionIT address_stack[64];
+        
+        memset(real_stack, 0, sizeof(REAL)*512);
+        memset(int_stack, 0, sizeof(int)*512);
+        memset(sound_stack, 0, sizeof(Soundfile*)*512);
+        memset(address_stack, 0, sizeof(InstructionIT)*64);
 
 #define dispatchFirstScal()                   \
     {                                         \
-        goto* fDispatchTable[(*it)->fOpcode]; \
+        goto *fDispatchTable[(*it)->fOpcode]; \
     }
 #define dispatchNextScal()                    \
     {                                         \
-        traceInstruction(it);                 \
+        if (TRACE >= 4) {     \
+            traceInstruction(it, int_stack[int_stack_index], real_stack[real_stack_index]); \
+        }                                     \
         it++;                                 \
-        goto* fDispatchTable[(*it)->fOpcode]; \
+        dispatchFirstScal();                  \
     }
 
+        
 #define dispatchBranch1Scal()                        \
     {                                                \
         it = (*it)->fBranch1->fInstructions.begin(); \
@@ -606,8 +2755,10 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 #define emptyReturnScal() (addr_stack_index == 0)
 
-        // Check block coherency
-        block->check();
+        if (TRACE > 0) {
+            // Check block coherency
+            block->check();
+        }
 
         InstructionIT it = block->fInstructions.begin();
         dispatchFirstScal();
@@ -664,7 +2815,7 @@ class FBCInterpreter : public FBCExecutor<T> {
 
     do_kStoreReal : {
         if (TRACE > 0) {
-            fRealHeap[assertRealHeap(it, (*it)->fOffset1)] = popReal(it);
+            fRealHeap[assertStoreRealHeap(it, (*it)->fOffset1)] = popReal(it);
         } else {
             fRealHeap[(*it)->fOffset1] = popReal(it);
         }
@@ -673,7 +2824,7 @@ class FBCInterpreter : public FBCExecutor<T> {
 
     do_kStoreInt : {
         if (TRACE > 0) {
-            fIntHeap[assertIntHeap(it, (*it)->fOffset1)] = popInt();
+            fIntHeap[assertStoreIntHeap(it, (*it)->fOffset1)] = popInt();
         } else {
             fIntHeap[(*it)->fOffset1] = popInt();
         }
@@ -694,7 +2845,7 @@ class FBCInterpreter : public FBCExecutor<T> {
     // Directly store a value
     do_kStoreRealValue : {
         if (TRACE > 0) {
-            fRealHeap[assertRealHeap(it, (*it)->fOffset1)] = (*it)->fRealValue;
+            fRealHeap[assertStoreRealHeap(it, (*it)->fOffset1)] = (*it)->fRealValue;
         } else {
             fRealHeap[(*it)->fOffset1] = (*it)->fRealValue;
         }
@@ -703,7 +2854,7 @@ class FBCInterpreter : public FBCExecutor<T> {
 
     do_kStoreIntValue : {
         if (TRACE > 0) {
-            fIntHeap[assertIntHeap(it, (*it)->fOffset1)] = (*it)->fIntValue;
+            fIntHeap[assertStoreIntHeap(it, (*it)->fOffset1)] = (*it)->fIntValue;
         } else {
             fIntHeap[(*it)->fOffset1] = (*it)->fIntValue;
         }
@@ -739,7 +2890,7 @@ class FBCInterpreter : public FBCExecutor<T> {
         if (TRACE > 0) {
             // DEBUG
             // assertIndex(it, offset, (*it)->fOffset2);
-            fRealHeap[assertRealHeap(it, (*it)->fOffset1 + offset, (*it)->fOffset2)] = popReal(it);
+            fRealHeap[assertStoreRealHeap(it, (*it)->fOffset1 + offset, (*it)->fOffset2)] = popReal(it);
         } else {
             fRealHeap[(*it)->fOffset1 + offset] = popReal(it);
         }
@@ -751,7 +2902,7 @@ class FBCInterpreter : public FBCExecutor<T> {
         if (TRACE > 0) {
             // DEBUG
             // assertIndex(it, offset, (*it)->fOffset2);
-            fIntHeap[assertIntHeap(it, (*it)->fOffset1 + offset, (*it)->fOffset2)] = popInt();
+            fIntHeap[assertStoreIntHeap(it, (*it)->fOffset1 + offset, (*it)->fOffset2)] = popInt();
         } else {
             fIntHeap[(*it)->fOffset1 + offset] = popInt();
         }
@@ -759,7 +2910,7 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     do_kBlockStoreReal : {
-        FIRBlockStoreRealInstruction<T>* inst = static_cast<FIRBlockStoreRealInstruction<T>*>(*it);
+        FIRBlockStoreRealInstruction<REAL>* inst = static_cast<FIRBlockStoreRealInstruction<REAL>*>(*it);
         assertInterp(inst);
         for (int i = 0; i < inst->fOffset2; i++) {
             fRealHeap[inst->fOffset1 + i] = inst->fNumTable[i];
@@ -768,7 +2919,7 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     do_kBlockStoreInt : {
-        FIRBlockStoreIntInstruction<T>* inst = static_cast<FIRBlockStoreIntInstruction<T>*>(*it);
+        FIRBlockStoreIntInstruction<REAL>* inst = static_cast<FIRBlockStoreIntInstruction<REAL>*>(*it);
         assertInterp(inst);
         for (int i = 0; i < inst->fOffset2; i++) {
             fIntHeap[inst->fOffset1 + i] = inst->fNumTable[i];
@@ -857,36 +3008,44 @@ class FBCInterpreter : public FBCExecutor<T> {
 
     // Cast operations
     do_kCastReal : {
-        pushReal(it, T(popInt()));
+        pushReal(it, REAL(popInt()));
         dispatchNextScal();
     }
 
     do_kCastRealHeap : {
-        pushReal(it, T(fIntHeap[(*it)->fOffset1]));
+        pushReal(it, REAL(fIntHeap[(*it)->fOffset1]));
         dispatchNextScal();
     }
 
     do_kCastInt : {
-        pushInt(int(popReal(it)));
+        if (TRACE >= 3) {
+            pushInt(int(checkCastIntOverflow(it, popReal(it))));
+        } else {
+            pushInt(int(popReal(it)));
+        }
         dispatchNextScal();
     }
 
     do_kCastIntHeap : {
-        pushInt(int(fRealHeap[(*it)->fOffset1]));
+        if (TRACE >= 3) {
+            pushInt(int(checkCastIntOverflow(it, fRealHeap[(*it)->fOffset1])));
+        } else {
+            pushInt(int(fRealHeap[(*it)->fOffset1]));
+        }
         dispatchNextScal();
     }
 
     // Bitcast operations
     do_kBitcastInt : {
-        T   v1 = popReal(it);
-        int v2 = *reinterpret_cast<int*>(&v1);
+        REAL v1 = popReal(it);
+        int  v2 = *reinterpret_cast<int*>(&v1);
         pushInt(v2);
         dispatchNextScal();
     }
 
     do_kBitcastReal : {
-        int v1 = popInt();
-        T   v2 = *reinterpret_cast<T*>(&v1);
+        int  v1 = popInt();
+        REAL v2 = *reinterpret_cast<REAL*>(&v1);
         pushReal(it, v2);
         dispatchNextScal();
     }
@@ -896,8 +3055,8 @@ class FBCInterpreter : public FBCExecutor<T> {
         //-------------------------------------------------------
 
     do_kAddReal : {
-        T v1 = popReal(it);
-        T v2 = popReal(it);
+        REAL v1 = popReal(it);
+        REAL v2 = popReal(it);
         pushReal(it, v1 + v2);
         dispatchNextScal();
     }
@@ -918,8 +3077,8 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     do_kSubReal : {
-        T v1 = popReal(it);
-        T v2 = popReal(it);
+        REAL v1 = popReal(it);
+        REAL v2 = popReal(it);
         pushReal(it, v1 - v2);
         dispatchNextScal();
     }
@@ -940,8 +3099,8 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     do_kMultReal : {
-        T v1 = popReal(it);
-        T v2 = popReal(it);
+        REAL v1 = popReal(it);
+        REAL v2 = popReal(it);
         pushReal(it, v1 * v2);
         dispatchNextScal();
     }
@@ -962,8 +3121,8 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     do_kDivReal : {
-        T v1 = popReal(it);
-        T v2 = popReal(it);
+        REAL v1 = popReal(it);
+        REAL v2 = popReal(it);
         if (TRACE > 0) {
             checkDivZero(it, v2);
         }
@@ -982,8 +3141,8 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     do_kRemReal : {
-        T v1 = popReal(it);
-        T v2 = popReal(it);
+        REAL v1 = popReal(it);
+        REAL v2 = popReal(it);
         if (TRACE > 0) {
             checkDivZero(it, v2);
         }
@@ -1009,7 +3168,15 @@ class FBCInterpreter : public FBCExecutor<T> {
         dispatchNextScal();
     }
 
-    do_kRshInt : {
+    do_kARshInt : {
+        int v1 = popInt();
+        int v2 = popInt();
+        pushInt(v1 >> v2);
+        dispatchNextScal();
+    }
+    
+    do_kLRshInt : {
+        // TODO
         int v1 = popInt();
         int v2 = popInt();
         pushInt(v1 >> v2);
@@ -1061,43 +3228,43 @@ class FBCInterpreter : public FBCExecutor<T> {
 
     // Comparaison Real
     do_kGTReal : {
-        T v1 = popReal(it);
-        T v2 = popReal(it);
+        REAL v1 = popReal(it);
+        REAL v2 = popReal(it);
         pushInt(v1 > v2);
         dispatchNextScal();
     }
 
     do_kLTReal : {
-        T v1 = popReal(it);
-        T v2 = popReal(it);
+        REAL v1 = popReal(it);
+        REAL v2 = popReal(it);
         pushInt(v1 < v2);
         dispatchNextScal();
     }
 
     do_kGEReal : {
-        T v1 = popReal(it);
-        T v2 = popReal(it);
+        REAL v1 = popReal(it);
+        REAL v2 = popReal(it);
         pushInt(v1 >= v2);
         dispatchNextScal();
     }
 
     do_kLEReal : {
-        T v1 = popReal(it);
-        T v2 = popReal(it);
+        REAL v1 = popReal(it);
+        REAL v2 = popReal(it);
         pushInt(v1 <= v2);
         dispatchNextScal();
     }
 
     do_kEQReal : {
-        T v1 = popReal(it);
-        T v2 = popReal(it);
+        REAL v1 = popReal(it);
+        REAL v2 = popReal(it);
         pushInt(v1 == v2);
         dispatchNextScal();
     }
 
     do_kNEReal : {
-        T v1 = popReal(it);
-        T v2 = popReal(it);
+        REAL v1 = popReal(it);
+        REAL v2 = popReal(it);
         pushInt(v1 != v2);
         dispatchNextScal();
     }
@@ -1184,7 +3351,13 @@ class FBCInterpreter : public FBCExecutor<T> {
         dispatchNextScal();
     }
 
-    do_kRshIntHeap : {
+    do_kARshIntHeap : {
+        pushInt(fIntHeap[(*it)->fOffset1] >> fIntHeap[(*it)->fOffset2]);
+        dispatchNextScal();
+    }
+        
+    do_kLRshIntHeap : {
+        // TODO
         pushInt(fIntHeap[(*it)->fOffset1] >> fIntHeap[(*it)->fOffset2]);
         dispatchNextScal();
     }
@@ -1272,7 +3445,7 @@ class FBCInterpreter : public FBCExecutor<T> {
         //------------------------------------------------------
 
     do_kAddRealStack : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushReal(it, fRealHeap[(*it)->fOffset1] + v1);
         dispatchNextScal();
     }
@@ -1284,7 +3457,7 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     do_kSubRealStack : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushReal(it, fRealHeap[(*it)->fOffset1] - v1);
         dispatchNextScal();
     }
@@ -1296,7 +3469,7 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     do_kMultRealStack : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushReal(it, fRealHeap[(*it)->fOffset1] * v1);
         dispatchNextScal();
     }
@@ -1308,7 +3481,7 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     do_kDivRealStack : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushReal(it, fRealHeap[(*it)->fOffset1] / v1);
         dispatchNextScal();
     }
@@ -1320,7 +3493,7 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     do_kRemRealStack : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushReal(it, std::remainder(fRealHeap[(*it)->fOffset1], v1));
         dispatchNextScal();
     }
@@ -1338,7 +3511,14 @@ class FBCInterpreter : public FBCExecutor<T> {
         dispatchNextScal();
     }
 
-    do_kRshIntStack : {
+    do_kARshIntStack : {
+        int v1 = popInt();
+        pushInt(fIntHeap[(*it)->fOffset1] >> v1);
+        dispatchNextScal();
+    }
+        
+    do_kLRshIntStack : {
+        // TODO
         int v1 = popInt();
         pushInt(fIntHeap[(*it)->fOffset1] >> v1);
         dispatchNextScal();
@@ -1383,37 +3563,37 @@ class FBCInterpreter : public FBCExecutor<T> {
 
     // Comparaison Real
     do_kGTRealStack : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushInt(fRealHeap[(*it)->fOffset1] > v1);
         dispatchNextScal();
     }
 
     do_kLTRealStack : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushInt(fRealHeap[(*it)->fOffset1] < v1);
         dispatchNextScal();
     }
 
     do_kGERealStack : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushInt(fRealHeap[(*it)->fOffset1] >= v1);
         dispatchNextScal();
     }
 
     do_kLERealStack : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushInt(fRealHeap[(*it)->fOffset1] <= v1);
         dispatchNextScal();
     }
 
     do_kEQRealStack : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushInt(fRealHeap[(*it)->fOffset1] == v1);
         dispatchNextScal();
     }
 
     do_kNERealStack : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushInt(fRealHeap[(*it)->fOffset1] != v1);
         dispatchNextScal();
     }
@@ -1442,7 +3622,7 @@ class FBCInterpreter : public FBCExecutor<T> {
         //-------------------------------------------------------
 
     do_kAddRealStackValue : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushReal(it, (*it)->fRealValue + v1);
         dispatchNextScal();
     }
@@ -1454,7 +3634,7 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     do_kSubRealStackValue : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushReal(it, (*it)->fRealValue - v1);
         dispatchNextScal();
     }
@@ -1466,7 +3646,7 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     do_kMultRealStackValue : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushReal(it, (*it)->fRealValue * v1);
         dispatchNextScal();
     }
@@ -1478,7 +3658,7 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     do_kDivRealStackValue : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushReal(it, (*it)->fRealValue / v1);
         dispatchNextScal();
     }
@@ -1490,7 +3670,7 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     do_kRemRealStackValue : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushReal(it, std::remainder((*it)->fRealValue, v1));
         dispatchNextScal();
     }
@@ -1508,7 +3688,14 @@ class FBCInterpreter : public FBCExecutor<T> {
         dispatchNextScal();
     }
 
-    do_kRshIntStackValue : {
+    do_kARshIntStackValue : {
+        int v1 = popInt();
+        pushInt((*it)->fIntValue >> v1);
+        dispatchNextScal();
+    }
+        
+    do_kLRshIntStackValue : {
+        // TODO
         int v1 = popInt();
         pushInt((*it)->fIntValue >> v1);
         dispatchNextScal();
@@ -1553,37 +3740,37 @@ class FBCInterpreter : public FBCExecutor<T> {
 
     // Comparaison Real
     do_kGTRealStackValue : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushInt((*it)->fRealValue > v1);
         dispatchNextScal();
     }
 
     do_kLTRealStackValue : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushInt((*it)->fRealValue < v1);
         dispatchNextScal();
     }
 
     do_kGERealStackValue : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushInt((*it)->fRealValue >= v1);
         dispatchNextScal();
     }
 
     do_kLERealStackValue : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushInt((*it)->fRealValue <= v1);
         dispatchNextScal();
     }
 
     do_kEQRealStackValue : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushInt((*it)->fRealValue == v1);
         dispatchNextScal();
     }
 
     do_kNERealStackValue : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushInt((*it)->fRealValue != v1);
         dispatchNextScal();
     }
@@ -1667,7 +3854,13 @@ class FBCInterpreter : public FBCExecutor<T> {
         dispatchNextScal();
     }
 
-    do_kRshIntValue : {
+    do_kARshIntValue : {
+        pushInt((*it)->fIntValue >> fIntHeap[(*it)->fOffset1]);
+        dispatchNextScal();
+    }
+        
+    do_kLRshIntValue : {
+        // TODO
         pushInt((*it)->fIntValue >> fIntHeap[(*it)->fOffset1]);
         dispatchNextScal();
     }
@@ -1791,7 +3984,13 @@ class FBCInterpreter : public FBCExecutor<T> {
         dispatchNextScal();
     }
 
-    do_kRshIntValueInvert : {
+    do_kARshIntValueInvert : {
+        pushInt(fIntHeap[(*it)->fOffset1] >> (*it)->fIntValue);
+        dispatchNextScal();
+    }
+        
+    do_kLRshIntValueInvert : {
+        // TODO
         pushInt(fIntHeap[(*it)->fOffset1] >> (*it)->fIntValue);
         dispatchNextScal();
     }
@@ -1849,131 +4048,143 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     do_kAbsf : {
-        T v = popReal(it);
+        REAL v = popReal(it);
         pushReal(it, std::fabs(v));
         dispatchNextScal();
     }
 
     do_kAcosf : {
-        T v = popReal(it);
+        REAL v = popReal(it);
         pushReal(it, std::acos(v));
         dispatchNextScal();
     }
         
     do_kAcoshf : {
-        T v = popReal(it);
+        REAL v = popReal(it);
         pushReal(it, std::acosh(v));
         dispatchNextScal();
     }
 
     do_kAsinf : {
-        T v = popReal(it);
+        REAL v = popReal(it);
         pushReal(it, std::asin(v));
         dispatchNextScal();
     }
         
     do_kAsinhf : {
-        T v = popReal(it);
+        REAL v = popReal(it);
         pushReal(it, std::asinh(v));
         dispatchNextScal();
     }
 
     do_kAtanf : {
-        T v = popReal(it);
+        REAL v = popReal(it);
         pushReal(it, std::atan(v));
         dispatchNextScal();
     }
         
     do_kAtanhf : {
-        T v = popReal(it);
+        REAL v = popReal(it);
         pushReal(it, std::atanh(v));
         dispatchNextScal();
     }
 
     do_kCeilf : {
-        T v = popReal(it);
+        REAL v = popReal(it);
         pushReal(it, std::ceil(v));
         dispatchNextScal();
     }
 
     do_kCosf : {
-        T v = popReal(it);
+        REAL v = popReal(it);
         pushReal(it, std::cos(v));
         dispatchNextScal();
     }
 
     do_kCoshf : {
-        T v = popReal(it);
+        REAL v = popReal(it);
         pushReal(it, std::cosh(v));
         dispatchNextScal();
     }
 
     do_kExpf : {
-        T v = popReal(it);
+        REAL v = popReal(it);
         pushReal(it, std::exp(v));
         dispatchNextScal();
     }
 
     do_kFloorf : {
-        T v = popReal(it);
+        REAL v = popReal(it);
         pushReal(it, std::floor(v));
         dispatchNextScal();
     }
 
     do_kLogf : {
-        T v = popReal(it);
+        REAL v = popReal(it);
         pushReal(it, std::log(v));
         dispatchNextScal();
     }
 
     do_kLog10f : {
-        T v = popReal(it);
+        REAL v = popReal(it);
         pushReal(it, std::log10(v));
         dispatchNextScal();
     }
         
     do_kRintf : {
-        T v = popReal(it);
+        REAL v = popReal(it);
         pushReal(it, std::rint(v));
         dispatchNextScal();
     }
 
     do_kRoundf : {
-        T v = popReal(it);
+        REAL v = popReal(it);
         pushReal(it, std::round(v));
         dispatchNextScal();
     }
 
     do_kSinf : {
-        T v = popReal(it);
+        REAL v = popReal(it);
         pushReal(it, std::sin(v));
         dispatchNextScal();
     }
 
     do_kSinhf : {
-        T v = popReal(it);
+        REAL v = popReal(it);
         pushReal(it, std::sinh(v));
         dispatchNextScal();
     }
 
     do_kSqrtf : {
-        T v = popReal(it);
+        REAL v = popReal(it);
         pushReal(it, std::sqrt(v));
         dispatchNextScal();
     }
 
     do_kTanf : {
-        T v = popReal(it);
+        REAL v = popReal(it);
         pushReal(it, std::tan(v));
         dispatchNextScal();
     }
 
     do_kTanhf : {
-        T v = popReal(it);
+        REAL v = popReal(it);
         pushReal(it, std::tanh(v));
         dispatchNextScal();
     }
-
+        
+    do_kIsnanf : {
+        REAL v = popReal(it);
+        pushInt(std::isnan(v));
+        dispatchNextScal();
+    }
+    
+    do_kIsinff : {
+        REAL v = popReal(it);
+        pushInt(std::isinf(v));
+        dispatchNextScal();
+    }
+  
         //------------------------------------
         // Extended unary math (heap version)
         ///-----------------------------------
@@ -2093,22 +4304,22 @@ class FBCInterpreter : public FBCExecutor<T> {
         //----------------------
 
     do_kAtan2f : {
-        T v1 = popReal(it);
-        T v2 = popReal(it);
+        REAL v1 = popReal(it);
+        REAL v2 = popReal(it);
         pushReal(it, std::atan2(v1, v2));
         dispatchNextScal();
     }
 
     do_kFmodf : {
-        T v1 = popReal(it);
-        T v2 = popReal(it);
+        REAL v1 = popReal(it);
+        REAL v2 = popReal(it);
         pushReal(it, std::fmod(v1, v2));
         dispatchNextScal();
     }
 
     do_kPowf : {
-        T v1 = popReal(it);
-        T v2 = popReal(it);
+        REAL v1 = popReal(it);
+        REAL v2 = popReal(it);
         pushReal(it, std::pow(v1, v2));
         dispatchNextScal();
     }
@@ -2121,8 +4332,8 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     do_kMaxf : {
-        T v1 = popReal(it);
-        T v2 = popReal(it);
+        REAL v1 = popReal(it);
+        REAL v2 = popReal(it);
         pushReal(it, std::max(v1, v2));
         dispatchNextScal();
     }
@@ -2135,12 +4346,19 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     do_kMinf : {
-        T v1 = popReal(it);
-        T v2 = popReal(it);
+        REAL v1 = popReal(it);
+        REAL v2 = popReal(it);
         pushReal(it, std::min(v1, v2));
         dispatchNextScal();
     }
-
+        
+    do_kCopysignf : {
+        REAL v1 = popReal(it);
+        REAL v2 = popReal(it);
+        pushReal(it, std::copysign(v1, v2));
+        dispatchNextScal();
+    }
+        
         //-------------------------------------
         // Extended binary math (heap version)
         //-------------------------------------
@@ -2185,19 +4403,19 @@ class FBCInterpreter : public FBCExecutor<T> {
         //--------------------------------------
 
     do_kAtan2fStack : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushReal(it, std::atan2(fRealHeap[(*it)->fOffset1], v1));
         dispatchNextScal();
     }
 
     do_kFmodfStack : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushReal(it, std::fmod(fRealHeap[(*it)->fOffset1], v1));
         dispatchNextScal();
     }
 
     do_kPowfStack : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushReal(it, std::pow(fRealHeap[(*it)->fOffset1], v1));
         dispatchNextScal();
     }
@@ -2209,7 +4427,7 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     do_kMaxfStack : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushReal(it, std::max(fRealHeap[(*it)->fOffset1], v1));
         dispatchNextScal();
     }
@@ -2221,7 +4439,7 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     do_kMinfStack : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushReal(it, std::min(fRealHeap[(*it)->fOffset1], v1));
         dispatchNextScal();
     }
@@ -2231,19 +4449,19 @@ class FBCInterpreter : public FBCExecutor<T> {
         //--------------------------------------------
 
     do_kAtan2fStackValue : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushReal(it, std::atan2((*it)->fRealValue, v1));
         dispatchNextScal();
     }
 
     do_kFmodfStackValue : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushReal(it, std::fmod((*it)->fRealValue, v1));
         dispatchNextScal();
     }
 
     do_kPowfStackValue : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushReal(it, std::pow((*it)->fRealValue, v1));
         dispatchNextScal();
     }
@@ -2255,7 +4473,7 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     do_kMaxfStackValue : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushReal(it, std::max((*it)->fRealValue, v1));
         dispatchNextScal();
     }
@@ -2267,7 +4485,7 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     do_kMinfStackValue : {
-        T v1 = popReal(it);
+        REAL v1 = popReal(it);
         pushReal(it, std::min((*it)->fRealValue, v1));
         dispatchNextScal();
     }
@@ -2419,13 +4637,13 @@ class FBCInterpreter : public FBCExecutor<T> {
     }
 
     end:
-
         // Check stack coherency
         assertInterp(real_stack_index == 0 && int_stack_index == 0 && sound_stack_index == 0);
     }
-
+#endif
+    
    public:
-    FBCInterpreter(interpreter_dsp_factory_aux<T, TRACE>* factory)
+    FBCInterpreter(interpreter_dsp_factory_aux<REAL, TRACE>* factory)
     {
         /*
         std::cout << "FBCInterpreter :"
@@ -2436,19 +4654,19 @@ class FBCInterpreter : public FBCExecutor<T> {
         */
 
         fFactory = factory;
-
+   
         if (fFactory->getMemoryManager()) {
-            fRealHeap  = static_cast<T*>(fFactory->allocate(sizeof(T) * fFactory->fRealHeapSize));
-            fIntHeap   = static_cast<int*>(fFactory->allocate(sizeof(T) * fFactory->fIntHeapSize));
+            fRealHeap  = static_cast<REAL*>(fFactory->allocate(sizeof(REAL) * fFactory->fRealHeapSize));
+            fIntHeap   = static_cast<int*>(fFactory->allocate(sizeof(REAL) * fFactory->fIntHeapSize));
             fSoundHeap = static_cast<Soundfile**>(fFactory->allocate(sizeof(Soundfile*) * fFactory->fSoundHeapSize));
-            fInputs    = static_cast<T**>(fFactory->allocate(sizeof(T*) * fFactory->fNumInputs));
-            fOutputs   = static_cast<T**>(fFactory->allocate(sizeof(T*) * fFactory->fNumOutputs));
+            fInputs    = static_cast<REAL**>(fFactory->allocate(sizeof(REAL*) * fFactory->fNumInputs));
+            fOutputs   = static_cast<REAL**>(fFactory->allocate(sizeof(REAL*) * fFactory->fNumOutputs));
         } else {
-            fRealHeap  = new T[fFactory->fRealHeapSize];
+            fRealHeap  = new REAL[fFactory->fRealHeapSize];
             fIntHeap   = new int[fFactory->fIntHeapSize];
             fSoundHeap = new Soundfile*[fFactory->fSoundHeapSize];
-            fInputs    = new T*[fFactory->fNumInputs];
-            fOutputs   = new T*[fFactory->fNumOutputs];
+            fInputs    = new REAL*[fFactory->fNumInputs];
+            fOutputs   = new REAL*[fFactory->fNumOutputs];
         }
 
         // std::cout << "==== FBCInterpreter ==== " << std::endl;
@@ -2457,21 +4675,29 @@ class FBCInterpreter : public FBCExecutor<T> {
 
         // Initialise HEAP with special values to detect incorrect Load access
         for (int i = 0; i < fFactory->fRealHeapSize; i++) {
-            fRealHeap[i] = T(DUMMY_REAL);
+            fRealHeap[i] = REAL(DUMMY_REAL);
         }
         for (int i = 0; i < fFactory->fIntHeapSize; i++) {
             fIntHeap[i] = DUMMY_INT;
         }
 
-        fRealStats[INTEGER_OVERFLOW] = 0;
-        fRealStats[DIV_BY_ZERO]      = 0;
-        fRealStats[FP_INFINITE]      = 0;
-        fRealStats[FP_NAN]           = 0;
-        fRealStats[FP_SUBNORMAL]     = 0;
+        fRealStats[INTEGER_OVERFLOW]  = 0;
+        fRealStats[DIV_BY_ZERO_REAL]  = 0;
+        fRealStats[DIV_BY_ZERO_INT]   = 0;
+        fRealStats[FP_INFINITE]       = 0;
+        fRealStats[FP_NAN]            = 0;
+        fRealStats[FP_SUBNORMAL]      = 0;
+        fRealStats[CAST_INT_OVERFLOW] = 0;
     }
 
     virtual ~FBCInterpreter()
     {
+        for (const auto& it : fPathInputTable) {
+            delete it.second;
+        }
+        for (const auto& it : fPathOutputTable) {
+            delete it.second;
+        }
         if (fFactory->getMemoryManager()) {
             fFactory->destroy(fRealHeap);
             fFactory->destroy(fIntHeap);
@@ -2490,7 +4716,7 @@ class FBCInterpreter : public FBCExecutor<T> {
         }
     }
 
-    void dumpMemory(FBCBlockInstruction<T>* block, const std::string& name, const std::string& filename)
+    void dumpMemory(FBCBlockInstruction<REAL>* block, const std::string& name, const std::string& filename)
     {
         std::ofstream out(filename);
         out << "DSP name: " << name << std::endl;
@@ -2509,8 +4735,8 @@ class FBCInterpreter : public FBCExecutor<T> {
     void setIntValue(int offset, int value) { fIntHeap[offset] = value; }
     int  getIntValue(int offset) { return fIntHeap[offset]; }
 
-    virtual void setInput(int input, T* buffer) { fInputs[input] = buffer; }
-    virtual void setOutput(int output, T* buffer) { fOutputs[output] = buffer; }
+    virtual void setInput(int input, REAL* buffer) { fInputs[input] = buffer; }
+    virtual void setOutput(int output, REAL* buffer) { fOutputs[output] = buffer; }
 };
 
 #endif

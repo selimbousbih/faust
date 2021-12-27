@@ -25,16 +25,17 @@
 #include "code_container.hh"
 #include "fir_to_fir.hh"
 #include "instructions_compiler.hh"
-#include "interpreter_dsp_aux.hh"
+#include "interpreter_dsp.hh"
+
 #include "interpreter_instructions.hh"
 #include "vec_code_container.hh"
 
 using namespace std;
 
-template <class T>
+template <class REAL>
 class InterpreterCodeContainer : public virtual CodeContainer {
    protected:
-    static InterpreterInstVisitor<T>* gInterpreterVisitor;
+    static InterpreterInstVisitor<REAL>* gInterpreterVisitor;
 
     FIRMetaBlockInstruction* produceMetadata(string& name);
 
@@ -46,14 +47,14 @@ class InterpreterCodeContainer : public virtual CodeContainer {
     }
 
     // To be implemented in each InterpreterScalarCodeContainer and InterpreterVectorCodeContainer classes
-    virtual FBCBlockInstruction<T>* generateCompute() = 0;
+    virtual FBCBlockInstruction<REAL>* generateCompute() = 0;
 
    public:
     InterpreterCodeContainer(const string& name, int numInputs, int numOutputs);
 
     virtual ~InterpreterCodeContainer() {}
 
-    void                      produceInternal();
+    void                      produceInternal() {}
     virtual dsp_factory_base* produceFactory();
 
     CodeContainer* createScalarContainer(const string& name, int sub_container_type);
@@ -61,24 +62,24 @@ class InterpreterCodeContainer : public virtual CodeContainer {
     static CodeContainer* createContainer(const string& name, int numInputs, int numOutputs);
 };
 
-template <class T>
-class InterpreterScalarCodeContainer : public InterpreterCodeContainer<T> {
+template <class REAL>
+class InterpreterScalarCodeContainer : public InterpreterCodeContainer<REAL> {
    protected:
-    virtual FBCBlockInstruction<T>* generateCompute();
+    virtual FBCBlockInstruction<REAL>* generateCompute();
 
    public:
     InterpreterScalarCodeContainer(const string& name, int numInputs, int numOutputs, int sub_container_type);
     virtual ~InterpreterScalarCodeContainer();
 };
 
-template <class T>
-class InterpreterVectorCodeContainer : public VectorCodeContainer, public InterpreterCodeContainer<T> {
+template <class REAL>
+class InterpreterVectorCodeContainer : public VectorCodeContainer, public InterpreterCodeContainer<REAL> {
    protected:
-    virtual FBCBlockInstruction<T>* generateCompute();
+    virtual FBCBlockInstruction<REAL>* generateCompute();
 
    public:
     InterpreterVectorCodeContainer(const string& name, int numInputs, int numOutputs)
-        : VectorCodeContainer(numInputs, numOutputs), InterpreterCodeContainer<T>(name, numInputs, numOutputs)
+        : VectorCodeContainer(numInputs, numOutputs), InterpreterCodeContainer<REAL>(name, numInputs, numOutputs)
     {
     }
     virtual ~InterpreterVectorCodeContainer() {}

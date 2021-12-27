@@ -35,15 +35,13 @@ class AbsPrim : public xtended {
 
     virtual bool needCache() { return true; }
 
-    virtual ::Type infereSigType(const vector< ::Type>& types)
+    virtual ::Type infereSigType(const vector<::Type>& types)
     {
         faustassert(types.size() == arity());
         Type t = types[0];
         return castInterval(t, abs(t->getInterval()));
         return t;
     }
-
-    virtual void sigVisit(Tree sig, sigvisitor* visitor) {}
 
     virtual int infereSigOrder(const vector<int>& args)
     {
@@ -55,10 +53,14 @@ class AbsPrim : public xtended {
     {
         double f;
         int    i;
-
         faustassert(args.size() == arity());
-
-        if (isDouble(args[0]->node(), &f)) {
+    
+        // abs(abs(sig)) ==> abs(sig)
+        xtended* xt = (xtended*)getUserData(args[0]);
+        if (xt == gGlobal->gAbsPrim) {
+            return args[0];
+            
+        } else if (isDouble(args[0]->node(), &f)) {
             return tree(fabs(f));
 
         } else if (isInt(args[0]->node(), &i)) {
@@ -70,7 +72,7 @@ class AbsPrim : public xtended {
     }
 
     virtual ValueInst* generateCode(CodeContainer* container, const list<ValueInst*>& args, ::Type result,
-                                    vector< ::Type> const& types)
+                                    vector<::Type> const& types)
     {
         faustassert(args.size() == arity());
         faustassert(types.size() == arity());
@@ -91,7 +93,7 @@ class AbsPrim : public xtended {
         }
     }
 
-    virtual string old_generateCode(Klass* klass, const vector<string>& args, const vector<Type>& types)
+    virtual string generateCode(Klass* klass, const vector<string>& args, const vector<::Type>& types)
     {
         faustassert(args.size() == arity());
         faustassert(types.size() == arity());
@@ -104,7 +106,7 @@ class AbsPrim : public xtended {
         }
     }
 
-    virtual string generateLateq(Lateq* lateq, const vector<string>& args, const vector< ::Type>& types)
+    virtual string generateLateq(Lateq* lateq, const vector<string>& args, const vector<::Type>& types)
     {
         faustassert(args.size() == arity());
         faustassert(types.size() == arity());

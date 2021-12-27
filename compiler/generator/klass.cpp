@@ -20,14 +20,14 @@
  ************************************************************************/
 
 /**********************************************************************
-           - klass.cpp : class C++ a remplir (projet FAUST) -
+        - klass.cpp : class C++ to be filled (FAUST project) -
 
-       Historique :
-       -----------
-       17-10-2001 : implementation initiale (yo)
-       18-10-2001 : Ajout de getFreshID (yo)
-       02-11-2001 : Ajout de sous classes (yo)
-       06-11-2001 : modif impression des classes (yo)
+        History :
+        -----------
+        17-10-2001 : initial implementation  (yo)
+        18-10-2001 : add getFreshID (yo)
+        02-11-2001 : add sub-classes (yo)
+        06-11-2001 : change classers impression (yo)
 
 ***********************************************************************/
 
@@ -87,6 +87,24 @@ void Klass::openLoop(Tree recsymbol, const string& size)
     // cerr << "\nOPEN REC LOOP(" << *recsymbol << ", " << size << ") ----> " << fTopLoop << endl;
 }
 
+void Klass::listAllLoopProperties(Tree sig, set<Loop*>& L, set<Tree>& visited)
+{
+    if (visited.count(sig)==0) {
+        visited.insert(sig);
+        Loop* l;
+        if (getLoopProperty(sig, l)) {
+            L.insert(l);
+        } else {
+            // we go down the expression
+            vector<Tree> subsigs;
+            int          n = getSubSignals(sig, subsigs, false);
+            for (int i = 0; i < n; i++) {
+                listAllLoopProperties(subsigs[i], L, visited);
+            }
+        }
+    }
+}
+
 /**
  * Close the top loop and either keep it
  * or absorb it within its enclosing loop.
@@ -94,6 +112,15 @@ void Klass::openLoop(Tree recsymbol, const string& size)
 void Klass::closeLoop(Tree sig)
 {
     faustassert(fTopLoop);
+    
+    // fix the missing dependencies
+    set<Loop*> L;
+    set<Tree> V;
+    listAllLoopProperties(sig, L, V);
+    for (Loop* l : L) {
+        fTopLoop->fBackwardLoopDependencies.insert(l);
+    }
+  
     Loop* l  = fTopLoop;
     fTopLoop = l->fEnclosingLoop;
     faustassert(fTopLoop);
@@ -102,7 +129,7 @@ void Klass::closeLoop(Tree sig)
     // cerr << endl;
 
     Tree S = symlist(sig);
-    // cerr << "CLOSE LOOP :" << l << " with symbols " << *S  << endl;
+    // cerr << "CLOSE LOOP :" << l << " with symbols " << *S << endl;
     if (l->isEmpty() || fTopLoop->hasRecDependencyIn(S)) {
         // cout << " will absorb" << endl;
         // empty or dependent loop -> absorbed by enclosing one
@@ -134,7 +161,7 @@ void printdecllist(int n, const string& decl, list<string>& content, ostream& fo
         tab(n, fout);
         fout << decl;
         string sep = "(";
-        for (auto& s : content) {
+        for (const auto& s : content) {
             fout << sep << s;
             sep = ", ";
         }
@@ -164,16 +191,13 @@ void Klass::printLibrary(ostream& fout)
  */
 void Klass::printIncludeFile(ostream& fout)
 {
-    set<string>           S;
-    set<string>::iterator f;
-
     if (gGlobal->gOpenMPSwitch) {
-        fout << "#include <omp.h>"
-             << "\n";
+        fout << "#include <omp.h>\n";
     }
 
+    set<string> S;
     collectIncludeFile(S);
-    for (auto& f : S) {
+    for (const auto& f : S) {
         string inc = f;
         // Only print non-empty include (inc is actually quoted)
         if (inc.size() > 2) {
@@ -232,14 +256,14 @@ void Klass::printMetadata(int n, const MetaDataSet& S, ostream& fout)
     fout << "virtual void metadata(Meta* m) { ";
 
     // We do not want to accumulate metadata from all hierachical levels, so the upper level only is kept
-    for (auto& i : gGlobal->gMetaDataSet) {
+    for (const auto& i : gGlobal->gMetaDataSet) {
         if (i.first != tree("author")) {
             tab(n + 1, fout);
             fout << "m->declare(\"" << *(i.first) << "\", " << **(i.second.begin()) << ");";
         } else {
             // But the "author" meta data is accumulated, the upper level becomes the main author and sub-levels become
             // "contributor"
-            for (auto& j : i.second) {
+            for (const auto& j : i.second) {
                 if (j == *i.second.begin()) {
                     tab(n + 1, fout);
                     fout << "m->declare(\"" << *(i.first) << "\", " << *j << ");";
@@ -940,6 +964,16 @@ void Klass::println(int n, ostream& fout)
         tab(n, fout);
         fout << "#ifdef FAUST_UIMACROS";
         tab(n + 1, fout);
+        tab(n + 1, fout);
+        for (const auto& it : gGlobal->gMetaDataSet) {
+            if (it.first == tree("filename")) {
+                fout << "#define FAUST_FILE_NAME " << **(it.second.begin());
+                break;
+            }
+        }
+        tab(n + 1, fout);
+        fout << "#define FAUST_CLASS_NAME " << "\"" << fKlassName << "\"";
+        tab(n + 1, fout);
         fout << "#define FAUST_INPUTS " << fNumInputs;
         tab(n + 1, fout);
         fout << "#define FAUST_OUTPUTS " << fNumOutputs;
@@ -949,7 +983,7 @@ void Klass::println(int n, ostream& fout)
         fout << "#define FAUST_PASSIVES " << fNumPassives;
         printlines(n + 1, fUIMacro, fout);
         tab(n, fout);
-        fout << "#endif";
+        fout << "#endif" << endl;
     }
 
     fout << endl;
@@ -1381,7 +1415,7 @@ void SigIntGenKlass::println(int n, ostream& fout)
     tab(n + 1, fout);
     fout << "int fSampleRate;";
 
-    for (auto& k : fSubClassList) k->println(n + 1, fout);
+    for (const auto& k : fSubClassList) k->println(n + 1, fout);
 
     printlines(n + 1, fDeclCode, fout);
 
@@ -1405,7 +1439,7 @@ void SigIntGenKlass::println(int n, ostream& fout)
     fout << "}";
 
     tab(n + 1, fout);
-    fout << "void fill (int count, int output[]) {";
+    fout << "void fill(int count, int output[]) {";
     printlines(n + 2, fZone1Code, fout);
     printlines(n + 2, fZone2Code, fout);
     printlines(n + 2, fZone2bCode, fout);
@@ -1431,7 +1465,7 @@ void SigFloatGenKlass::println(int n, ostream& fout)
     tab(n + 1, fout);
     fout << "int fSampleRate;";
 
-    for (auto& k : fSubClassList) k->println(n + 1, fout);
+    for (const auto& k : fSubClassList) k->println(n + 1, fout);
 
     printlines(n + 1, fDeclCode, fout);
 
@@ -1455,7 +1489,7 @@ void SigFloatGenKlass::println(int n, ostream& fout)
     fout << "}";
 
     tab(n + 1, fout);
-    fout << subst("void fill (int count, $0 output[]) {", ifloat());
+    fout << subst("void fill(int count, $0 output[]) {", ifloat());
     printlines(n + 2, fZone1Code, fout);
     printlines(n + 2, fZone2Code, fout);
     printlines(n + 2, fZone2bCode, fout);
@@ -1470,17 +1504,17 @@ void SigFloatGenKlass::println(int n, ostream& fout)
 
 static void merge(set<string>& dst, set<string>& src)
 {
-    for (auto& i : src) dst.insert(i);
+    for (const auto& i : src) dst.insert(i);
 }
 
 void Klass::collectIncludeFile(set<string>& S)
 {
-    for (auto& k : fSubClassList) k->collectIncludeFile(S);
+    for (const auto& k : fSubClassList) k->collectIncludeFile(S);
     merge(S, fIncludeFileSet);
 }
 
 void Klass::collectLibrary(set<string>& S)
 {
-    for (auto& k : fSubClassList) k->collectLibrary(S);
+    for (const auto& k : fSubClassList) k->collectLibrary(S);
     merge(S, fLibrarySet);
 }

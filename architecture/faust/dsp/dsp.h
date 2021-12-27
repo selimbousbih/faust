@@ -32,7 +32,7 @@
 #define FAUSTFLOAT float
 #endif
 
-class UI;
+struct UI;
 struct Meta;
 
 /**
@@ -67,13 +67,13 @@ class dsp {
     
         /**
          * Trigger the ui_interface parameter with instance specific calls
-         * to 'addBtton', 'addVerticalSlider'... in order to build the UI.
+         * to 'openTabBox', 'addButton', 'addVerticalSlider'... in order to build the UI.
          *
          * @param ui_interface - the user interface builder
          */
         virtual void buildUserInterface(UI* ui_interface) = 0;
     
-        /* Returns the sample rate currently used by the instance */
+        /* Return the sample rate currently used by the instance */
         virtual int getSampleRate() = 0;
     
         /**
@@ -81,28 +81,28 @@ class dsp {
          * - static class 'classInit': static tables initialization
          * - 'instanceInit': constants and instance state initialization
          *
-         * @param sample_rate - the sampling rate in Hertz
+         * @param sample_rate - the sampling rate in Hz
          */
         virtual void init(int sample_rate) = 0;
 
         /**
          * Init instance state
          *
-         * @param sample_rate - the sampling rate in Hertz
+         * @param sample_rate - the sampling rate in Hz
          */
         virtual void instanceInit(int sample_rate) = 0;
-
+    
         /**
          * Init instance constant state
          *
-         * @param sample_rate - the sampling rate in Hertz
+         * @param sample_rate - the sampling rate in Hz
          */
         virtual void instanceConstants(int sample_rate) = 0;
     
         /* Init default control parameters values */
         virtual void instanceResetUserInterface() = 0;
     
-        /* Init instance state (delay lines...) */
+        /* Init instance state (like delay lines...) but keep the control parameter values */
         virtual void instanceClear() = 0;
  
         /**
@@ -175,7 +175,8 @@ class decorator_dsp : public dsp {
 };
 
 /**
- * DSP factory class.
+ * DSP factory class, used with LLVM and Interpreter backends
+ * to create DSP instances from a compiled DSP program.
  */
 
 class dsp_factory {
@@ -201,21 +202,66 @@ class dsp_factory {
     
 };
 
-/**
- * On Intel set FZ (Flush to Zero) and DAZ (Denormals Are Zero)
- * flags to avoid costly denormals.
- */
+// Denormal handling
 
-#ifdef __SSE__
-    #include <xmmintrin.h>
-    #ifdef __SSE2__
-        #define AVOIDDENORMALS _mm_setcsr(_mm_getcsr() | 0x8040)
-    #else
-        #define AVOIDDENORMALS _mm_setcsr(_mm_getcsr() | 0x8000)
-    #endif
-#else
-    #define AVOIDDENORMALS
+#if defined (__SSE__)
+#include <xmmintrin.h>
 #endif
 
+class ScopedNoDenormals
+{
+    private:
+    
+        intptr_t fpsr;
+        
+        void setFpStatusRegister(intptr_t fpsr_aux) noexcept
+        {
+        #if defined (__arm64__) || defined (__aarch64__)
+           asm volatile("msr fpcr, %0" : : "ri" (fpsr_aux));
+        #elif defined (__SSE__)
+            _mm_setcsr(static_cast<uint32_t>(fpsr_aux));
+        #endif
+        }
+        
+        void getFpStatusRegister() noexcept
+        {
+        #if defined (__arm64__) || defined (__aarch64__)
+            asm volatile("mrs %0, fpcr" : "=r" (fpsr));
+        #elif defined ( __SSE__)
+            fpsr = static_cast<intptr_t>(_mm_getcsr());
+        #endif
+        }
+    
+    public:
+    
+        ScopedNoDenormals() noexcept
+        {
+        #if defined (__arm64__) || defined (__aarch64__)
+            intptr_t mask = (1 << 24 /* FZ */);
+        #else
+            #if defined(__SSE__)
+            #if defined(__SSE2__)
+                intptr_t mask = 0x8040;
+            #else
+                intptr_t mask = 0x8000;
+            #endif
+            #else
+                intptr_t mask = 0x0000;
+            #endif
+        #endif
+            getFpStatusRegister();
+            setFpStatusRegister(fpsr | mask);
+        }
+        
+        ~ScopedNoDenormals() noexcept
+        {
+            setFpStatusRegister(fpsr);
+        }
+
+};
+
+#define AVOIDDENORMALS ScopedNoDenormals();
+
 #endif
-/**************************  END  dsp.h **************************/
+
+/************************** END dsp.h **************************/

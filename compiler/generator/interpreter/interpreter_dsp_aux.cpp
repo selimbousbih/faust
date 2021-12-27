@@ -19,7 +19,7 @@
  ************************************************************************
  ************************************************************************/
 
-#include "interpreter_dsp_aux.hh"
+#include "interpreter_dsp.hh"
 #include "compatibility.hh"
 #include "libfaust.h"
 #include "lock_api.hh"
@@ -27,6 +27,7 @@
 using namespace std;
 
 #ifdef MACHINE
+#include "sha_key.hh"
 void faustassertaux(bool cond, const string& file, int line)
 {
     if (!cond) {
@@ -121,6 +122,7 @@ static string read_real_type(istream* in)
     stringstream type_reader(type_line);
     string       dummy, type;
     type_reader >> dummy;  // Read "interpreter_dsp_factory" token
+    checkToken(dummy, "interpreter_dsp_factory");
     type_reader >> type;
 
     return type;
@@ -196,11 +198,16 @@ EXPORT interpreter_dsp_factory* readInterpreterDSPFactoryFromBitcodeFile(const s
     }
 }
 
-EXPORT void writeInterpreterDSPFactoryToBitcodeFile(interpreter_dsp_factory* factory, const string& bitcode_path)
+EXPORT bool writeInterpreterDSPFactoryToBitcodeFile(interpreter_dsp_factory* factory, const string& bitcode_path)
 {
     LOCK_API
     ofstream writer(bitcode_path.c_str());
-    factory->write(&writer, true);
+    if (writer.is_open()) {
+        factory->write(&writer, true);
+        return true;
+    } else {
+        return false;
+    }
 }
 
 EXPORT void interpreter_dsp::metadata(Meta* meta)

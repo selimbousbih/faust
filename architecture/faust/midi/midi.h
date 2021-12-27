@@ -32,10 +32,11 @@
 
 class MapUI;
 
-/*************************************
- A time-stamped short MIDI message
-**************************************/
+/**
+ * A timestamped short MIDI message used with SOUL.
+ */
 
+// Force contiguous memory layout
 #pragma pack (push, 1)
 struct MIDIMessage
 {
@@ -44,14 +45,35 @@ struct MIDIMessage
 };
 #pragma pack (pop)
 
-/*******************************************************************************
+/**
+ * For timestamped MIDI messages.
+ */
+struct DatedMessage {
+    
+    double fDate;
+    unsigned char fBuffer[3];
+    size_t fSize;
+    
+    DatedMessage(double date, unsigned char* buffer, size_t size)
+    :fDate(date), fSize(size)
+    {
+        assert(size <= 3);
+        memcpy(fBuffer, buffer, size);
+    }
+    
+    DatedMessage():fDate(0.0), fSize(0)
+    {}
+    
+};
+
+/**
  * MIDI processor definition.
  *
  * MIDI input or output handling classes will implement this interface,
- * so the same method names (keyOn, ctrlChange...) will be used either
+ * so the same method names (keyOn, keyOff, ctrlChange...) will be used either
  * when decoding MIDI input or encoding MIDI output events.
- *******************************************************************************/
-
+ * MIDI channel is numbered in [0..15] in this layer.
+ */
 class midi {
 
     public:
@@ -65,7 +87,7 @@ class midi {
             return keyOn(channel, pitch, velocity);
         }
         
-        virtual void keyOff(double, int channel, int pitch, int velocity = 127)
+        virtual void keyOff(double, int channel, int pitch, int velocity = 0)
         {
             keyOff(channel, pitch, velocity);
         }
@@ -155,12 +177,11 @@ class midi {
 
 };
 
-/*
- A class to decode NRPN and RPN messages, adapted from JUCE forum message: https://forum.juce.com/t/14bit-midi-controller-support/11517
-*/
-
-class MidiNRPN
-{
+/**
+ * A class to decode NRPN and RPN messages, adapted from JUCE forum message:
+ * https://forum.juce.com/t/14bit-midi-controller-support/11517
+ */
+class MidiNRPN {
     
     private:
     
@@ -246,6 +267,14 @@ class MidiNRPN
     
 };
 
+/**
+ * A pure interface for MIDI handlers that can send/receive MIDI messages to/from 'midi' objects.
+ */
+struct midi_interface {
+    virtual void addMidiIn(midi* midi_dsp)      = 0;
+    virtual void removeMidiIn(midi* midi_dsp)   = 0;
+    virtual ~midi_interface() {}
+};
 
 /****************************************************
  * Base class for MIDI input handling.
@@ -256,8 +285,7 @@ class MidiNRPN
  * - decoding two data byte messages: handleData2
  * - getting ready messages in polling mode
  ****************************************************/
-
-class midi_handler : public midi {
+class midi_handler : public midi, public midi_interface {
 
     protected:
 
@@ -269,7 +297,7 @@ class midi_handler : public midi {
   
     public:
 
-        midi_handler(const std::string& name = "MIDIHandler"):fName(name) {}
+        midi_handler(const std::string& name = "MIDIHandler"):midi_interface(), fName(name) {}
         virtual ~midi_handler() {}
 
         void addMidiIn(midi* midi_dsp) { if (midi_dsp) fMidiInputs.push_back(midi_dsp); }
@@ -281,6 +309,7 @@ class midi_handler : public midi {
             }
         }
 
+        // Those 2 methods have to be implemented by subclasses
         virtual bool startMidi() { return true; }
         virtual void stopMidi() {}
     
@@ -288,8 +317,8 @@ class midi_handler : public midi {
         std::string getName() { return fName; }
     
         // To be used in polling mode
-        virtual int getMessages(std::vector<MIDIMessage>* message) { return 0; }
-    
+        virtual int recvMessages(std::vector<MIDIMessage>* message) { return 0; }
+        virtual void sendMessages(std::vector<MIDIMessage>* message, int count) {}
     
         // MIDI Real-Time
         void handleClock(double time)
@@ -317,7 +346,8 @@ class midi_handler : public midi {
         {
             if (type == MIDI_CLOCK) {
                 handleClock(time);
-            } else if (type == MIDI_START) {
+            // We can consider start and continue as identical messages
+            } else if ((type == MIDI_START) || (type == MIDI_CONT)) {
                 handleStart(time);
             } else if (type == MIDI_STOP) {
                 handleStop(time);
@@ -389,6 +419,13 @@ class midi_handler : public midi {
                 fMidiInputs[i]->pitchWheel(time, channel, (data2 << 7) + data1);
             }
         }
+    
+        void handlePitchWheel(double time, int channel, int bend)
+        {
+            for (unsigned int i = 0; i < fMidiInputs.size(); i++) {
+                fMidiInputs[i]->pitchWheel(time, channel, bend);
+            }
+        }
         
         void handlePolyAfterTouch(double time, int channel, int data1, int data2)
         {
@@ -427,28 +464,6 @@ class midi_handler : public midi {
             }
         }
   
-};
-
-//-------------------------------
-// For timestamped MIDI messages
-//-------------------------------
-
-struct DatedMessage {
-    
-    double fDate;
-    unsigned char fBuffer[3];
-    size_t fSize;
-    
-    DatedMessage(double date, unsigned char* buffer, size_t size)
-    :fDate(date), fSize(size)
-    {
-        assert(size <= 3);
-        memcpy(fBuffer, buffer, size);
-    }
-    
-    DatedMessage():fDate(0.0), fSize(0)
-    {}
-    
 };
 
 #endif // __midi__

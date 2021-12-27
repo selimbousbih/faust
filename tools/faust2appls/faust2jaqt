@@ -3,16 +3,21 @@
 #####################################################################
 #                                                                   #
 #               Compiles Faust programs to JACK-QT                  #
-#               (c) Grame, 2009-2018                                #
+#               (c) Grame, 2009-2019                                #
 #                                                                   #
 #####################################################################
 
 . faustpath
 . faustoptflags
+. usage.sh
 
-CXXFLAGS=$MYGCCFLAGS
+CXXFLAGS+=" $MYGCCFLAGS"  # So that additional CXXFLAGS can be used
 
 ARCHFILE=$FAUSTARCH/jack-qt.cpp
+
+if [[ $(uname -s) != Darwin ]]; then
+	LFLAGS+="-no-pie"
+fi
 
 #-------------------------------------------------------------------
 # Set Faust include path
@@ -32,8 +37,11 @@ OSCLIB=""
 POLY="POLY"
 DEPLOY=""
 NVOICES=-1
+PRESETDIR="auto"
+PRESETDEFS=""
 SOUNDFILE="0"
 SOUNDFILEDEFS=""
+SOUNDFILEINC=""
 SOUNDFILELIBS=""
 SAMPLERATEDEFS=""
 SAMPLERATELIBS=""
@@ -43,16 +51,18 @@ do
     p=$1
 
     if [ $p = "-help" ] || [ $p = "-h" ]; then
-        echo "faust2jaqt [-httpd] [-qrcode] [-soundfile] [-resample] [-nvoices <num>] [-effect auto|<effect.dsp>] [-midi] [-osc] [additional Faust options (-vec -vs 8...)] <file.dsp>"
-        echo "Use '-httpd' to activate HTTP control"
-        echo "Use '-qrcode' to activate QR code generation"
-        echo "Use '-soundfile' when compiling DSP using 'soundfile' primitive, to add needed resources"
-        echo "Use '-resample' to resample soundfiles to the audio driver sample rate"
-        echo "Use '-nvoices <num>' to produce a polyphonic self-contained DSP with <num> voices, ready to be used with MIDI or OSC"
-        echo "Use '-effect <effect.dsp>' to produce a polyphonic DSP connected to a global output effect, ready to be used with MIDI or OSC"
-        echo "Use '-effect auto' to produce a polyphonic DSP connected to a global output effect defined as 'effect' in <file.dsp>, ready to be used with MIDI or OSC"
-        echo "Use '-midi' to activate MIDI control"
-        echo "Use '-osc' to activate OSC control"
+        usage faust2jaqt "[options] [Faust options] <file.dsp>"
+        require Jack, Qt
+        echo "Compiles Faust programs to JACK-QT"
+        option
+        options -httpd -osc -midi -soundfile -qrcode
+        option "-nvoices <num>"
+        option "-effect <effect.dsp>"
+        option "-effect auto"
+        option "-preset <directory>" "add a preset manager on top of GUI and save the preset files in the given directory"
+        option "-preset auto" "add a preset manager on top of GUI and save the preset files in a system temporary directory"
+        option -resample "to resample soundfiles to the audio driver sample rate."
+        option "Faust options"
         exit
     fi
     
@@ -85,28 +95,32 @@ do
     elif [ $p = "-soundfile" ]; then
         SOUNDFILE="1"
         SOUNDFILEDEFS="DEFINES += SOUNDFILE"
-        SOUNDFILELIBS=`pkg-config --cflags --static --libs sndfile`
+        SOUNDFILEINC=$(pkg-config --cflags sndfile | cut -c 3-)
+        SOUNDFILELIBS=`pkg-config --static --libs sndfile`
     elif [ $p = "-resample" ]; then
         SAMPLERATEDEFS="DEFINES += SAMPLERATE"
         SAMPLERATELIBS=`pkg-config --cflags --static --libs samplerate`
     elif [ $p = "-osc" ]; then
         OSCDEFS="DEFINES += OSCCTRL"
         OSCLIBS="-lOSCFaust"
-	elif [ "$p" = "-httpd" ]; then
-		HTTPDEFS="DEFINES += HTTPCTRL"
-		HTTPLIBS="-lHTTPDFaust -lmicrohttpd"
-	elif [ "$p" = "-qrcode" ]; then # requires -httpd
-		QRDEFS="DEFINES += QRCODECTRL"
+    elif [ "$p" = "-httpd" ]; then
+	HTTPDEFS="DEFINES += HTTPCTRL"
+	HTTPLIBS="-lHTTPDFaust -lmicrohttpd"
+    elif [ "$p" = "-preset" ]; then
+        PRESETDEFS="DEFINES += PRESETUI"
+        shift
+        PRESETDIR=$1
+    elif [ "$p" = "-qrcode" ]; then # requires -httpd
+    	QRDEFS="DEFINES += QRCODECTRL"
     elif [ ${p:0:1} = "-" ]; then
-	    OPTIONS="$OPTIONS $p"
-	elif [[ -f "$p" ]]; then
-	    FILES="$FILES $p"
+	OPTIONS="$OPTIONS $p"
+    elif [[ -f "$p" ]] && [ ${p: -4} == ".dsp" ]; then
+        FILES="$FILES $p"
     else
-	    OPTIONS="$OPTIONS $p"        
-	fi
+	OPTIONS="$OPTIONS $p"
+    fi
 
 shift
-
 done
 
 #-------------------------------------------------------------------
@@ -142,11 +156,11 @@ for p in $FILES; do
 
     CUR=$(pwd)
     f=$(basename "$p")
-	SRCDIR=$(dirname "$p")
+    SRCDIR=$(dirname "$p")
 
     # creates a temporary dir 
     TDR=$(mktemp -d faust.XXXXXX)
-	TMP="$TDR/${f%.dsp}"
+    TMP="$TDR/${f%.dsp}"
     mkdir "$TMP"
 
     # compile faust to c++
@@ -170,12 +184,22 @@ EndOfCode
     else
         faust -i -json -a $ARCHFILE $OPTIONS "$SRCDIR/$f" -o "$TMP/${f%.dsp}_tmp.cpp" || exit
     fi
+    
+    # add preset management
+    if [ $PRESETDIR = "auto" ]; then
+        echo "#define PRESETDIR \"/var/tmp/\"" > "$TMP/preset.cpp"
+    else
+        echo "#define PRESETDIR \"$PRESETDIR\"" > "$TMP/preset.cpp"
+    fi
+
+    cat "$TMP/preset.cpp" "$TMP/${f%.dsp}_tmp.cpp" > "$TMP/${f%.dsp}.cpp"
+    rm "$TMP/preset.cpp" "$TMP/${f%.dsp}_tmp.cpp"
 
     # compile c++ to binary
     (
-	    cd "$TMP"
-	    $QMAKE -project "QT += widgets printsupport network" "CONFIG+=warn_off" "$CLANGOPT" "INCLUDEPATH+=$CUR" "INCLUDEPATH+=$FAUSTINC /opt/local/include" "QMAKE_CXXFLAGS=$CXXFLAGS -Wno-unused-parameter $FAUSTTOOLSFLAGS" "LIBS+=$ARCHLIB $SOUNDFILELIBS $SAMPLERATELIBS $OSCLIBS $HTTPLIBS" "HEADERS+=$FAUSTINC/faust/gui/QTUI.h" "RESOURCES+= $FAUSTINC/faust/gui/Styles/Grey.qrc" "$OSCDEFS" "$HTTPDEFS" "$QRDEFS" "$POLYDEFS" "$MIDIDEFS" "$SOUNDFILEDEFS" "$SAMPLERATEDEFS"
-	    $QMAKE $SPEC QMAKE_CFLAGS_ISYSTEM=-I
+        cd "$TMP"
+        $QMAKE -project "QT += widgets printsupport network" "CONFIG+=warn_off" "$CLANGOPT" "INCLUDEPATH+=$FAUSTINC" "INCLUDEPATH+=$SOUNDFILEINC" "QMAKE_CXXFLAGS=$CXXFLAGS -Wno-unused-parameter $FAUSTTOOLSFLAGS" "QMAKE_LFLAGS=$LFLAGS" "LIBS+=$ARCHLIB $SOUNDFILELIBS $SAMPLERATELIBS $OSCLIBS $HTTPLIBS" "HEADERS+=$FAUSTINC/faust/gui/QTUI.h" "RESOURCES+= $FAUSTINC/faust/gui/Styles/Grey.qrc" "$OSCDEFS" "$HTTPDEFS" "$QRDEFS" "$POLYDEFS" "$MIDIDEFS" "$SOUNDFILEDEFS" "$SAMPLERATEDEFS" "$PRESETDEFS"
+        $QMAKE $SPEC QMAKE_CFLAGS_ISYSTEM=-I
         make
     ) > /dev/null || exit
 
@@ -200,7 +224,7 @@ EndOfCode
                     if [ ${snd:0:1} = "/" ]; then 
                         echo "Warning: soundfile with absolute path is not copied !"
                     else
-                        #create destination path and possibly create directory
+                        # create destination path and possibly create directory
                         sfpath="$TMP/${f%.dsp}$EXT/Contents/Resources/$(dirname $snd)/"
                         if ! [ -d $sfpath ]; then
                             echo "Create $sfpath"
@@ -224,9 +248,12 @@ EndOfCode
         fi
     fi
 
-    #remove tempory stuff
+    # remove tempory files
     rm -rf "$SRCDIR/${f%.dsp}$EXT"
-    cp -r "$TMP/${f%.dsp}$EXT" "$SRCDIR/${f%.dsp}$EXT"
+    cp -a "$TMP/${f%.dsp}$EXT" "$SRCDIR/${f%.dsp}$EXT"
+    if [[ $(uname) == Darwin ]]; then
+        codesign --sign - --deep --force "$SRCDIR/${f%.dsp}$EXT"
+    fi
     rm -rf "$TDR"
     rm -f $p.json
 
@@ -235,5 +262,3 @@ EndOfCode
 done
 
 echo $BINARIES
-
-

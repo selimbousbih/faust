@@ -48,7 +48,7 @@ class LLVMCodeContainer : public virtual CodeContainer {
     void generateFunMap(const string& fun1_aux, const string& fun2_aux, int num_args, bool body = false);
     void generateFunMaps();
 
-    llvm::PointerType* generateDspStruct();
+    PointerType* generateDspStruct();
 
     // To be implemented in each LLVMScalarCodeContainer, LLVMVectorCodeContainer and LLVMWorkStealingCodeContainer
     // classes
@@ -71,7 +71,7 @@ class LLVMCodeContainer : public virtual CodeContainer {
         generateUserInterface(&json_visitor1);
 
         map<string, int> path_index_table;
-        for (auto& it : json_visitor1.fPathTable) {
+        for (const auto& it : json_visitor1.fPathTable) {
             // Get field index
             path_index_table[it.second] = fStructVisitor.getFieldOffset(it.first);
         }
@@ -91,6 +91,7 @@ class LLVMCodeContainer : public virtual CodeContainer {
         fBuilder->ClearInsertionPoint();
     }
  
+    void init(const string& name, int numInputs, int numOutputs, Module* module, LLVMContext* context);
 
    public:
     LLVMCodeContainer(const string& name, int numInputs, int numOutputs);

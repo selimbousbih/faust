@@ -28,7 +28,7 @@ using namespace std;
 
 /**
  * Infere the type of a term according to its surrounding type environment
- * @param sig the signal to aanlyze
+ * @param sig the signal to analyse
  * @param env the type environment
  * @return the type of sig according to environment env
  */
@@ -59,8 +59,8 @@ void sigvisitor::visit(Tree sig)
     else if (isSigPrefix(sig, s1, s2))
         visitPrefix(sig, s1, s2);
 
-    else if (isSigFixDelay(sig, s1, s2))
-        visitFixDelay(sig, s1, s2);
+    else if (isSigDelay(sig, s1, s2))
+        visitDelay(sig, s1, s2);
 
     else if (isSigBinOp(sig, &i, s1, s2))
         visitBinOp(sig, i, s1, s2);
@@ -150,9 +150,6 @@ void sigvisitor::visit(Tree sig)
 
     else if (isSigSelect2(sig, sel, s1, s2))
         visitSelect2(sig, sel, s1, s2);
-
-    else if (isSigSelect3(sig, sel, s1, s2, s3))
-        visitSelect3(sig, sel, s1, s2, s3);
 
     else if (isList(sig))
         visitList(sig);

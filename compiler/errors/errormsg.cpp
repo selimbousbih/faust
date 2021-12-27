@@ -35,7 +35,11 @@ void faustassertaux(bool cond, const string& file, int line)
 {
     if (!cond) {
         stringstream str;
+#ifdef EMCC
+        str << "ASSERT : please report this message and the failing DSP file to Faust developers (";
+#else
         str << "ASSERT : please report this message, the stack trace, and the failing DSP file to Faust developers (";
+#endif
         str << "file: " << file.substr(file.find_last_of('/') + 1) << ", line: " << line << ", ";
         str << "version: " << FAUSTVERSION;
         if (gGlobal) {
@@ -75,7 +79,7 @@ void evalerror(const char* filename, int linenum, const char* msg, Tree exp)
 void evalerrorbox(const char* filename, int linenum, const char* msg, Tree exp)
 {
     stringstream error;
-    error << filename << " : " << linenum << " : ERROR : " << msg << boxpp(exp) << endl;
+    error << filename << " : " << linenum << " : ERROR : " << msg << " : " << boxpp(exp) << endl;
     gGlobal->gErrorCount++;
     throw faustexception(error.str());
 }
@@ -83,14 +87,14 @@ void evalerrorbox(const char* filename, int linenum, const char* msg, Tree exp)
 void evalwarning(const char* filename, int linenum, const char* msg, Tree exp)
 {
     stringstream error;
-    error << filename << " : " << linenum << " : WARNING : " << msg << boxpp(exp) << endl;
+    error << filename << " : " << linenum << " : WARNING : " << msg << " : " << boxpp(exp) << endl;
     gGlobal->gErrorMsg = error.str();
 }
 
 void evalremark(const char* filename, int linenum, const char* msg, Tree exp)
 {
     stringstream error;
-    error << filename << " : " << linenum << " : REMARK : " << msg << boxpp(exp) << endl;
+    error << filename << " : " << linenum << " : REMARK : " << msg << " : " << boxpp(exp) << endl;
     gGlobal->gErrorMsg = error.str();
 }
 

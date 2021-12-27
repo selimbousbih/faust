@@ -34,17 +34,6 @@
 #include "simplify.hh"
 #include "tlib.hh"
 
-#if 0
-static void countAddTerm(map<Tree,Tree>& M, Tree t, bool invflag);
-static void incTermCount(map<Tree,int>& M, Tree t, bool invflag);
-static Tree buildPowTerm(Tree f, int q);
-static Tree simplifyingReorganizingMul(Tree t1, Tree t2);
-static Tree reorganizingMul(Tree k, Tree t);
-static void factorizeAddTerm(map<Tree,Tree>& M);
-#endif
-
-#undef TRACE
-
 /**
  * Compute the Add-Normal form of a term t.
  * \param t the term to be normalized
@@ -86,11 +75,11 @@ Tree normalizeAddTerm(Tree t)
  */
 Tree normalizeDelay1Term(Tree s)
 {
-    return normalizeFixedDelayTerm(s, tree(1));
+    return normalizeDelayTerm(s, tree(1));
 }
 
 /**
- * Compute the normal form of a fixed delay term (s@d).
+ * Compute the normal form of a delay term (s@d).
  * The normalisation rules are :
  *		s@0 -> s
  *     	0@d -> 0
@@ -105,14 +94,14 @@ Tree normalizeDelay1Term(Tree s)
  * \return the normalized term
  */
 
-Tree normalizeFixedDelayTerm(Tree s, Tree d)
+Tree normalizeDelayTerm(Tree s, Tree d)
 {
     Tree x, y, r;
     int  i;
 
     if (isZero(d)) {
         if (isProj(s, &i, r)) {
-            return sigFixDelay(s, d);
+            return sigDelay(s, d);
         } else {
             return s;
         }
@@ -122,29 +111,29 @@ Tree normalizeFixedDelayTerm(Tree s, Tree d)
 
     } else if (isSigMul(s, x, y)) {
         if (getSigOrder(x) < 2) {
-            return /*simplify*/ (sigMul(x, normalizeFixedDelayTerm(y, d)));
+            return /*simplify*/ (sigMul(x, normalizeDelayTerm(y, d)));
         } else if (getSigOrder(y) < 2) {
-            return /*simplify*/ (sigMul(y, normalizeFixedDelayTerm(x, d)));
+            return /*simplify*/ (sigMul(y, normalizeDelayTerm(x, d)));
         } else {
-            return sigFixDelay(s, d);
+            return sigDelay(s, d);
         }
 
     } else if (isSigDiv(s, x, y)) {
         if (getSigOrder(y) < 2) {
-            return /*simplify*/ (sigDiv(normalizeFixedDelayTerm(x, d), y));
+            return /*simplify*/ (sigDiv(normalizeDelayTerm(x, d), y));
         } else {
-            return sigFixDelay(s, d);
+            return sigDelay(s, d);
         }
 
-    } else if (isSigFixDelay(s, x, y)) {
+    } else if (isSigDelay(s, x, y)) {
         if (getSigOrder(y) < 2) {
             // (x@n)@m = x@(n+m) when n is constant
-            return normalizeFixedDelayTerm(x, simplify(sigAdd(d, y)));
+            return normalizeDelayTerm(x, simplify(sigAdd(d, y)));
         } else {
-            return sigFixDelay(s, d);
+            return sigDelay(s, d);
         }
 
     } else {
-        return sigFixDelay(s, d);
+        return sigDelay(s, d);
     }
 }

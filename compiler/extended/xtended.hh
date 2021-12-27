@@ -31,8 +31,8 @@
 #include "sigtype.hh"
 #include "sigvisitor.hh"
 #include "tlib.hh"
+#include "ppsig.hh"
 
-class CodeGen;
 class CodeContainer;
 
 class xtended : public virtual Garbageable {
@@ -49,7 +49,7 @@ class xtended : public virtual Garbageable {
     Tree box()
     {
         Tree b = tree(fSymbol);
-        faustassert(getUserData(b) != 0);
+        faustassert(getUserData(b) != nullptr);
         return b;
     }
 
@@ -57,11 +57,11 @@ class xtended : public virtual Garbageable {
     virtual unsigned int arity() = 0;
 
     virtual ValueInst* generateCode(CodeContainer* container, const list<ValueInst*>& args, ::Type result_type,
-                                    vector< ::Type> const& types) = 0;
+                                    vector<::Type> const& types) = 0;
 
     // SL : 28/09/17
     // Old CPP backend
-    virtual string old_generateCode(Klass* klass, const vector<string>& args, const vector<Type>& types) = 0;
+    virtual string generateCode(Klass* klass, const vector<string>& args, const vector<Type>& types) = 0;
 
     virtual string generateLateq(Lateq* lateq, const vector<string>& args, const vector< ::Type>& types) = 0;
     virtual int    infereSigOrder(const vector<int>& args)                                               = 0;
@@ -74,13 +74,13 @@ class xtended : public virtual Garbageable {
         return false;
     }  ///< generally false, but true for binary op # such that #(x) == _#x
 
-    void prepareTypeArgsResult(::Type result, const list<ValueInst*>& args, vector< ::Type> const& types,
+    void prepareTypeArgsResult(::Type result, const list<ValueInst*>& args, vector<::Type> const& types,
                                Typed::VarType& result_type, vector<Typed::VarType>& arg_types,
                                list<ValueInst*>& casted_args);
 };
 
 // True if two floating point numbers are close enough to be considered identical.
-// It is used to recognize PI/n and 0 in some symbolic simplifications
+// It is used to recognize PI/n and 0 in some symbolic simplifications.
 inline bool comparable(double x, double y)
 {
     return fabs(x - y) < 0.00001;

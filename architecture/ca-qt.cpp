@@ -5,7 +5,7 @@
  each section for license and copyright information.
  *************************************************************************/
 
-/*******************BEGIN ARCHITECTURE SECTION (part 1/2)****************/
+/******************* BEGIN ca-qt.cpp ****************/
 
 /************************************************************************
  FAUST Architecture File
@@ -109,9 +109,11 @@ static void osc_compute_callback(void* arg)
 #include "effect.h"
 #endif
 
+using namespace std;
+
 dsp* DSP;
 
-std::list<GUI*> GUI::fGuiList;
+list<GUI*> GUI::fGuiList;
 ztimedmap GUI::gTimedZoneMap;
 
 /******************************************************************************
@@ -177,7 +179,7 @@ class Sensors : public QObject
         
     public:
         
-        typedef std::map<int, Sensor*> TSensors;
+        typedef map<int, Sensor*> TSensors;
         Sensors(APIUI* ui)
         : fUI(ui), fAccel(Sensor::kAccelerometer), fGyro(Sensor::kGyroscope), fTimerID(0) {}
         virtual ~Sensors() { killTimer(fTimerID); }
@@ -228,7 +230,7 @@ void Sensors::start()
 #define coreaudio		iosaudio
 #endif
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
     char name[256];
     char rcfilename[256];
@@ -236,7 +238,6 @@ int main(int argc, char *argv[])
     bool midi_sync = false;
     int nvoices = 0;
     bool control = true;
-    mydsp_poly* dsp_poly = NULL;
     
     mydsp* tmp_dsp = new mydsp();
     MidiMeta::analyse(tmp_dsp, midi_sync, nvoices);
@@ -251,7 +252,7 @@ int main(int argc, char *argv[])
     snprintf(rcfilename, 256, "%s/.%src", home, name);
     
     if (isopt(argv, "-help") || isopt(argv, "-h")) {
-        std::cout << "prog [--frequency <val>] [--buffer <val>] [--nvoices <val>] [--control <0/1>] [--group <0/1>] [--virtual-midi <0/1>]\n";
+        cout << "prog [--frequency <val>] [--buffer <val>] [--nvoices <val>] [--control <0/1>] [--group <0/1>] [--virtual-midi <0/1>]\n";
         exit(1);
     }
     
@@ -264,17 +265,17 @@ int main(int argc, char *argv[])
     control = lopt(argv, "--control", control);
     int group = lopt(argv, "--group", 1);
     
-    std::cout << "Started with " << nvoices << " voices\n";
-    dsp_poly = new mydsp_poly(new mydsp(), nvoices, control, group);
+    cout << "Started with " << nvoices << " voices\n";
+    DSP = new mydsp_poly(new mydsp(), nvoices, control, group);
     
 #if MIDICTRL
     if (midi_sync) {
-        DSP = new timed_dsp(new dsp_sequencer(dsp_poly, new effect()));
+        DSP = new timed_dsp(new dsp_sequencer(DSP, new effect()));
     } else {
-        DSP = new dsp_sequencer(dsp_poly, new effect());
+        DSP = new dsp_sequencer(DSP, new effect());
     }
 #else
-    DSP = new dsp_sequencer(dsp_poly, new effect());
+    DSP = new dsp_sequencer(DSP, new effect());
 #endif
     
 #else
@@ -283,17 +284,13 @@ int main(int argc, char *argv[])
     int group = lopt(argv, "--group", 1);
     
     if (nvoices > 0) {
-        std::cout << "Started with " << nvoices << " voices\n";
-        dsp_poly = new mydsp_poly(new mydsp(), nvoices, control, group);
+        cout << "Started with " << nvoices << " voices\n";
+        DSP = new mydsp_poly(new mydsp(), nvoices, control, group);
         
 #if MIDICTRL
         if (midi_sync) {
-            DSP = new timed_dsp(dsp_poly);
-        } else {
-            DSP = dsp_poly;
+            DSP = new timed_dsp(DSP);
         }
-#else
-        DSP = dsp_poly;
 #endif
         
     } else {
@@ -318,19 +315,19 @@ int main(int argc, char *argv[])
     
 #endif
     
-    if (DSP == 0) {
-        std::cerr << "Unable to allocate Faust DSP object" << std::endl;
+    if (!DSP) {
+        cerr << "Unable to allocate Faust DSP object" << endl;
         exit(1);
     }
     
     QApplication myApp(argc, argv);
     
-    FUI finterface;
     QTGUI* interface = new QTGUI();
+    FUI finterface;
     
 #ifdef PRESETUI
-    PresetUI* pinterface = new PresetUI(interface, std::string(PRESETDIR) + std::string(name) + ((nvoices > 0) ? "_poly" : ""));
-    DSP->buildUserInterface(pinterface);
+    PresetUI pinterface(interface, string(PRESETDIR) + string(name) + ((nvoices > 0) ? "_poly" : ""));
+    DSP->buildUserInterface(&pinterface);
 #else
     DSP->buildUserInterface(interface);
     DSP->buildUserInterface(&finterface);
@@ -342,16 +339,15 @@ int main(int argc, char *argv[])
     
 #ifdef MIDICTRL
     rt_midi midi_handler(name, is_virtual);
-    midi_handler.addMidiIn(dsp_poly);
     MidiUI midiinterface(&midi_handler);
     DSP->buildUserInterface(&midiinterface);
-    std::cout << "MIDI is on" << std::endl;
+    cout << "MIDI is on" << endl;
 #endif
     
 #ifdef HTTPCTRL
     httpdUI httpdinterface(name, DSP->getNumInputs(), DSP->getNumOutputs(), argc, argv);
     DSP->buildUserInterface(&httpdinterface);
-    std::cout << "HTTPD is on" << std::endl;
+    cout << "HTTPD is on" << endl;
 #endif
     
     coreaudio audio(srate, fpb);
@@ -361,11 +357,8 @@ int main(int argc, char *argv[])
 // After audio init to get SR
 #ifdef SOUNDFILE
     // Use bundle path
-    SoundUI soundinterface(SoundUI::getBinaryPath("/Contents/Resources/"), audio.getSampleRate());
-    // SoundUI has to be dispatched on all internal voices
-    if (dsp_poly) dsp_poly->setGroup(false);
+    SoundUI soundinterface(SoundUI::getBinaryPath() + "/Contents/Resources/", audio.getSampleRate());
     DSP->buildUserInterface(&soundinterface);
-    if (dsp_poly) dsp_poly->setGroup(group);
 #endif
     
 #ifdef IOS
@@ -375,12 +368,12 @@ int main(int argc, char *argv[])
 #ifdef OSCCTRL
     OSCUI oscinterface(name, argc, argv);
     DSP->buildUserInterface(&oscinterface);
-    std::cout << "OSC is on" << std::endl;
+    cout << "OSC is on" << endl;
     audio.addControlCallback(osc_compute_callback, &oscinterface);
 #endif
     
-    std::cout << "ins " << audio.getNumInputs() << std::endl;
-    std::cout << "outs " << audio.getNumOutputs() << std::endl;
+    cout << "ins " << audio.getNumInputs() << endl;
+    cout << "outs " << audio.getNumOutputs() << endl;
     
 #ifdef HTTPCTRL
     httpdinterface.run();
@@ -392,14 +385,16 @@ int main(int argc, char *argv[])
 #ifdef OSCCTRL
     oscinterface.run();
 #endif
+    
 #ifdef MIDICTRL
     if (!midiinterface.run()) {
-        std::cerr << "MidiUI run error\n";
+        cerr << "MidiUI run error " << endl;
     }
 #endif
     
     // After the allocation of controllers
     finterface.recallState(rcfilename);
+ 
     interface->run();
     
     myApp.setStyleSheet(interface->styleSheet());
@@ -413,8 +408,10 @@ int main(int argc, char *argv[])
     audio.stop();
     finterface.saveState(rcfilename);
     
+    delete DSP;
+    
     return 0;
 }
 
-/********************END ARCHITECTURE SECTION (part 2/2)****************/
+/******************** END ca-qt.cpp ****************/
 

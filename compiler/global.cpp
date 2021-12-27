@@ -32,6 +32,7 @@
 #include "cosprim.hh"
 #include "exp10prim.hh"
 #include "expprim.hh"
+#include "floats.hh"
 #include "floorprim.hh"
 #include "fmodprim.hh"
 #include "ftzprim.hh"
@@ -74,8 +75,16 @@
 #include "java_code_container.hh"
 #endif
 
+#ifdef CSHARP_BUILD
+#include "csharp_code_container.hh"
+#endif
+
 #ifdef RUST_BUILD
 #include "rust_code_container.hh"
+#endif
+
+#ifdef DLANG_BUILD
+#include "dlang_code_container.hh"
 #endif
 
 // Parser
@@ -99,9 +108,9 @@ global::global() : TABBER(1), gLoopDetector(1024, 400), gStackOverflowDetector(M
     EVALPROPERTY   = symbol("EvalProperty");
     PMPROPERTYNODE = symbol("PMPROPERTY");
 
-    gResult          = 0;
-    gResult2         = 0;
-    gExpandedDefList = 0;
+    gResult          = nullptr;
+    gResult2         = nullptr;
+    gExpandedDefList = nullptr;
 
     gDetailsSwitch    = false;
     gDrawSignals      = false;
@@ -114,7 +123,6 @@ global::global() : TABBER(1), gLoopDetector(1024, 400), gStackOverflowDetector(M
     gMaxNameSize      = 40;
     gSimpleNames      = false;
     gSimplifyDiagrams = false;
-    gLessTempSwitch   = false;
     gMaxCopyDelay     = 16;
 
     gVectorSwitch      = false;
@@ -133,6 +141,7 @@ global::global() : TABBER(1), gLoopDetector(1024, 400), gStackOverflowDetector(M
     gUIMacroSwitch = false;
     gDumpNorm      = false;
     gFTZMode       = 0;
+    gRangeUI       = false;
 
     gFloatSize = 1;
 
@@ -142,21 +151,24 @@ global::global() : TABBER(1), gLoopDetector(1024, 400), gStackOverflowDetector(M
     gDSPStruct  = false;
     gLightMode  = false;
     gClang      = false;
-    gCheckTable = false;
+    gCheckTable = "";
+    
+    gMathExceptions = false;
 
     gClassName      = "mydsp";
     gSuperClassName = "dsp";
     gProcessName    = "process";
 
-    gDSPFactory = 0;
+    gDSPFactory = nullptr;
 
-    gInputString = 0;
+    gInputString = nullptr;
 
     // Backend configuration : default values
-    gGenerateSelectWithIf = true;
     gAllowForeignFunction = true;
+    gAllowForeignConstant = true;
+    gAllowForeignVar      = true;
     gComputeIOTA          = false;
-    gFAUSTFLOATToInternal = false;
+    gFAUSTFLOAT2Internal  = false;
     gInPlace              = false;
     gHasExp10             = false;
     gLoopVarInBytes       = false;
@@ -164,13 +176,20 @@ global::global() : TABBER(1), gLoopDetector(1024, 400), gStackOverflowDetector(M
     gUseDefaultSound      = true;
     gHasTeeLocal          = false;
     gFastMath             = false;
+    gMathApprox           = false;
     gNeedManualPow        = true;
     gRemoveVarAddress     = false;
-    gOneSample            = false;
+    gOneSample            = -1;
     gOneSampleControl     = false;
+    gComputeMix           = false;
     gFastMathLib          = "default";
+    gNameSpace            = "";
+
+    gNarrowingLimit = 0;
+    gWideningLimit = 0;
 
     // Fastmath mapping float version
+    gFastMathLibTable["fabsf"]      = "fast_fabsf";
     gFastMathLibTable["acosf"]      = "fast_acosf";
     gFastMathLibTable["asinf"]      = "fast_asinf";
     gFastMathLibTable["atanf"]      = "fast_atanf";
@@ -187,12 +206,14 @@ global::global() : TABBER(1), gLoopDetector(1024, 400), gStackOverflowDetector(M
     gFastMathLibTable["log10f"]     = "fast_log10f";
     gFastMathLibTable["powf"]       = "fast_powf";
     gFastMathLibTable["remainderf"] = "fast_remainderf";
+    gFastMathLibTable["rintf"]      = "fast_rintf";
     gFastMathLibTable["roundf"]     = "fast_roundf";
     gFastMathLibTable["sinf"]       = "fast_sinf";
     gFastMathLibTable["sqrtf"]      = "fast_sqrtf";
     gFastMathLibTable["tanf"]       = "fast_tanf";
 
     // Fastmath mapping double version
+    gFastMathLibTable["fabs"]      = "fast_fabs";
     gFastMathLibTable["acos"]      = "fast_acos";
     gFastMathLibTable["asin"]      = "fast_asin";
     gFastMathLibTable["atan"]      = "fast_atan";
@@ -209,6 +230,7 @@ global::global() : TABBER(1), gLoopDetector(1024, 400), gStackOverflowDetector(M
     gFastMathLibTable["log10"]     = "fast_log10";
     gFastMathLibTable["pow"]       = "fast_pow";
     gFastMathLibTable["remainder"] = "fast_remainder";
+    gFastMathLibTable["rint"]      = "fast_rint";
     gFastMathLibTable["round"]     = "fast_round";
     gFastMathLibTable["sin"]       = "fast_sin";
     gFastMathLibTable["sqrt"]      = "fast_sqrt";
@@ -235,9 +257,9 @@ global::global() : TABBER(1), gLoopDetector(1024, 400), gStackOverflowDetector(M
     gLocalCausalityCheck = false;
     gCausality           = false;
 
-    gOccurrences = 0;
+    gOccurrences = nullptr;
     gFoldingFlag = false;
-    gDevSuffix   = 0;
+    gDevSuffix   = nullptr;
 
     gAbsPrim       = new AbsPrim();
     gAcosPrim      = new AcosPrim();
@@ -331,9 +353,10 @@ global::global() : TABBER(1), gLoopDetector(1024, 400), gStackOverflowDetector(M
     FFUN        = symbol("ForeignFunction");
 
     SIGINPUT           = symbol("SigInput");
+    gMaxInputs         = 0;
     SIGOUTPUT          = symbol("SigOutput");
     SIGDELAY1          = symbol("SigDelay1");
-    SIGFIXDELAY        = symbol("SigFixDelay");
+    SIGDELAY           = symbol("SigDelay");
     SIGPREFIX          = symbol("SigPrefix");
     SIGIOTA            = symbol("SigIota");
     SIGRDTBL           = symbol("SigRDTbl");
@@ -344,7 +367,9 @@ global::global() : TABBER(1), gLoopDetector(1024, 400), gStackOverflowDetector(M
     SIGDOCWRITETBL     = symbol("SigDocWriteTbl");
     SIGDOCACCESSTBL    = symbol("SigDocAccessTbl");
     SIGSELECT2         = symbol("SigSelect2");
-    SIGSELECT3         = symbol("SigSelect3");
+    SIGASSERTBOUNDS    = symbol("sigAssertBounds");
+    SIGHIGHEST         = symbol("sigHighest");
+    SIGLOWEST          = symbol("sigLowest");
     SIGBINOP           = symbol("SigBinOp");
     SIGFFUN            = symbol("SigFFun");
     SIGFCONST          = symbol("SigFConst");
@@ -382,11 +407,13 @@ global::global() : TABBER(1), gLoopDetector(1024, 400), gStackOverflowDetector(M
     SYMRECREF = symbol("SYMRECREF");
     SYMLIFTN  = symbol("LIFTN");
 
-    gMachineFloatSize  = sizeof(float);
-    gMachineInt32Size  = sizeof(int);
-    gMachineInt64Size  = sizeof(long int);
-    gMachineDoubleSize = sizeof(double);
-    gMachineBoolSize   = sizeof(bool);
+    gMachineFloatSize      = sizeof(float);
+    gMachineInt32Size      = sizeof(int);
+    gMachineInt64Size      = sizeof(long int);
+    gMachineDoubleSize     = sizeof(double);
+    gMachineQuadSize       = sizeof(long double);
+    gMachineFixedPointSize = gMachineFloatSize;
+    gMachineBoolSize       = sizeof(bool);
 
     // Assuming we are compiling for a 64 bits machine
     gMachinePtrSize = sizeof(nullptr);
@@ -399,16 +426,20 @@ global::global() : TABBER(1), gLoopDetector(1024, 400), gStackOverflowDetector(M
     gOutputLang          = "";
 
 #ifdef WASM_BUILD
-    gWASMVisitor = 0;  // Will be (possibly) allocated in WebAssembly backend
-    gWASTVisitor = 0;  // Will be (possibly) allocated in WebAssembly backend
+    gWASMVisitor = nullptr;  // Will be (possibly) allocated in WebAssembly backend
+    gWASTVisitor = nullptr;  // Will be (possibly) allocated in WebAssembly backend
 #endif
 
 #ifdef INTERP_BUILD
-    gInterpreterVisitor = 0;  // Will be (possibly) allocated in Interp backend
+    gInterpreterVisitor = nullptr;  // Will be (possibly) allocated in Interp backend
+#endif
+
+#ifdef JULIA_BUILD
+    gJuliaVisitor = nullptr;  // Will be (possibly) allocated in Julia backend
 #endif
 
 #ifdef SOUL_BUILD
-    gTableSizeVisitor = 0;  // Will be (possibly) allocated in SOUL backend
+    gTableSizeVisitor = nullptr;  // Will be (possibly) allocated in SOUL backend
 #endif
 
     gHelpSwitch       = false;
@@ -421,18 +452,20 @@ global::global() : TABBER(1), gLoopDetector(1024, 400), gStackOverflowDetector(M
     gGraphSwitch      = false;
     gDrawPSSwitch     = false;
     gDrawSVGSwitch    = false;
+    gVHDLSwitch       = false;
+    gVHDLTrace        = false;
+    gElementarySwitch = false;
     gPrintXMLSwitch   = false;
     gPrintJSONSwitch  = false;
     gPrintDocSwitch   = false;
-    gBalancedSwitch   = 0;
     gArchFile         = "";
     gExportDSP        = false;
 
     gTimeout = 120;  // Time out to abort compiler (in seconds)
 
     // Globals to transfer results in thread based evaluation
-    gProcessTree  = 0;
-    gLsignalsTree = 0;
+    gProcessTree  = nullptr;
+    gLsignalsTree = nullptr;
     gNumInputs    = 0;
     gNumOutputs   = 0;
     gErrorMessage = "";
@@ -451,8 +484,9 @@ void global::init()
     gSymListProp           = new property<Tree>();
 
     // Essential predefined types
-    gMemoizedTypes   = new property<AudioType*>();
-    gAllocationCount = 0;
+    gMemoizedTypes          = new property<AudioType*>();
+    gAllocationCount        = 0;
+    gMaskDelayLineThreshold = INT_MAX;
 
     // True by default but only usable with -lang ocpp backend
     gEnableFlag = true;
@@ -469,12 +503,17 @@ void global::init()
     TEXEC = makeSimpleType(kInt, kKonst, kExec, kVect, kNum, interval());
 
     // More predefined types
-    TINPUT   = makeSimpleType(kReal, kSamp, kExec, kVect, kNum, interval());
+    TINPUT   = makeSimpleType(kReal, kSamp, kExec, kVect, kNum, interval(-1, 1));
     TGUI     = makeSimpleType(kReal, kBlock, kExec, kVect, kNum, interval());
     TGUI01   = makeSimpleType(kReal, kBlock, kExec, kVect, kNum, interval(0, 1));
     INT_TGUI = makeSimpleType(kInt, kBlock, kExec, kVect, kNum, interval());
 
-    TREC = makeSimpleType(kInt, kSamp, kInit, kScal, kNum, interval());
+    TREC = makeSimpleType(kInt, kSamp, kInit, kScal, kNum, interval(0, 0));
+    // !!! TRECMAX Maximal only in the last component of the type lattice
+    TRECMAX = makeSimpleType(kInt, kSamp, kInit, kScal, kNum, interval(-HUGE_VAL,HUGE_VAL));
+
+    // empty Predefined bit depth
+    RES = res();
 
     // Predefined symbols CONS and NIL
     CONS = symbol("cons");
@@ -507,7 +546,7 @@ void global::init()
 
     // yyfilename is defined in errormsg.cpp but must be redefined at each compilation.
     yyfilename = "";
-    yyin       = 0;
+    yyin       = nullptr;
 
     gLatexheaderfilename = "latexheader.tex";
     gDocTextsDefaultFile = "mathdoctexts-default.txt";
@@ -561,10 +600,40 @@ void global::init()
     gMathForeignFunctions["tanhf"] = true;
     gMathForeignFunctions["tanh"]  = true;
     gMathForeignFunctions["tanhl"] = true;
+
+    gMathForeignFunctions["isnanf"] = true;
+    gMathForeignFunctions["isnan"]  = true;
+    gMathForeignFunctions["isnanl"] = true;
+
+    gMathForeignFunctions["isinff"] = true;
+    gMathForeignFunctions["isinf"]  = true;
+    gMathForeignFunctions["isinfl"] = true;
+    
+    gMathForeignFunctions["copysignf"] = true;
+    gMathForeignFunctions["copysign"]  = true;
+    gMathForeignFunctions["copysignl"] = true;
 }
 
-void global::printCompilationOptions(ostream& dst, bool backend)
+string global::printFloat()
 {
+    switch (gGlobal->gFloatSize) {
+        case 1:
+            return "-single ";
+        case 2:
+            return "-double ";
+        case 3:
+            return "-quad ";
+        case 4:
+            return "-fx ";
+        default:
+            faustassert(false);
+            return "";
+    }
+}
+
+void global::printCompilationOptions(stringstream& dst, bool backend)
+{
+    if (gArchFile != "") dst << "-a " << gArchFile << " ";
     if (backend) {
 #ifdef LLVM_BUILD
         if (gOutputLang == "llvm") {
@@ -576,36 +645,39 @@ void global::printCompilationOptions(ostream& dst, bool backend)
         dst << "-lang " << gOutputLang << " ";
 #endif
     }
+    if (gInlineArchSwitch) dst << "-i ";
     if (gInPlace) dst << "-inpl ";
-    if (gOneSample) dst << "-os ";
+    if (gOneSample >= 0) dst << "-os" << gOneSample << " ";
     if (gLightMode) dst << "-light ";
-    if (gSchedulerSwitch) {
-        dst << "-sch"
-            << " -vs " << gVecSize << ((gFunTaskSwitch) ? " -fun" : "") << ((gGroupTaskSwitch) ? " -g" : "")
-            << ((gDeepFirstSwitch) ? " -dfs" : "")
-            << ((gFloatSize == 2) ? " -double" : (gFloatSize == 3) ? " -quad" : "") << " -ftz " << gFTZMode << " -mcd "
-            << gGlobal->gMaxCopyDelay << ((gMemoryManager) ? " -mem" : "");
-    } else if (gVectorSwitch) {
-        dst << "-vec"
-            << " -lv " << gVectorLoopVariant << " -vs " << gVecSize << ((gFunTaskSwitch) ? " -fun" : "")
-            << ((gGroupTaskSwitch) ? " -g" : "") << ((gDeepFirstSwitch) ? " -dfs" : "")
-            << ((gFloatSize == 2) ? " -double" : (gFloatSize == 3) ? " -quad" : "") << " -ftz " << gFTZMode << " -mcd "
-            << gGlobal->gMaxCopyDelay << ((gMemoryManager) ? " -mem" : "");
-    } else if (gOpenMPSwitch) {
-        dst << "-omp"
-            << " -vs " << gVecSize << " -vs " << gVecSize << ((gFunTaskSwitch) ? " -fun" : "")
-            << ((gGroupTaskSwitch) ? " -g" : "") << ((gDeepFirstSwitch) ? " -dfs" : "")
-            << ((gFloatSize == 2) ? " -double" : (gFloatSize == 3) ? " -quad" : "") << " -ftz " << gFTZMode << " -mcd "
-            << gGlobal->gMaxCopyDelay << ((gMemoryManager) ? " -mem" : "");
-    } else {
-        dst << ((gFloatSize == 1) ? "-scal" : ((gFloatSize == 2) ? "-double" : (gFloatSize == 3) ? "-quad" : ""))
-            << " -ftz " << gFTZMode << ((gMemoryManager) ? " -mem" : "");
+    if (gMemoryManager) dst << "-mem ";
+    if (gComputeMix) dst << "-cm ";
+    if (gRangeUI) dst << "-rui ";
+    if (gMathApprox) dst << "-mapp ";
+    if (gClassName != "mydsp") dst << "-cn " << gClassName << " ";
+    if (gSuperClassName != "dsp") dst << "-scn " << gSuperClassName << " ";
+    if (gProcessName != "process") dst << "-pn " << gProcessName << " ";
+    if (gMaskDelayLineThreshold != INT_MAX) dst << "-dtl " << gMaskDelayLineThreshold << " ";
+    dst << "-es " << gEnableFlag << " ";
+    if (gHasExp10) dst << "-exp10 ";
+    if (gSchedulerSwitch) dst << "-sch ";
+    if (gOpenMPSwitch) dst << "-omp " << ((gOpenMPLoop) ? "-pl " : "");
+    dst << "-mcd " << gGlobal->gMaxCopyDelay << " ";
+    if (gGlobal->gUIMacroSwitch) dst << "-uim ";
+    dst << printFloat() << "-ftz " << gFTZMode << " ";
+    if (gVectorSwitch) {
+        dst << "-vec "
+            << "-lv " << gVectorLoopVariant << " "
+            << "-vs " << gVecSize << " " << ((gFunTaskSwitch) ? "-fun " : "") << ((gGroupTaskSwitch) ? "-g " : "")
+            << ((gDeepFirstSwitch) ? "-dfs " : "");
     }
+
+    // Add 'compile_options' metadata
+    gGlobal->gMetaDataSet[tree("compile_options")].insert(tree("\"" + dst.str() + "\""));
 }
 
 void global::initTypeSizeMap()
 {
-    // Init type size table
+    // Init type size table (in bytes)
     gTypeSizeMap[Typed::kFloat]         = gMachineFloatSize;
     gTypeSizeMap[Typed::kFloat_ptr]     = gMachinePtrSize;
     gTypeSizeMap[Typed::kFloat_ptr_ptr] = gMachinePtrSize;
@@ -617,6 +689,18 @@ void global::initTypeSizeMap()
     gTypeSizeMap[Typed::kDouble_ptr_ptr] = gMachinePtrSize;
     gTypeSizeMap[Typed::kDouble_vec]     = gMachineDoubleSize * gVecSize;
     gTypeSizeMap[Typed::kDouble_vec_ptr] = gMachinePtrSize;
+    
+    gTypeSizeMap[Typed::kQuad]         = gMachineQuadSize;
+    gTypeSizeMap[Typed::kQuad_ptr]     = gMachinePtrSize;
+    gTypeSizeMap[Typed::kQuad_ptr_ptr] = gMachinePtrSize;
+    gTypeSizeMap[Typed::kQuad_vec]     = gMachineQuadSize * gVecSize;
+    gTypeSizeMap[Typed::kQuad_vec_ptr] = gMachinePtrSize;
+    
+    gTypeSizeMap[Typed::kFixedPoint]         = gMachineFixedPointSize;
+    gTypeSizeMap[Typed::kFixedPoint_ptr]     = gMachinePtrSize;
+    gTypeSizeMap[Typed::kFixedPoint_ptr_ptr] = gMachinePtrSize;
+    gTypeSizeMap[Typed::kFixedPoint_vec]     = gMachineFixedPointSize * gVecSize;
+    gTypeSizeMap[Typed::kFixedPoint_vec_ptr] = gMachinePtrSize;
 
     gTypeSizeMap[Typed::kInt32]         = gMachineInt32Size;
     gTypeSizeMap[Typed::kInt32_ptr]     = gMachinePtrSize;
@@ -651,6 +735,47 @@ int global::audioSampleSize()
     return int(pow(2.f, float(gFloatSize + 1)));
 }
 
+bool global::hasForeignFunction(const string& name, const string& inc_file)
+{
+    // LLVM backend can use 'standard' foreign linked functions
+    static vector<std::string> inc_file_list = { "<math.h>", "<cmath>", "<stdlib.h>" };
+    bool is_linkable = (gOutputLang == "llvm") && (find(begin(inc_file_list), end(inc_file_list), inc_file) != inc_file_list.end());
+    
+    bool has_internal_math_ff = ((gOutputLang == "llvm")
+                                 || startWith(gOutputLang, "wast")
+                                 || startWith(gOutputLang, "wasm")
+                                 || (gOutputLang == "interp")
+                                 || startWith(gOutputLang, "soul")
+                                 || (gOutputLang == "dlang")
+                                 || (gOutputLang == "csharp")
+                                 || (gOutputLang == "rust")
+                                 || (gOutputLang == "julia"));
+    
+    return (has_internal_math_ff && (gMathForeignFunctions.find(name) != gMathForeignFunctions.end())) || is_linkable;
+}
+
+BasicTyped* global::genBasicTyped(Typed::VarType type)
+{
+    // Possibly force FAUSTFLOAT type (= kFloatMacro) to internal real
+    Typed::VarType new_type = ((type == Typed::kFloatMacro) && gFAUSTFLOAT2Internal) ? itfloat() : type;
+
+    // If not defined, add the type in the table
+    if (gTypeTable.find(new_type) == gTypeTable.end()) {
+        gTypeTable[new_type] = new BasicTyped(new_type);
+    }
+    return gTypeTable[new_type];
+}
+
+void global::setVarType(const string& name, Typed::VarType type)
+{
+    gVarTypeTable[name] = genBasicTyped(type);
+}
+
+Typed::VarType global::getVarType(const string& name)
+{
+    return gVarTypeTable[name]->getType();
+}
+
 global::~global()
 {
     Garbageable::cleanup();
@@ -666,11 +791,20 @@ global::~global()
 #ifdef CPP_BUILD
     CPPInstVisitor::cleanup();
 #endif
+#ifdef CSHARP_BUILD
+    CSharpInstVisitor::cleanup();
+#endif
+#ifdef DLANG_BUILD
+    DLangInstVisitor::cleanup();
+#endif
 #ifdef FIR_BUILD
     FIRInstVisitor::cleanup();
 #endif
 #ifdef JAVA_BUILD
     JAVAInstVisitor::cleanup();
+#endif
+#ifdef JULIS_BUILD
+    JuliaInstVisitor::cleanup();
 #endif
 #ifdef RUST_BUILD
     RustInstVisitor::cleanup();
@@ -688,11 +822,11 @@ void global::destroy()
 #ifdef EMCC
     if (faustexception::gJSExceptionMsg) {
         free((void*)faustexception::gJSExceptionMsg);
-        faustexception::gJSExceptionMsg = NULL;
+        faustexception::gJSExceptionMsg = nullptr;
     }
 #endif
     delete gGlobal;
-    gGlobal = NULL;
+    gGlobal = nullptr;
 }
 
 string global::makeDrawPath()
@@ -727,14 +861,6 @@ string global::getFreshID(const string& prefix)
     int n               = gIDCounters[prefix];
     gIDCounters[prefix] = n + 1;
     return subst("$0$1", prefix, T(n));
-}
-
-Garbageable::Garbageable()
-{
-}
-
-Garbageable::~Garbageable()
-{
 }
 
 void Garbageable::cleanup()

@@ -24,11 +24,13 @@
 
 #include <iostream>
 #include <fstream>
+#include <sstream>
 
 #include "faust/dsp/llvm-dsp.h"
 #include "faust/dsp/libfaust.h"
 #include "faust/audio/dummy-audio.h"
 #include "faust/gui/DecoratorUI.h"
+#include "faust/gui/PrintUI.h"
 #include "faust/misc.h"
 
 using namespace std;
@@ -40,14 +42,14 @@ static void printList(const vector<string>& list)
     }
 }
 
-struct testUI : public GenericUI {
+struct TestUI : public GenericUI {
     
     FAUSTFLOAT fInit;
     FAUSTFLOAT fMin;
     FAUSTFLOAT fMax;
     FAUSTFLOAT fStep;
     
-    testUI(FAUSTFLOAT init, FAUSTFLOAT min, FAUSTFLOAT max, FAUSTFLOAT step)
+    TestUI(FAUSTFLOAT init, FAUSTFLOAT min, FAUSTFLOAT max, FAUSTFLOAT step)
     {
         fInit = init;
         fMin = min;
@@ -74,7 +76,7 @@ struct testUI : public GenericUI {
 
 int main(int argc, const char** argv)
 {
-    if (isopt((char**)argv, "-h") || isopt((char**)argv, "-help")) {
+    if (isopt((char**)argv, "-h") || isopt((char**)argv, "-help") || argc < 2) {
         cout << "llvm-test foo.dsp" << endl;
         exit(EXIT_FAILURE);
     }
@@ -82,11 +84,9 @@ int main(int argc, const char** argv)
     string error_msg;
     cout << "Libfaust version : " << getCLibFaustVersion () << endl;
     string dspFile = argv[1];
-    string tempDir = "/private/var/tmp";
-    if (argc > 1) {
-        tempDir = argv[2];
-    }
-    
+   
+    cout << "=============================\n";
+    cout << "Test createDSPFactoryFromFile\n";
     {
         dsp_factory* factory = createDSPFactoryFromFile(dspFile, 0, NULL, "", error_msg, -1);
         
@@ -108,7 +108,11 @@ int main(int argc, const char** argv)
         cout << "getName " << factory->getName() << endl;
         cout << "getSHAKey " << factory->getSHAKey() << endl;
         
-        dummyaudio audio(2);
+        cout << "Print UI parameters" << endl;
+        PrintUI print_ui;
+        DSP->buildUserInterface(&print_ui);
+        
+        dummyaudio audio(1);
         if (!audio.init("FaustDSP", DSP)) {
             return 0;
         }
@@ -120,8 +124,10 @@ int main(int argc, const char** argv)
         deleteDSPFactory(static_cast<llvm_dsp_factory*>(factory));
     }
     
+    cout << "=============================\n";
+    cout << "Test createDSPFactoryFromString\n";
     {
-        dsp_factory* factory = createDSPFactoryFromString("score", "process = +;", 0, NULL, "", error_msg, -1);
+        dsp_factory* factory = createDSPFactoryFromString("FaustDSP", "process = +;", 0, NULL, "", error_msg, -1);
         if (!factory) {
             cerr << "Cannot create factory : " << error_msg;
             exit(EXIT_FAILURE);
@@ -140,7 +146,7 @@ int main(int argc, const char** argv)
         cout << "getName " << factory->getName() << endl;
         cout << "getSHAKey " << factory->getSHAKey() << endl;
         
-        dummyaudio audio(2);
+        dummyaudio audio(1);
         if (!audio.init("FaustDSP", DSP)) {
             return 0;
         }
@@ -155,7 +161,7 @@ int main(int argc, const char** argv)
     cout << "=============================\n";
     cout << "Test of UI element encoding\n";
     {
-        dsp_factory* factory = createDSPFactoryFromString("score", "process = vslider(\"Volume\", 0.5, 0, 1, 0.025);", 0, NULL, "", error_msg, -1);
+        dsp_factory* factory = createDSPFactoryFromString("FaustDSP", "process = vslider(\"Volume\", 0.5, 0, 1, 0.025);", 0, NULL, "", error_msg, -1);
         if (!factory) {
             cerr << "Cannot create factory : " << error_msg;
             exit(EXIT_FAILURE);
@@ -167,18 +173,22 @@ int main(int argc, const char** argv)
             exit(EXIT_FAILURE);
         }
 
-        testUI test(0.5, 0, 1, 0.025);
+        TestUI test(0.5, 0, 1, 0.025);
         DSP->buildUserInterface(&test);
+        
+        delete DSP;
+        deleteDSPFactory(static_cast<llvm_dsp_factory*>(factory));
     }
     
     // Test generateAuxFilesFromFile/generateAuxFilesFromString
+    string tempDir = "/private/var/tmp/";
     int argc2 = 0;
     const char* argv2[64];
     argv2[argc2++] = "-svg";
     argv2[argc2++] = "-O";
     argv2[argc2++] = tempDir.c_str();
-    argv2[argc2] = 0;  // NULL terminated argv
-    
+    argv2[argc2] = nullptr;  // NULL terminated argv
+   
     {
         cout << "=============================\n";
         cout << "Test generateAuxFilesFromFile\n";

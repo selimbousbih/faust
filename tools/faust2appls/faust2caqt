@@ -11,10 +11,12 @@ set -e
 
 . faustpath
 . faustoptflags
+. usage.sh
 
-CXXFLAGS=$MYGCCFLAGS
+CXXFLAGS+=" $MYGCCFLAGS"  # So that additional CXXFLAGS can be used
 
 ARCHFILE=$FAUSTARCH/ca-qt.cpp
+
 [ -d /opt/local/lib ] && OPTLIB=-L/opt/local/lib
 ARCHLIB="-L$FAUSTLDDIR -L/usr/local/lib $OPTLIB -framework CoreAudio -framework AudioUnit -framework CoreServices -framework CoreMIDI -framework CoreFoundation"
 DEBUG=false
@@ -29,9 +31,11 @@ POLY="POLY"
 DEPLOY="yes"
 EFFECT=""
 PRESETDIR="auto"
+PRESETDEFS=""
 NVOICES=-1
 SOUNDFILE="0"
 SOUNDFILEDEFS=""
+SOUNDFILEINC=""
 SOUNDFILELIBS=""
 SAMPLERATEDEFS=""
 SAMPLERATELIBS=""
@@ -42,23 +46,24 @@ do
     p=$1
 
     if [ $p = "-help" ] || [ $p = "-h" ]; then
-        echo "faust2caqt [-opt native|generic] [-httpd] [-qrcode] [-soundfile] [-resample] [-nvoices <num>] [-effect auto|<effect.dsp>] [-midi] [-osc] [-preset auto|<directory>] [-me] [-debug] [-nodeploy] [additional Faust options (-vec -vs 8...)] <file.dsp>"
-        echo "Use '-opt native' to activate the best compilation options for the native CPU"
-        echo "Use '-opt generic' to activate the best compilation options for a generic CPU"
-        echo "Use '-httpd' to activate HTTP control"
-        echo "Use '-qrcode' to activate QR code generation"
-        echo "Use '-nvoices <num>' to produce a polyphonic self-contained DSP with <num> voices, ready to be used with MIDI or OSC"
-        echo "Use '-soundfile' when compiling DSP using 'soundfile' primitive, to add needed resources"
-        echo "Use '-resample' to resample soundfiles to the audio driver sample rate"
-        echo "Use '-effect <effect.dsp>' to produce a polyphonic DSP connected to a global output effect, ready to be used with MIDI or OSC"
-        echo "Use '-effect auto' to produce a polyphonic DSP connected to a global output effect defined as 'effect' in <file.dsp>, ready to be used with MIDI or OSC"
-        echo "Use '-midi' to activate MIDI control"
-        echo "Use '-osc' to activate OSC control"
-        echo "Use '-preset <directory>' to add a preset manager on top of GUI and save the preset files in a given directory"
-        echo "Use '-preset auto' to add a preset manager on top of GUI and save the preset files in a system temporary directory"
-        echo "Use '-me' to catch math computation exception (Floating point exception and integer div-by-zero of overflow)"
-        echo "Use '-debug' to print all the build steps"
-        echo "Use '-nodeploy' to not create a self-contained application using 'macdeployqt'"
+        usage faust2caqt "[options] [Faust options] <file.dsp>"
+	platform MacOS
+	require Qt
+	echo "Compiles Faust programs to CoreAudio and QT"
+	option
+        options -httpd -osc -midi -qrcode -soundfile
+        option "-opt native' to activate the best compilation options for the native CPU"
+        option "-opt generic' to activate the best compilation options for a generic CPU"
+        option "-nvoices <num>"
+        option -resample "to resample soundfiles to the audio driver sample rate"
+        option "-effect <effect.dsp>"
+        option "-effect auto"
+        option "-preset <directory>" "add a preset manager on top of GUI and save the preset files in the given directory"
+        option "-preset auto" "add a preset manager on top of GUI and save the preset files in a system temporary directory"
+        option -me "to catch math computation exceptions (floating point exceptions and integer div-by-zero or overflow)"
+        option -debug "to print all the build steps"
+        option -nodeploy
+        option "Faust options"
         exit
     fi
 
@@ -68,11 +73,11 @@ do
         shift
         OPT=$1
     elif [ $p = "-nodeploy" ]; then
-    	DEPLOY="no"
+        DEPLOY="no"
     elif [ "$p" = "-icc" ]; then
         ignore=" "
     elif [ "$p" = "-me" ]; then
-    	MATHDEFS="DEFINES += HAS_MATH_EXCEPTION"
+        MATHDEFS="DEFINES += HAS_MATH_EXCEPTION"
     elif [ $p = "-nvoices" ]; then
         POLYDEFS="DEFINES += POLY"
         shift
@@ -90,13 +95,14 @@ do
     elif [ $p = "-soundfile" ]; then
         SOUNDFILE="1"
         SOUNDFILEDEFS="DEFINES += SOUNDFILE"
-        SOUNDFILELIBS=`pkg-config --cflags --static --libs sndfile`
+        SOUNDFILEINC=$(pkg-config --cflags sndfile | cut -c 3-)
+        SOUNDFILELIBS=`pkg-config --static --libs sndfile`
     elif [ $p = "-resample" ]; then
         SAMPLERATEDEFS="DEFINES += SAMPLERATE"
         SAMPLERATELIBS=`pkg-config --cflags --static --libs samplerate`
     elif [ $p = "-osc" ]; then
-         OSCDEFS="DEFINES += OSCCTRL"
-         OSCLIBS="-lOSCFaust"
+        OSCDEFS="DEFINES += OSCCTRL"
+        OSCLIBS="-lOSCFaust"
     elif [ "$p" = "-httpd" ]; then
         HTTPDEFS="DEFINES += HTTPCTRL"
         HTTPLIBS="-lHTTPDFaust -lmicrohttpd"
@@ -108,11 +114,11 @@ do
         QRDEFS="DEFINES += QRCODECTRL"
     elif [ ${p:0:1} = "-" ]; then
         OPTIONS="$OPTIONS $p"
-    elif [[ -f "$p" ]]; then
+    elif [[ -f "$p" ]] && [ ${p: -4} == ".dsp" ]; then
         FILES="$FILES $p"
     else
-        OPTIONS="$OPTIONS $p"        
-	fi
+        OPTIONS="$OPTIONS $p"
+    fi
 
 shift
 
@@ -144,20 +150,21 @@ for p in $FILES; do
 
     CUR=$(pwd)
     f=$(basename "$p")
-	SRCDIR=$(dirname "$p")
+    SRCDIR=$(dirname "$p")
 
     # creates a temporary dir 
     TDR=$(mktemp -d faust.XXXXXX)
-	TMP="$TDR/${f%.dsp}"
+    TMP="$TDR/${f%.dsp}"
     mkdir "$TMP"
 
     # discover best compilation options
     if [ "$OPT" = "generic" ]; then
-        echo "Look for best compilation options in generic mode..."
-        OPTIONS="$(faustbench-llvm -notrace -generic $f)"
+        echo "Look for best compilation options in 'generic' mode..."
+        OPTIONS="$OPTIONS $(faustbench-llvm -notrace -generic $OPTIONS $f)"
+        echo $OPTIONS
     elif [ "$OPT" = "native" ]; then
-        echo "Look for best compilation options in native mode..."
-        OPTIONS="$(faustbench-llvm -notrace $f)"
+        echo "Look for best compilation options in 'native' mode..."
+        OPTIONS="$OPTIONS $(faustbench-llvm -notrace $OPTIONS $f)"
         echo $OPTIONS
     fi
 
@@ -182,7 +189,7 @@ EndOfCode
     else
         faust -i -json -a $ARCHFILE $OPTIONS "$SRCDIR/$f" -o "$TMP/${f%.dsp}_tmp.cpp" || exit
     fi
-
+    
     # add preset management
     if [ $PRESETDIR = "auto" ]; then
         echo "#define PRESETDIR \"/var/tmp/\"" > "$TMP/preset.cpp"
@@ -191,14 +198,13 @@ EndOfCode
     fi
 
     cat "$TMP/preset.cpp" "$TMP/${f%.dsp}_tmp.cpp" > "$TMP/${f%.dsp}.cpp"
-    rm "$TMP/preset.cpp"
-    rm "$TMP/${f%.dsp}_tmp.cpp"
+    rm "$TMP/preset.cpp" "$TMP/${f%.dsp}_tmp.cpp"
 
     # compile c++ to binary
     (
-	    cd "$TMP"
-	    qmake -project "QT += widgets printsupport network" "CONFIG+=warn_off" "$CLANGOPT" "INCLUDEPATH+=$CUR" "INCLUDEPATH+=$FAUSTINC /opt/local/include" "QMAKE_CXXFLAGS= $CXXFLAGS -Wno-unused-parameter $FAUSTTOOLSFLAGS" "QMAKE_INFO_PLIST=$FAUSTARCH/Info.plist" "LIBS+=$ARCHLIB $SOUNDFILELIBS $SAMPLERATELIBS $OSCLIBS $HTTPLIBS" "HEADERS+=$FAUSTINC/faust/gui/QTUI.h" "RESOURCES+= $FAUSTINC/faust/gui/Styles/Grey.qrc" "$OSCDEFS" "$HTTPDEFS" "$QRDEFS" "$POLYDEFS" "$MIDIDEFS" "$SOUNDFILEDEFS" "$MATHDEFS" "$SAMPLERATEDEFS" "$PRESETDEFS"
-	    qmake $SPEC
+        cd "$TMP"
+        qmake -project "QT += widgets printsupport network" "CONFIG+=warn_off" "$CLANGOPT" "INCLUDEPATH+=$FAUSTINC" "INCLUDEPATH+=$SOUNDFILEINC" "QMAKE_CXXFLAGS= $CXXFLAGS -Wno-unused-parameter $FAUSTTOOLSFLAGS" "QMAKE_INFO_PLIST=$FAUSTARCH/Info.plist" "LIBS+=$ARCHLIB $SOUNDFILELIBS $SAMPLERATELIBS $OSCLIBS $HTTPLIBS" "HEADERS+=$FAUSTINC/faust/gui/QTUI.h" "RESOURCES+= $FAUSTINC/faust/gui/Styles/Grey.qrc" "$OSCDEFS" "$HTTPDEFS" "$QRDEFS" "$POLYDEFS" "$MIDIDEFS" "$SOUNDFILEDEFS" "$MATHDEFS" "$SAMPLERATEDEFS" "$PRESETDEFS"
+        qmake $SPEC
         make
     ) > /dev/null || exit
 
@@ -249,20 +255,19 @@ EndOfCode
     rm -rf "$SRCDIR/${f%.dsp}$EXT"
     rm $p.json
 
-    cp -r "$TMP/${f%.dsp}$EXT" "$SRCDIR/${f%.dsp}$EXT"
+    cp -a "$TMP/${f%.dsp}$EXT" "$SRCDIR/${f%.dsp}$EXT"
+    codesign --sign - --deep --force "$SRCDIR/${f%.dsp}$EXT"
     RMTMP=true
     if $DEBUG;
     then
-	    echo "====> delete temporary folder $TDR ? [Y/n]"
-	    read DEL
-	    [ $DEL == "n" ] && RMTMP=false
-	fi	
-	[ $RMTMP == true ] && rm -rf "$TDR"
+        echo "====> delete temporary folder $TDR ? [Y/n]"
+        read DEL
+        [ $DEL == "n" ] && RMTMP=false
+    fi	
+    [ $RMTMP == true ] && rm -rf "$TDR"
 
     # collect binary file name for FaustGIDE
     BINARIES="$BINARIES$SRCDIR/${f%.dsp}$EXT;"
 done
 
 echo $BINARIES
-
-

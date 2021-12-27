@@ -1,9 +1,9 @@
-% man(1) Version 2.19.0 (04-October-2019) | Faust man page
+% man(1) Version 2.38.15 (22-December-2021) | Faust man page
 
 NAME
 ====
 
-Faust  -  DSP  to  C/C++,  Rust,  LLVM  IR,  JAVA, WebAssembly (wast/wasm), Interpreter compiler
+Faust - DSP to C/C++, CSharp, DLang, Interpreter, Java, LLVM IR, Rust, SOUL, and WebAssembly (wast/wasm)
 
 SYNOPSIS
 ========
@@ -27,7 +27,7 @@ Input options:
 
   **-A** \<dir>  **--architecture-dir** \<dir>      add the directory \<dir> to the architecture search path.
 
-  **-I** \<dir>  **--import-dir** \<dir>            add the directory \<dir> to the import search path.
+  **-I** \<dir>  **--import-dir** \<dir>            add the directory \<dir> to the libraries search path.
 
   **-L** \<file> **--library** \<file>              link with the LLVM module \<file>.
 
@@ -54,13 +54,15 @@ Code generation options:
 ---------------------------------------
 
   **-lang** \<lang> **--language**                 select output language,
-                                          'lang' should be in c, ocpp, cpp (default), rust, java, llvm, cllvm, fir, wast/wasm, soul, interp.
+                                          'lang' should be c, cpp (default), csharp, dlang, fir, interp, java, julia, llvm, ocpp, rust, soul or wast/wasm.
 
   **-single**     **--single-precision-floats**   use single precision floats for internal computations (default).
 
   **-double**     **--double-precision-floats**   use double precision floats for internal computations.
 
   **-quad**       **--quad-precision-floats**     use quad precision floats for internal computations.
+
+  **-fx**         **--fixed-point**               use fixed-point for internal computations.
 
   **-es** 1|0     **--enable-semantics** 1|0      use enable semantics when 1 (default), and simple multiplication otherwise.
 
@@ -70,11 +72,17 @@ Code generation options:
 
   **-clang**      **--clang**                     when compiled with clang/clang++, adds specific #pragma for auto-vectorization.
 
-  **-flist**      **--file-list**                 use file list used to eval process.
+  **-exp10**      **--generate-exp10**            pow(10,x) replaced by possibly faster exp10(x).
 
-  **-exp10**      **--generate-exp10**            function call instead of pow(10) function.
+  **-os**         **--one-sample**                generate one sample computation (same as -os0).
 
-  **-os**         **--one-sample**                generate one sample computation.
+  **-os0**        **--one-sample0**               generate one sample computation (0 = separated control).
+
+  **-os1**        **--one-sample1**               generate one sample computation (1 = separated control and DSP struct).
+
+  **-os2**        **--one-sample2**               generate one sample computation (2 = separated control and DSP struct. Separation in short and long delay lines).
+
+  **-cm**         **--compute-mix**               mix in outputs buffers.
 
   **-cn** \<name>  **--class-name** \<name>         specify the name of the dsp class to be used instead of mydsp.
 
@@ -82,21 +90,17 @@ Code generation options:
 
   **-pn** \<name>  **--process-name** \<name>       specify the name of the dsp entry-point instead of process.
 
-  **-lb**         **--left-balanced**             generate left balanced expressions.
-
-  **-mb**         **--mid-balanced**              generate mid balanced expressions (default).
-
-  **-rb**         **--right-balanced**            generate right balanced expressions.
-
-  **-lt**         **--less-temporaries**          generate less temporaries in compiling delays.
-
   **-mcd** \<n>    **--max-copy-delay** \<n>        threshold between copy and ring buffer implementation (default 16 samples).
+
+  **-dlt** \<n>    **--delay-line-threshold** \<n>  threshold between 'mask' and 'select' ring buffer implementation (default INT_MAX samples).
 
   **-mem**        **--memory**                    allocate static in global state using a custom memory manager.
 
   **-ftz** \<n>    **--flush-to-zero** \<n>         code added to recursive signals [0:no (default), 1:fabs based, 2:mask based (fastest)].
 
-  **-inj** \<f>    **--inject** \<f>                inject source file \<f> into architecture file instead of compile a dsp file.
+  **-rui**        **--range-ui**                  whether to generate code to limit vslider/hslider/nentry values in [min..max] range.
+
+  **-inj** \<f>    **--inject** \<f>                inject source file \<f> into architecture file instead of compiling a dsp file.
 
   **-scal**      **--scalar**                     generate non-vectorized code.
 
@@ -124,8 +128,17 @@ Code generation options:
 
   **-fun**       **--fun-tasks**                  separate tasks code as separated functions (in -vec, -sch, or -omp mode).
 
-  **-fm** \<file> **--fast-math** \<file>           use optimized versions of mathematical functions implemented in \<file>,
-                                          use 'faust/dsp/fastmath.cpp' when file is 'def'.
+  **-fm** \<file> **--fast-math** \<file>           use optimized versions of mathematical functions implemented in \<file>, use 'faust/dsp/fastmath.cpp' when file is 'def'.
+
+  **-mapp**      **--math-approximation**         simpler/faster versions of 'floor/ceil/fmod/remainder' functions.
+
+  **-ns** \<name> **--namespace** \<name>           generate C++ or D code in a namespace \<name>.
+
+  **-vhdl**      **--vhdl**                       output vhdl file.
+
+  **-wi** \<n>    **--widening-iterations** \<n>    number of iterations before widening in signal bounding.
+
+  **-ni** \<n>    **--narrowing-iterations** \<n>   number of iterations before stopping narrowing in signal bounding.
 
 
 Block diagram options:
@@ -141,7 +154,8 @@ Block diagram options:
 
   **-f** \<n>     **--fold** \<n>                   threshold to activate folding mode during block-diagram generation (default 25 elements).
 
-  **-fc** \<n>    **--fold-complexity** \<n>       complexity threshold to fold an expression in folding mode (default 2)
+  **-fc** \<n>    **--fold-complexity** \<n>        complexity threshold to fold an expression in folding mode (default 2).
+
   **-mns** \<n>   **--max-name-size** \<n>          threshold during block-diagram generation (default 40 char).
 
   **-sn**        **--simple-names**               use simple names (without arguments) during block-diagram generation.
@@ -166,13 +180,19 @@ Debug options:
 
   **-time**       **--compilation-time**          display compilation phases timing information.
 
+  **-flist**      **--file-list**                 print file list (including libraries) used to eval process.
+
   **-tg**         **--task-graph**                print the internal task graph in dot format.
 
   **-sg**         **--signal-graph**              print the internal signal graph in dot format.
 
   **-norm**       **--normalized-form**           print signals in normalized form and exit.
 
-  **-ct**         **--check-table**               check table index range.
+  **-ct**         **--check-table**               check table index range and exit at first failure.
+
+  **-cat**        **--check-all-table**           check all table index range.
+
+  **-me**         **--math-exceptions**           check / for 0 as denominator and remainder, fmod, sqrt, log10, log, acos, asin functions domain.
 
 
 Information options:
@@ -211,6 +231,6 @@ Please report bugs to: **<https://github.com/grame-cncm/faust/issues>**
 AUTHOR
 ======
 
-Copyright (C) 2002-2019, GRAME - Centre National de Creation Musicale.
+Copyright (C) 2002-2021, GRAME - Centre National de Creation Musicale.
 All rights reserved.
 

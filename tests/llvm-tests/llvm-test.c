@@ -22,23 +22,63 @@
  
  ************************************************************************/
 
-#include <faust/dsp/llvm-c-dsp.h>
-#include <iostream>
-#include <cassert>
+#include <stdio.h>
+#include <string.h>
 
-using namespace std;
+#include "faust/dsp/llvm-dsp-c.h"
+#include "faust/gui/PrintCUI.h"
+
+static bool isopt(char* argv[], const char* name)
+{
+    for (int i = 0; argv[i]; i++) if (!strcmp(argv[i], name)) return true;
+    return false;
+}
 
 int main(int argc, const char** argv)
 {
+    if (isopt((char**)argv, "-h") || isopt((char**)argv, "-help")) {
+        printf("llvm-test-c\n");
+        exit(EXIT_FAILURE);
+    }
+    
     int argc1 = 0;
     const char* argv1[2];
     argv1[argc1++] = "-vec";
     argv1[argc1] = 0;
     
-    char err[4096] = {};
-    auto fac = createCDSPFactoryFromString("score",
-                                           "process = +;",
-                                           argc1, argv1, "", err, -1);
-    cout << err << endl;
-    assert(fac);
+    char error_msg[4096];
+    const char* code =
+        "import(\"stdfaust.lib\");\n"
+        "\n"
+        "f0 = hslider(\"[foo:bar]f0\", 110, 110, 880, 1);\n"
+        "\n"
+        "n = 2;\n"
+        "\n"
+        "inst = par(i, n, os.oscs(f0 * (n+i) / n)) :> /(n);\n"
+        "\n"
+        "process = inst, inst;\n";
+    
+    llvm_dsp_factory* factory = createCDSPFactoryFromString("score", code, argc1, argv1, "", error_msg, -1);
+    if (!factory) {
+        printf("Cannot create factory : %s\n", error_msg);
+        exit(EXIT_FAILURE);
+    } else {
+        llvm_dsp* dsp = createCDSPInstance(factory);
+        if (!dsp) {
+            printf("Cannot create DSP\n");
+            exit(EXIT_FAILURE);
+        } else {
+            printf("getNumInputs : %d\n", getNumInputsCDSPInstance(dsp));
+            printf("getNumOutputs : %d\n", getNumOutputsCDSPInstance(dsp));
+            
+            // Defined in PrintCUI.h
+            metadataCDSPInstance(dsp, &mglue);
+            
+            buildUserInterfaceCDSPInstance(dsp, &uglue);
+            
+            // Cleanup
+            deleteCDSPInstance(dsp);
+            deleteCDSPFactory(factory);
+        }
+    }
 }

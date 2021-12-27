@@ -80,10 +80,22 @@ struct Max_Meta2 : Meta
 struct Max_Meta3 : Meta
 {
     string fName;
+    
+    bool endWith(const string& str, const string& suffix)
+    {
+        size_t i = str.rfind(suffix);
+        return (i != string::npos) && (i == (str.length() - suffix.length()));
+    }
+    
     void declare(const char* key, const char* value)
     {
         if ((strcmp("filename", key) == 0)) {
-            fName = "com.grame." + string(value) + "~";
+            string val = value;
+            if (endWith(value, ".dsp")) {
+                fName = "com.grame." + val.substr(0, val.size() - 4) + "~";
+            } else {
+                fName = "com.grame." + val + "~";
+            }
         }
     }
 };
@@ -102,8 +114,13 @@ class mspUIObject {
         mspUIObject(const string& label, FAUSTFLOAT* zone):fLabel(label),fZone(zone) {}
         virtual ~mspUIObject() {}
         
-        virtual void setValue(FAUSTFLOAT f) { *fZone = range(0.0,1.0,f); }
+        virtual void setValue(FAUSTFLOAT f) { *fZone = range(0.0, 1.0, f); }
         virtual FAUSTFLOAT getValue() { return *fZone; }
+    
+        virtual FAUSTFLOAT getInitValue() { return FAUSTFLOAT(0); }
+        virtual FAUSTFLOAT getMinValue() { return FAUSTFLOAT(0); }
+        virtual FAUSTFLOAT getMaxValue() { return FAUSTFLOAT(0); }
+    
         virtual void toString(char* buffer) {}
         virtual string getName() { return fLabel; }
 };
@@ -157,7 +174,12 @@ class mspSlider : public mspUIObject {
             snprintf(buffer, STR_SIZE, "%s", res.c_str());
         }
         
-        void setValue(FAUSTFLOAT f) { *fZone = range(fMin,fMax,f); }
+        void setValue(FAUSTFLOAT f) { *fZone = range(fMin, fMax, f); }
+    
+        virtual FAUSTFLOAT getInitValue() { return fInit; }
+        virtual FAUSTFLOAT getMinValue() { return fMin; }
+        virtual FAUSTFLOAT getMaxValue() { return fMax; }
+    
 };
 
 class mspBargraph : public mspUIObject {
@@ -171,7 +193,7 @@ class mspBargraph : public mspUIObject {
     public:
         
         mspBargraph(const string& label, FAUSTFLOAT* zone, FAUSTFLOAT min, FAUSTFLOAT max)
-        :mspUIObject(label,zone),fMin(min),fMax(max),fCurrent(*zone) {}
+        :mspUIObject(label,zone), fMin(min), fMax(max), fCurrent(*zone) {}
         virtual ~mspBargraph() {}
         
         void toString(char* buffer)
@@ -181,25 +203,32 @@ class mspBargraph : public mspUIObject {
             string res = str.str();
             snprintf(buffer, STR_SIZE, "%s", res.c_str());
         }
-        
-        virtual FAUSTFLOAT getValue()
+    
+        // special version
+        virtual FAUSTFLOAT getValue(bool& new_val)
         {
             if (*fZone != fCurrent) {
                 fCurrent = *fZone;
-                return fCurrent;
+                new_val = true;
             } else {
-                return NAN;
+                new_val = false;
             }
+            return fCurrent;
         }
+    
+        virtual FAUSTFLOAT getMinValue() { return fMin; }
+        virtual FAUSTFLOAT getMaxValue() { return fMax; }
+    
 };
 
 class mspUI : public UI, public PathBuilder
 {
     private:
         
-        map<string, mspUIObject*> fUITable1;       // Table using labels
-        map<string, mspUIObject*> fUITable2;       // Table using complete path
-        map<string, mspUIObject*> fUITable3;       // Table containing bargraph
+        map<string, mspUIObject*> fInputLabelTable;      // Input table using labels
+        map<string, mspUIObject*> fInputPathTable;       // Input table using paths
+        map<string, mspUIObject*> fOutputLabelTable;     // Table containing bargraph with labels
+        map<string, mspUIObject*> fOutputPathTable;      // Table containing bargraph with paths
         
         map<const char*, const char*> fDeclareTable;
         
@@ -225,7 +254,23 @@ class mspUI : public UI, public PathBuilder
                 return string(label);
             }
         }
-        
+    
+        void addSlider(const char* label, FAUSTFLOAT* zone, FAUSTFLOAT init, FAUSTFLOAT min, FAUSTFLOAT max, FAUSTFLOAT step)
+        {
+            mspUIObject* obj = new mspSlider(createLabel(label), zone, init, min, max, step);
+            fInputLabelTable[string(label)] = obj;
+            fInputPathTable[buildPath(label)] = obj;
+            fDeclareTable.clear();
+        }
+    
+        void addBargraph(const char* label, FAUSTFLOAT* zone, FAUSTFLOAT min, FAUSTFLOAT max)
+        {
+            mspUIObject* obj = new mspBargraph(createLabel(label), zone, min, max);
+            fOutputLabelTable[string(label)] = obj;
+            fOutputPathTable[buildPath(label)] = obj;
+            fDeclareTable.clear();
+        }
+    
     public:
         
         typedef map<string, mspUIObject*>::iterator iterator;
@@ -237,6 +282,7 @@ class mspUI : public UI, public PathBuilder
             }
             fMultiIndex = fMultiControl = 0;
         }
+    
         virtual ~mspUI()
         {
             clear();
@@ -245,22 +291,15 @@ class mspUI : public UI, public PathBuilder
         void addButton(const char* label, FAUSTFLOAT* zone)
         {
             mspUIObject* obj = new mspButton(createLabel(label), zone);
-            fUITable1[string(label)] = obj;
-            fUITable2[buildPath(label)] = obj;
+            fInputLabelTable[string(label)] = obj;
+            fInputPathTable[buildPath(label)] = obj;
         }
         
         void addCheckButton(const char* label, FAUSTFLOAT* zone)
         {
             mspUIObject* obj = new mspCheckButton(createLabel(label), zone);
-            fUITable1[string(label)] = obj;
-            fUITable2[buildPath(label)] = obj;
-        }
-        
-        void addSlider(const char* label, FAUSTFLOAT* zone, FAUSTFLOAT init, FAUSTFLOAT min, FAUSTFLOAT max, FAUSTFLOAT step)
-        {
-            mspUIObject* obj = new mspSlider(createLabel(label), zone, init, min, max, step);
-            fUITable1[string(label)] = obj;
-            fUITable2[buildPath(label)] = obj;
+            fInputLabelTable[string(label)] = obj;
+            fInputPathTable[buildPath(label)] = obj;
         }
         
         void addVerticalSlider(const char* label, FAUSTFLOAT* zone, FAUSTFLOAT init, FAUSTFLOAT min, FAUSTFLOAT max, FAUSTFLOAT step)
@@ -275,20 +314,17 @@ class mspUI : public UI, public PathBuilder
         
         void addNumEntry(const char* label, FAUSTFLOAT* zone, FAUSTFLOAT init, FAUSTFLOAT min, FAUSTFLOAT max, FAUSTFLOAT step)
         {
-            mspUIObject* obj = new mspSlider(createLabel(label), zone, init, min, max, step);
-            fUITable1[string(label)] = obj;
-            fUITable2[buildPath(label)] = obj;
+            addSlider(label, zone, init, min, max, step);
         }
-        
+    
         void addHorizontalBargraph(const char* label, FAUSTFLOAT* zone, FAUSTFLOAT min, FAUSTFLOAT max)
         {
-            fUITable3[buildPath(label)] = new mspBargraph(createLabel(label), zone, min, max);
-            fDeclareTable.clear();
+            addBargraph(label, zone, min, max);
         }
+    
         void addVerticalBargraph(const char* label, FAUSTFLOAT* zone, FAUSTFLOAT min, FAUSTFLOAT max)
         {
-            fUITable3[buildPath(label)] = new mspBargraph(createLabel(label), zone, min, max);
-            fDeclareTable.clear();
+            addBargraph(label, zone, min, max);
         }
         
         void addSoundfile(const char* label, const char* filename, Soundfile** sf_zone) {}
@@ -296,11 +332,11 @@ class mspUI : public UI, public PathBuilder
         void openTabBox(const char* label) { pushLabel(label); fDeclareTable.clear(); }
         void openHorizontalBox(const char* label) { pushLabel(label); fDeclareTable.clear(); }
         void openVerticalBox(const char* label) { pushLabel(label); fDeclareTable.clear(); }
-        void closeBox() {popLabel(); fDeclareTable.clear();}
+        void closeBox() { popLabel(); fDeclareTable.clear(); }
         
         virtual void declare(FAUSTFLOAT* zone, const char* key, const char* val)
         {
-            if (strcmp(key,"multi") == 0) {
+            if (strcmp(key, "multi") == 0) {
                 int index = atoi(val);
                 if (index >= 0 && index < MULTI_SIZE) {
                     fMultiTable[index] = zone;
@@ -326,79 +362,211 @@ class mspUI : public UI, public PathBuilder
         
         bool isMulti() { return fMultiControl > 0; }
         
-        bool isValue(string name)
+        bool isValue(const string& name)
         {
-            return (fUITable1.count(name) || fUITable2.count(name));
+            return (fInputLabelTable.count(name) || fInputPathTable.count(name));
         }
-        bool isOutputValue(string name)
+    
+        bool isOutputValue(const string& name)
         {
-            return fUITable3.count(name);
+            return fOutputPathTable.count(name);
         }
-        bool isInputValue(string name)
+    
+        bool isInputValue(const string& name)
         {
-            return fUITable2.count(name);
+            return fInputPathTable.count(name);
         }
-        bool setValue(string name, FAUSTFLOAT f)
+    
+        bool setValue(const string& name, FAUSTFLOAT val)
         {
-            if (fUITable1.count(name)) {
-                fUITable1[name]->setValue(f);
+            if (fInputLabelTable.count(name)) {
+                fInputLabelTable[name]->setValue(val);
                 return true;
-            } else if (fUITable2.count(name)) {
-                fUITable2[name]->setValue(f);
+            } else if (fInputPathTable.count(name)) {
+                fInputPathTable[name]->setValue(val);
                 return true;
             } else {
                 return false;
             }
         }
-        FAUSTFLOAT getOutputValue(string name) { return fUITable3[name]->getValue(); }
+    
+        FAUSTFLOAT getOutputValue(const string& name, bool& new_val)
+        {
+            return static_cast<mspBargraph*>(fOutputPathTable[name])->getValue(new_val);
+        }
         
-        iterator begin1()	{ return fUITable1.begin(); }
-        iterator end1()		{ return fUITable1.end(); }
+        iterator begin1() { return fInputLabelTable.begin(); }
+        iterator end1() { return fInputLabelTable.end(); }
         
-        iterator begin2()	{ return fUITable2.begin(); }
-        iterator end2()		{ return fUITable2.end(); }
-        
-        int itemsCount() { return fUITable1.size(); }
+        iterator begin2() { return fInputPathTable.begin(); }
+        iterator end2() { return fInputPathTable.end(); }
+    
+        iterator begin3() { return fOutputLabelTable.begin(); }
+        iterator end3() { return fOutputLabelTable.end(); }
+    
+        iterator begin4() { return fOutputPathTable.begin(); }
+        iterator end4() { return fOutputPathTable.end(); }
+    
+        int inputItemsCount() { return fInputLabelTable.size(); }
+        int outputItemsCount() { return fOutputLabelTable.size(); }
+    
         void clear()
         {
-            for (auto& it : fUITable1) {
+            for (const auto& it : fInputLabelTable) {
                 delete it.second;
             }
+            fInputLabelTable.clear();
+            fInputPathTable.clear();
             
-            fUITable1.clear();
-            fUITable2.clear();
+            for (const auto& it : fOutputLabelTable) {
+                delete it.second;
+            }
+            fOutputLabelTable.clear();
+            fOutputPathTable.clear();
         }
         
         void displayControls()
         {
-            post((char*)"------- Range and path ----------");
-            for (auto& it : fUITable2) {
+            post("------- Range and path ----------");
+            for (const auto& it : fInputPathTable) {
                 char param[STR_SIZE];
                 it.second->toString(param);
                 post(param);
                 string path = "Complete path: " + it.first;
                 post(path.c_str());
             }
-            post((char*)"---------------------------------");
+            post("---------------------------------");
         }
+    
+        static bool checkDigit(const string& name)
+        {
+            for (int i = name.size() - 1; i >= 0; i--) {
+                if (isdigit(name[i])) { return true; }
+            }
+            return false;
+        }
+        
+        static int countDigit(const string& name)
+        {
+            int count = 0;
+            for (int i = name.size() - 1; i >= 0; i--) {
+                if (isdigit(name[i])) { count++; }
+            }
+            return count;
+        }
+
 };
 
-static bool check_digit(const string& name)
-{
-    for (int i = name.size() - 1; i >= 0; i--) {
-        if (isdigit(name[i])) { return true; }
-    }
-    return false;
-}
+//==============
+// MIDI handler
+//==============
 
-static int count_digit(const string& name)
-{
-    int count = 0;
-    for (int i = name.size() - 1; i >= 0; i--) {
-        if (isdigit(name[i])) { count++; }
+struct max_midi : public midi_handler {
+    
+    void* m_midi_outlet = NULL;
+    
+    max_midi(void* midi_outlet = NULL):m_midi_outlet(midi_outlet)
+    {}
+    
+    void sendMessage(std::vector<unsigned char>& message)
+    {
+        assert(m_midi_outlet);
+        for (int i = 0; i < message.size(); i++) {
+            outlet_int(m_midi_outlet, message[i]);
+        }
     }
-    return count;
-}
+    
+    // MIDI output API
+    MapUI* keyOn(int channel, int pitch, int velocity)
+    {
+        std::vector<unsigned char> message;
+        message.push_back(MIDI_NOTE_ON + channel);
+        message.push_back(pitch);
+        message.push_back(velocity);
+        sendMessage(message);
+        return NULL;
+    }
+    
+    void keyOff(int channel, int pitch, int velocity)
+    {
+        std::vector<unsigned char> message;
+        message.push_back(MIDI_NOTE_OFF + channel);
+        message.push_back(pitch);
+        message.push_back(velocity);
+        sendMessage(message);
+    }
+    
+    void ctrlChange(int channel, int ctrl, int val)
+    {
+        std::vector<unsigned char> message;
+        message.push_back(MIDI_CONTROL_CHANGE + channel);
+        message.push_back(ctrl);
+        message.push_back(val);
+        sendMessage(message);
+    }
+    
+    void chanPress(int channel, int press)
+    {
+        std::vector<unsigned char> message;
+        message.push_back(MIDI_AFTERTOUCH + channel);
+        message.push_back(press);
+        sendMessage(message);
+    }
+    
+    void progChange(int channel, int pgm)
+    {
+        std::vector<unsigned char> message;
+        message.push_back(MIDI_PROGRAM_CHANGE + channel);
+        message.push_back(pgm);
+        sendMessage(message);
+    }
+    
+    void keyPress(int channel, int pitch, int press)
+    {
+        std::vector<unsigned char> message;
+        message.push_back(MIDI_POLY_AFTERTOUCH + channel);
+        message.push_back(pitch);
+        message.push_back(press);
+        sendMessage(message);
+    }
+    
+    void pitchWheel(int channel, int wheel)
+    {
+        std::vector<unsigned char> message;
+        message.push_back(MIDI_PITCH_BEND + channel);
+        message.push_back(wheel & 0x7F);           // lsb 7bit
+        message.push_back((wheel >> 7) & 0x7F);    // msb 7bit
+        sendMessage(message);
+    }
+    
+    void ctrlChange14bits(int channel, int ctrl, int value) {}
+    
+    void startSync(double date)
+    {
+        std::vector<unsigned char> message;
+        message.push_back(MIDI_START);
+        sendMessage(message);
+    }
+    
+    void stopSync(double date)
+    {
+        std::vector<unsigned char> message;
+        message.push_back(MIDI_STOP);
+        sendMessage(message);
+    }
+    
+    void clock(double date)
+    {
+        std::vector<unsigned char> message;
+        message.push_back(MIDI_CLOCK);
+        sendMessage(message);
+    }
+    
+    void sysEx(double, std::vector<unsigned char>& message)
+    {
+        sendMessage(message);
+    }
+};
 
 #endif
 /**************************  END  mspUI.h **************************/

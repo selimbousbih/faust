@@ -38,7 +38,9 @@
 #include <CoreServices/CoreServices.h>
 
 #include "faust/audio/audio.h"
+#ifdef HAS_MATH_EXCEPTION
 #include "faust/audio/fpe.h"
+#endif
 #include "faust/dsp/dsp.h"
 
 /******************************************************************************
@@ -233,7 +235,7 @@ class TCoreAudioRenderer
         AudioUnit fAUHAL;
         bool fState;
 
-        OSStatus GetDefaultDeviceAndSampleRate(int inChan, int outChan, int& sample_rate, AudioDeviceID* device)
+        OSStatus GetDefaultDeviceAndSampleRate(int inChan, int outChan, int& sample_rate, int& outChannelOffset, AudioDeviceID* device)
         {
             
             UInt32 theSize = sizeof(UInt32);
@@ -284,7 +286,7 @@ class TCoreAudioRenderer
                     *device = inDefault;
                     goto end;
                 } else {
-                    if (CreateAggregateDevice(inDefault, outDefault, sample_rate) != noErr) {
+                    if (CreateAggregateDevice(inDefault, outDefault, sample_rate, outChannelOffset) != noErr) {
                         return kAudioHardwareBadDeviceError;
                     }
                     //printf("fAggregateDeviceID %d\n", fAggregateDeviceID);
@@ -315,7 +317,7 @@ class TCoreAudioRenderer
             return noErr;
         }
 
-        OSStatus CreateAggregateDevice(AudioDeviceID captureDeviceID, AudioDeviceID playbackDeviceID, int& sample_rate)
+        OSStatus CreateAggregateDevice(AudioDeviceID captureDeviceID, AudioDeviceID playbackDeviceID, int& sample_rate, int& outChannelOffset)
         {
             OSStatus err = noErr;
             AudioObjectID sub_device[32];
@@ -354,10 +356,10 @@ class TCoreAudioRenderer
                 }
             }
             
-            return CreateAggregateDeviceAux(captureDeviceIDArray, playbackDeviceIDArray, sample_rate);
+            return CreateAggregateDeviceAux(captureDeviceIDArray, playbackDeviceIDArray, sample_rate, outChannelOffset);
         }
         
-        OSStatus CreateAggregateDeviceAux(std::vector<AudioDeviceID> captureDeviceID, std::vector<AudioDeviceID> playbackDeviceID, int& sample_rate)
+        OSStatus CreateAggregateDeviceAux(std::vector<AudioDeviceID> captureDeviceID, std::vector<AudioDeviceID> playbackDeviceID, int& sample_rate, int& outChannelOffset)
         {
             OSStatus osErr = noErr;
             UInt32 outSize;
@@ -433,7 +435,27 @@ class TCoreAudioRenderer
             char device_name[256];
             for (UInt32 i = 0; i < captureDeviceID.size(); i++) {
                 GetDeviceNameFromID(captureDeviceID[i], device_name);
-                //printf("Separated input = '%s' \n", device_name);
+                //printf("Separated input = '%s'\n", device_name);
+
+                // Compute the total number of output channels that the input devices have:
+                // we'll need to skip past these in our aggregate device and jump to the
+                // output channels that belong to the actual output device.
+                AudioBufferList bufferList;
+                outSize = sizeof(bufferList);
+                osErr = AudioDeviceGetProperty(captureDeviceID[i], 0, kAudioDeviceSectionGlobal,
+                                       kAudioDevicePropertyStreamConfiguration,
+                                       &outSize, &bufferList);
+                if (osErr != noErr) {
+                    printf("TCoreAudioRenderer::CreateAggregateDeviceAux : kAudioDevicePropertyStreamConfiguration error\n");
+                    printError(osErr);
+                    return osErr;
+                }
+                int captureDeviceOutChannels =
+                    bufferList.mNumberBuffers > 0
+                    ? bufferList.mBuffers[0].mNumberChannels
+                    : 0;
+                //printf("output channels to skip: %d\n", captureDeviceOutChannels);
+                outChannelOffset += captureDeviceOutChannels;
             }
             
             for (UInt32 i = 0; i < playbackDeviceID.size(); i++) {
@@ -1094,7 +1116,8 @@ class TCoreAudioRenderer
                 }
             }
              
-            if (GetDefaultDeviceAndSampleRate(inChan, outChan, sample_rate, &fDeviceID) != noErr) {
+            int outChannelOffset = 0;
+            if (GetDefaultDeviceAndSampleRate(inChan, outChan, sample_rate, outChannelOffset, &fDeviceID) != noErr) {
                 printf("Cannot open default device\n");
                 return OPEN_ERR;
             }
@@ -1107,17 +1130,7 @@ class TCoreAudioRenderer
             // fBufferSize now has the real value, either 'bufferSize' (if could be changed) or driver current one
             
             // AUHAL
-        
-        #ifdef MAC_OS_X_VERSION_10_5
-            ComponentDescription cd = {kAudioUnitType_Output, kAudioUnitSubType_HALOutput, kAudioUnitManufacturer_Apple, 0, 0};
-            Component HALOutput = FindNextComponent(NULL, &cd);
-            err = OpenAComponent(HALOutput, &fAUHAL);
-            if (err != noErr) {
-                printf("Error calling OpenAComponent\n");
-                printError(err);
-                goto error;
-            }
-        #else 
+        #if (defined(MAC_OS_X_VERSION_10_5) && (MAC_OS_X_VERSION_MAX_ALLOWED > MAC_OS_X_VERSION_10_5))
             AudioComponentDescription cd = {kAudioUnitType_Output, kAudioUnitSubType_HALOutput, kAudioUnitManufacturer_Apple, 0, 0};
             AudioComponent HALOutput = AudioComponentFindNext(NULL, &cd);
             err = AudioComponentInstanceNew(HALOutput, &fAUHAL);
@@ -1126,8 +1139,17 @@ class TCoreAudioRenderer
                 printError(err);
                 goto error;
             }
+        #else
+            ComponentDescription cd = {kAudioUnitType_Output, kAudioUnitSubType_HALOutput, kAudioUnitManufacturer_Apple, 0, 0};
+            Component HALOutput = FindNextComponent(NULL, &cd);
+            err = OpenAComponent(HALOutput, &fAUHAL);
+            if (err != noErr) {
+                printf("Error calling OpenAComponent\n");
+                printError(err);
+                goto error;
+            }
         #endif
-            
+              
             err = AudioUnitInitialize(fAUHAL);
             if (err != noErr) {
                 printf("Cannot initialize AUHAL unit\n");
@@ -1223,7 +1245,7 @@ class TCoreAudioRenderer
             /*
              Just ignore this case : seems to work without any further change...
              
-             if (outChan > fPhysicalOutputs) {
+             if (outChannelOffset + outChan > fPhysicalOutputs) {
                 printf("This device hasn't required output channels\n");
                 goto error;
              }
@@ -1254,7 +1276,8 @@ class TCoreAudioRenderer
                     chanArr[i] = -1;
                 }
                 for (int i = 0; i < outChan; i++) {
-                    chanArr[i] = i;
+                    // Skip past the output channels belonging to the *input* device, skip to the output channels belonging to the *output* device
+                    chanArr[outChannelOffset + i] = i;
                 }
                 err = AudioUnitSetProperty(fAUHAL, kAudioOutputUnitProperty_ChannelMap, kAudioUnitScope_Output, 0, chanArr, sizeof(SInt32) * fPhysicalOutputs);
                 if (err != noErr) {

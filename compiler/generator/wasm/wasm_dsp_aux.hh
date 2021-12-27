@@ -34,7 +34,7 @@
 #include "wasm_binary.hh"
 
 class wasm_dsp_factory;
-struct JSONUITemplatedDecoder;
+struct JSONUIDecoderBase;
 
 /*
  Read the wasm binary module, extract the JSON, define a new end for the module (without the last 'data segment'
@@ -240,10 +240,10 @@ struct WasmBinaryReader {
             pos += 3;  // move 3 int8_t
 
             // read JSON size
-            auto size = getU32LEB();
+            auto jsize = getU32LEB();
 
             // read JSON
-            for (size_t j = 0; j < size; j++) {
+            for (size_t j = 0; j < jsize; j++) {
                 json += char(getInt8());
             }
             if (debug) std::cerr << "JSON : " << json << std::endl;
@@ -313,13 +313,15 @@ typedef class faust_smartptr<wasm_dsp_factory> SDsp_factory;
 class EXPORT wasm_dsp_factory : public dsp_factory, public faust_smartable {
     friend class wasm_dsp;
    protected:
-    dsp_factory_base*        fFactory;
-    JSONUITemplatedDecoder*  fDecoder;
-    int                      fInstance; // Index of wasm DSP instance
-    MapUI                    fMapUI;
+    dsp_factory_base*   fFactory;
+    JSONUIDecoderBase*  fDecoder;
+    int                 fInstance; // Index of wasm DSP instance
+    MapUI               fMapUI;
+/*
 #ifdef EMCC
     SoundUI* fSoundUI;
 #endif
+*/
 
    public:
     wasm_dsp_factory():fFactory(nullptr), fDecoder(nullptr), fInstance(0)
@@ -341,7 +343,7 @@ class EXPORT wasm_dsp_factory : public dsp_factory, public faust_smartable {
     std::vector<std::string> getLibraryList();
     std::vector<std::string> getIncludePathnames();
 
-    JSONUITemplatedDecoder* getDecoder() { return fDecoder; }
+    JSONUIDecoderBase* getDecoder() { return fDecoder; }
 
     wasm_dsp* createDSPInstance();
     void deleteDSPInstance(wasm_dsp* dsp);
@@ -350,7 +352,7 @@ class EXPORT wasm_dsp_factory : public dsp_factory, public faust_smartable {
     dsp_memory_manager* getMemoryManager();
 
     void write(std::ostream* out, bool binary, bool smallflag = false);
-    void writeAux(std::ostream* out, bool binary, bool smallflag = false);
+    void writeHelper(std::ostream* out, bool binary, bool smallflag = false);
 
     std::string getBinaryCode();
 
