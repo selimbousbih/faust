@@ -211,9 +211,10 @@ void FIRCodeContainer::dumpMemory(ostream* dst)
             fComputeBlockInstructions->accept(&struct_visitor);
             
             for (const auto& it : struct_visitor.getFieldTable()) {
-                *dst << "Field = " << it.first << " size = " << it.second.fSizeBytes;
+                *dst << "Field = " << it.first << " size = " << it.second.fSize;
                 *dst << " r_count = " << it.second.fRAccessCount;
-                *dst << " w_count = " << it.second.fWAccessCount << endl;
+                *dst << " w_count = " << it.second.fWAccessCount;
+                *dst << " ratio = " << float(it.second.fRAccessCount + it.second.fWAccessCount) / float(it.second.fSize) << endl;
             }
         }
         
@@ -226,9 +227,10 @@ void FIRCodeContainer::dumpMemory(ostream* dst)
             loop->accept(&struct_visitor);
             
             for (const auto& it : struct_visitor.getFieldTable()) {
-                *dst << "Field = " << it.first << " size = " << it.second.fSizeBytes;
+                *dst << "Field = " << it.first << " size = " << it.second.fSize;
                 *dst << " r_count = " << it.second.fRAccessCount;
-                *dst << " w_count = " << it.second.fWAccessCount << endl;
+                *dst << " w_count = " << it.second.fWAccessCount;
+                *dst << " ratio = " << float(it.second.fRAccessCount + it.second.fWAccessCount) / float(it.second.fSize) << endl;
             }
         }
     }

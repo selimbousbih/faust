@@ -1,24 +1,26 @@
-/************************** BEGIN llvm-dsp.h **************************/
-/************************************************************************
- ************************************************************************
- Copyright (C) 2003-2017 GRAME, Centre National de Creation Musicale
- 
- This program is free software; you can redistribute it and/or modify
- it under the terms of the GNU Lesser General Public License as published by
- the Free Software Foundation; either version 2.1 of the License, or
- (at your option) any later version.
- 
- This program is distributed in the hope that it will be useful,
- but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- GNU Lesser General Public License for more details.
- 
- You should have received a copy of the GNU Lesser General Public License
- along with this program; if not, write to the Free Software
- Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
- 
- ************************************************************************
- ************************************************************************/
+/************************** BEGIN llvm-dsp.h *****************************
+FAUST Architecture File
+Copyright (C) 2003-2022 GRAME, Centre National de Creation Musicale
+---------------------------------------------------------------------
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+
+EXCEPTION : As a special exception, you may create a larger work
+that contains this FAUST architecture section and distribute
+that work under terms of your choice, so long as this FAUST
+architecture section is not modified.
+***************************************************************************/
 
 #ifndef LLVM_DSP_H
 #define LLVM_DSP_H
@@ -207,7 +209,7 @@ llvm_dsp_factory* createDSPFactoryFromString(const std::string& name_app,
  * It has to be used with the signal API defined in libfaust-signal.h.
  *
  * @param name_app - the name of the Faust program
- * @param signals - the vector of output signals
+ * @param signals_vec - the vector of output signals
  * @param argc - the number of parameters in argv array
  * @param argv - the array of parameters
  * @param target - the LLVM machine target: like 'i386-apple-macosx10.6.0:opteron',
@@ -251,7 +253,7 @@ llvm_dsp_factory* createDSPFactoryFromBoxes(const std::string& name_app, Box box
 /**
  * Delete a Faust DSP factory, that is decrements it's reference counter, possibly really deleting the internal pointer. 
  * Possibly also delete DSP pointers associated with this factory, if they were not explicitly deleted with C++ delete.
- * Beware : all kept factories and DSP pointers (in local variables...) thus become invalid.
+ * Beware: all kept factories and DSP pointers (in local variables...) thus become invalid.
  * 
  * @param factory - the DSP factory
  *
@@ -271,7 +273,7 @@ bool deleteDSPFactory(llvm_dsp_factory* factory);
 DEPRECATED(std::vector<std::string> getDSPFactoryLibraryList(llvm_dsp_factory* factory));
 
 /**
- * Delete all Faust DSP factories kept in the library cache. Beware : all kept factory and DSP pointers (in local variables...) thus become invalid.
+ * Delete all Faust DSP factories kept in the library cache. Beware: all kept factory and DSP pointers (in local variables...) thus become invalid.
  * 
  */                                 
 void deleteAllDSPFactories();
@@ -470,6 +472,7 @@ bool writeDSPFactoryToMachineFile(llvm_dsp_factory* factory, const std::string& 
  * Write a Faust DSP factory into an object code file.
  *
  * @param factory - the DSP factory
+ * @param object_code_path - the object code file pathname
  * @param target - the LLVM machine target: like 'i386-apple-macosx10.6.0:opteron',
  *                 using an empty string takes the current machine settings,
  *                 and i386-apple-macosx10.6.0:generic kind of syntax for a generic processor

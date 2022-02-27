@@ -27,6 +27,7 @@
 #include <sstream>
 #include <string>
 #include <map>
+#include <climits>
 
 #include "Text.hh"
 #include "fir_to_fir.hh"
@@ -43,6 +44,10 @@ inline bool isControl(const string& name)
         || startWith(name, "fEntry")
         || startWith(name, "fVbargraph")
         || startWith(name, "fHbargraph")
+        || name == "iControl"
+        || name == "fControl"
+        || name == "iZone"
+        || name == "fZone"
         || name == "fSampleRate";
 }
 
@@ -65,7 +70,9 @@ class TextInstVisitor : public InstVisitor {
     // To be adapted in subclasses
     virtual void visitCond(ValueInst* cond)
     {
+        *fOut << "(";
         cond->accept(this);
+        *fOut << ")";
     }
   
    public:
@@ -195,16 +202,28 @@ class TextInstVisitor : public InstVisitor {
         }
         *fOut << '}';
     }
+    
+    virtual bool needParenthesis(BinopInst* inst, ValueInst* arg)
+    {
+        int p0 = gBinOpTable[inst->fOpcode]->fPriority;
+        BinopInst* a = dynamic_cast<BinopInst*>(arg);
+        int p1 = a ? gBinOpTable[a->fOpcode]->fPriority : INT_MAX;
+        return (isLogicalOpcode(inst->fOpcode) || (p0 > p1)) && !arg->isSimpleValue();
+    }
 
     virtual void visit(BinopInst* inst)
     {
-        *fOut << "(";
+        bool cond1 = needParenthesis(inst, inst->fInst1);
+        bool cond2 = needParenthesis(inst, inst->fInst2);
+        if (cond1) *fOut << "(";
         inst->fInst1->accept(this);
+        if (cond1) *fOut << ")";
         *fOut << " ";
         *fOut << gBinOpTable[inst->fOpcode]->fName;
         *fOut << " ";
+        if (cond2) *fOut << "(";
         inst->fInst2->accept(this);
-        *fOut << ")";
+        if (cond2) *fOut << ")";
     }
 
     virtual void visit(::CastInst* inst) { faustassert(false); }
@@ -220,13 +239,10 @@ class TextInstVisitor : public InstVisitor {
         }
     }
 
-    virtual void generateFunCallArgs(list<ValueInst*>::const_iterator beg,
-                                     list<ValueInst*>::const_iterator end,
-                                     size_t size)
+    virtual void generateFunCallArgs(ListValuesIt beg, ListValuesIt end, size_t size)
     {
-        list<ValueInst*>::const_iterator it = beg;
-        size_t                           i  = 0;
-        for (it = beg; it != end; it++, i++) {
+        size_t i = 0;
+        for (ListValuesIt it = beg; it != end; it++, i++) {
             // Compile argument
             (*it)->accept(this);
             if (i < size - 1) *fOut << ", ";
@@ -263,7 +279,7 @@ class TextInstVisitor : public InstVisitor {
     virtual void generateFunCall(FunCallInst* inst, const std::string& fun_name)
     {
         if (inst->fMethod) {
-            list<ValueInst*>::const_iterator it = inst->fArgs.begin();
+            ListValuesIt it = inst->fArgs.begin();
             // Compile object arg
             (*it)->accept(this);
             // Compile parameters

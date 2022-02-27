@@ -87,6 +87,10 @@
 #include "dlang_code_container.hh"
 #endif
 
+#ifdef JULIA_BUILD
+#include "julia_code_container.hh"
+#endif
+
 // Parser
 extern FILE*       yyin;
 extern const char* yyfilename;
@@ -358,7 +362,6 @@ global::global() : TABBER(1), gLoopDetector(1024, 400), gStackOverflowDetector(M
     SIGDELAY1          = symbol("SigDelay1");
     SIGDELAY           = symbol("SigDelay");
     SIGPREFIX          = symbol("SigPrefix");
-    SIGIOTA            = symbol("SigIota");
     SIGRDTBL           = symbol("SigRDTbl");
     SIGWRTBL           = symbol("SigWRTbl");
     SIGTABLE           = symbol("SigTable");
@@ -670,9 +673,18 @@ void global::printCompilationOptions(stringstream& dst, bool backend)
             << "-vs " << gVecSize << " " << ((gFunTaskSwitch) ? "-fun " : "") << ((gGroupTaskSwitch) ? "-g " : "")
             << ((gDeepFirstSwitch) ? "-dfs " : "");
     }
-
+  
     // Add 'compile_options' metadata
-    gGlobal->gMetaDataSet[tree("compile_options")].insert(tree("\"" + dst.str() + "\""));
+    string res = dst.str();
+    gGlobal->gMetaDataSet[tree("compile_options")].insert(tree("\"" + res.substr(0, res.size()-1) + "\""));
+}
+
+string global::printCompilationOptions1()
+{
+    stringstream dst;
+    printCompilationOptions(dst, true);
+    string res = dst.str();
+    return res.substr(0, res.size()-1);
 }
 
 void global::initTypeSizeMap()
@@ -803,7 +815,7 @@ global::~global()
 #ifdef JAVA_BUILD
     JAVAInstVisitor::cleanup();
 #endif
-#ifdef JULIS_BUILD
+#ifdef JULIA_BUILD
     JuliaInstVisitor::cleanup();
 #endif
 #ifdef RUST_BUILD

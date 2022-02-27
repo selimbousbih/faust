@@ -173,6 +173,7 @@ faustgen_factory::faustgen_factory(const string& name)
     fOptLevel = LLVM_OPTIMIZATION;
     fPolyphonic = false;
     fSoundUI = NULL;
+    fSampleFormat = kNone;
     
 #ifdef __APPLE__
     // OSX only : access to the fautgen~ bundle
@@ -342,24 +343,30 @@ llvm_dsp_factory* faustgen_factory::create_factory_from_sourcecode()
 
 ::dsp* faustgen_factory::create_dsp_instance(int nvoices)
 {
-    ::dsp* mono = fDSPfactory->createDSPInstance();
+    ::dsp* dsp = fDSPfactory->createDSPInstance();
     
     // Check 'nvoices' metadata
     if (nvoices == 0) {
         MyMeta meta;
-        mono->metadata(&meta);
+        dsp->metadata(&meta);
         std::string numVoices = meta.get("nvoices", "0");
         nvoices = atoi(numVoices.c_str());
         if (nvoices < 0) nvoices = 0;
     }
     
+    // Add the sample size if needed
+    if (fSampleFormat == kFloat) {
+        dsp = new dsp_sample_adapter<float, double>(dsp);
+    }
+    
     if (nvoices > 0) {
         fPolyphonic = true;
-        return new mydsp_poly(mono, nvoices, true);
+        dsp = new mydsp_poly(dsp, nvoices, true);
     } else {
         fPolyphonic = false;
-        return mono;
     }
+    
+    return dsp;
 }
 
 ::dsp* faustgen_factory::create_dsp_aux()
@@ -461,11 +468,7 @@ void faustgen_factory::default_compile_options()
 {
     // Clear and set default value
     fCompileOptions.clear();
-    
-    // By default when double
-    if (sizeof(FAUSTFLOAT) == 8) {
-        add_compile_option("-double");
-    }
+    fSampleFormat = kNone;
     
     // Add -svg to current compile options
     add_compile_option("-svg");
@@ -486,11 +489,23 @@ void faustgen_factory::default_compile_options()
         if (*it == "-opt") {
             it++;
             fOptLevel = atoi((*it).c_str());
+        } else if (*it == "-single") {
+            fSampleFormat = kFloat;
+            add_compile_option(*it);
+        } else if (*it == "-double") {
+            fSampleFormat = kDouble;
+            add_compile_option(*it);
         } else {
             add_compile_option(*it);
         }
     }
     
+    // By defaut -double is used
+    if (fSampleFormat == kNone) {
+        fSampleFormat = kDouble;
+        add_compile_option("-double");
+    }
+  
     // Vector mode by default
     /*
      add_compile_option("-vec");
@@ -519,6 +534,9 @@ void faustgen_factory::getfromdictionary(t_dictionary* d)
     // Read sourcecode "version" key
     const char* faustgen_version;
     err = dictionary_getstring(d, gensym("version"), &faustgen_version);
+    
+    // Read fSampleFormat version
+    err = dictionary_getlong(d, gensym("sample_format"), (t_atom_long*)&fSampleFormat);
     
     if (err != MAX_ERR_NONE) {
         post("Cannot read \"version\" key, so ignore bitcode, force recompilation and use default compileoptions");
@@ -586,13 +604,16 @@ void faustgen_factory::appendtodictionary(t_dictionary* d)
 {
     post("Saving object version, library_path, sourcecode and bitcode...");
     
-    // Save machine serial number
+    // Write machine serial number
     dictionary_appendstring(d, gensym("serial_number"), getSerialNumber().c_str());
     
-    // Save faustgen~ version
+    // Write faustgen~ version
     dictionary_appendstring(d, gensym("version"), FAUSTGEN_VERSION);
     
-    // Save fLibraryPath
+    // Write fSampleFormat version
+    dictionary_appendlong(d, gensym("sample_format"), fSampleFormat);
+    
+    // Write fLibraryPath
     StringSetIt it;
     int i = 0;
     for (it = fLibraryPath.begin(); it != fLibraryPath.end(); it++) {
@@ -601,13 +622,13 @@ void faustgen_factory::appendtodictionary(t_dictionary* d)
         dictionary_appendstring(d, gensym(library_path), (*it).c_str());
     }
     
-    // Save source code
+    // Write source code
     if (fSourceCodeSize) {
         dictionary_appendlong(d, gensym("sourcecode_size"), fSourceCodeSize);
         dictionary_appendstring(d, gensym("sourcecode"), *fSourceCode);
     }
     
-    // Save bitcode
+    // Write bitcode
     if (fDSPfactory) {
         // Alternate model using machine code
         string machinecode = writeDSPFactoryToMachine(fDSPfactory, getTarget());
@@ -1537,7 +1558,7 @@ inline void faustgen::perform(int vs, t_sample** inputs, long numins, t_sample**
     if (!fMute && fDSPfactory->try_lock_audio()) {
         // Has to be tested again when the lock has been taken...
         if (fDSP) {
-            fDSP->compute(vs, static_cast<FAUSTFLOAT**>(inputs), static_cast<FAUSTFLOAT**>(outputs));
+            fDSP->compute(vs, reinterpret_cast<FAUSTFLOAT**>(inputs), reinterpret_cast<FAUSTFLOAT**>(outputs));
             if (fOSCUI) fOSCUI->endBundle();
             //update_outputs();
             // Use the right outlet to output messages
@@ -1790,7 +1811,7 @@ extern "C" void ext_main(void* r)
     t_class * mclass = faustgen::makeMaxClass("faustgen~");
     post("faustgen~ v%s (sample = 64 bits code = %s)", FAUSTGEN_VERSION, getCodeSize());
     post("LLVM powered Faust embedded compiler v%s", getCLibFaustVersion());
-    post("Copyright (c) 2012-2021 Grame");
+    post("Copyright (c) 2012-2022 Grame");
     
     // Start 'libfaust' in multi-thread safe mode
     startMTDSPFactories();

@@ -1,7 +1,7 @@
-/************************************************************************
- ************************************************************************
- Copyright (C) 2021 GRAME, Centre National de Creation Musicale
- 
+/***************************************************************************
+ FAUST Architecture File
+ Copyright (C) 2003-2022 GRAME, Centre National de Creation Musicale
+ ---------------------------------------------------------------------
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU Lesser General Public License as published by
  the Free Software Foundation; either version 2.1 of the License, or
@@ -9,15 +9,18 @@
  
  This program is distributed in the hope that it will be useful,
  but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  GNU Lesser General Public License for more details.
  
  You should have received a copy of the GNU Lesser General Public License
  along with this program; if not, write to the Free Software
  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  
- ************************************************************************
- ************************************************************************/
+ EXCEPTION : As a special exception, you may create a larger work
+ that contains this FAUST architecture section and distribute
+ that work under terms of your choice, so long as this FAUST
+ architecture section is not modified.
+ ***************************************************************************/
 
 #include <string>
 #include <vector>
@@ -472,8 +475,8 @@ Box boxCheckbox(const std::string& label);
  *
  * @param label - the label definition (see [2])
  * @param init - the init box, a constant numerical expression (see [1])
- * @param min - the max box, a constant numerical expression (see [1])
- * @param max - the min box, a constant numerical expression (see [1])
+ * @param min - the min box, a constant numerical expression (see [1])
+ * @param max - the max box, a constant numerical expression (see [1])
  * @param step - the step box, a constant numerical expression (see [1])
  *
  * @return the vertical slider box.
@@ -485,8 +488,8 @@ Box boxVSlider(const std::string& label, Box init, Box min, Box max, Box step);
  *
  * @param label - the label definition (see [2])
  * @param init - the init box, a constant numerical expression (see [1])
- * @param min - the max box, a constant numerical expression (see [1])
- * @param max - the min box, a constant numerical expression (see [1])
+ * @param min - the min box, a constant numerical expression (see [1])
+ * @param max - the max box, a constant numerical expression (see [1])
  * @param step - the step box, a constant numerical expression (see [1])
  *
  * @return the horizontal slider box.
@@ -498,8 +501,8 @@ Box boxHSlider(const std::string& label, Box init, Box min, Box max, Box step);
  *
  * @param label - the label definition (see [2])
  * @param init - the init box, a constant numerical expression (see [1])
- * @param min - the max box, a constant numerical expression (see [1])
- * @param max - the min box, a constant numerical expression (see [1])
+ * @param min - the min box, a constant numerical expression (see [1])
+ * @param max - the max box, a constant numerical expression (see [1])
  * @param step - the step box, a constant numerical expression (see [1])
  *
  * @return the num entry box.
@@ -510,8 +513,8 @@ Box boxNumEntry(const std::string& label, Box init, Box min, Box max, Box step);
  * Create a vertical bargraph box.
  *
  * @param label - the label definition (see [2])
- * @param min - the max box, a constant numerical expression (see [1])
- * @param max - the min box, a constant numerical expression (see [1])
+ * @param min - the min box, a constant numerical expression (see [1])
+ * @param max - the max box, a constant numerical expression (see [1])
  *
  * @return the vertical bargraph box.
  */
@@ -521,9 +524,9 @@ Box boxVBargraph(const std::string& label, Box min, Box max);
  * Create a vertical bargraph box.
  *
  * @param label - the label definition (see [2])
- * @param min - the max box, a constant numerical expression (see [1])
- * @param max - the min box, a constant numerical expression (see [1])
- * @param s - the input box
+ * @param min - the min box, a constant numerical expression (see [1])
+ * @param max - the max box, a constant numerical expression (see [1])
+ * @param x - the input box
  *
  * @return the vertical bargraph box.
  */
@@ -533,8 +536,8 @@ Box boxVBargraph(const std::string& label, Box min, Box max, Box x);
  * Create an horizontal bargraph box.
  *
  * @param label - the label definition (see [2])
- * @param min - the max box, a constant numerical expression (see [1])
- * @param max - the min box, a constant numerical expression (see [1])
+ * @param min - the min box, a constant numerical expression (see [1])
+ * @param max - the max box, a constant numerical expression (see [1])
  *
  * @return the horizontal bargraph box.
  */
@@ -544,9 +547,9 @@ Box boxHBargraph(const std::string& label, Box min, Box max);
  * Create a horizontal bargraph box.
  *
  * @param label - the label definition (see [2])
- * @param min - the max box, a constant numerical expression (see [1])
- * @param max - the min box, a constant numerical expression (see [1])
- * @param s - the input box
+ * @param min - the min box, a constant numerical expression (see [1])
+ * @param max - the max box, a constant numerical expression (see [1])
+ * @param x - the input box
  *
  * @return the vertical horizontal box.
  */

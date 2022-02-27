@@ -39,7 +39,7 @@ struct TableSizeVisitor : public DispatchVisitor {
     virtual void visit(FunCallInst* inst)
     {
         if (startWith(inst->fName, "fill")) {
-            list<ValueInst*>::const_iterator it = inst->fArgs.begin();
+            ListValuesIt it = inst->fArgs.begin();
             it++;
             Int32NumInst* size = dynamic_cast<Int32NumInst*>(*it);
             faustassert(size);
@@ -56,7 +56,7 @@ struct TableSizeCloneVisitor : public BasicCloneVisitor {
     virtual ValueInst* visit(FunCallInst* inst)
     {
         if (startWith(inst->fName, "fill")) {
-            list<ValueInst*>::const_iterator it = inst->fArgs.begin();
+            ListValuesIt it = inst->fArgs.begin();
             it++;
             Int32NumInst* size = dynamic_cast<Int32NumInst*>(*it);
             faustassert(size);
@@ -94,6 +94,11 @@ class SOULCodeContainer : public virtual CodeContainer {
         if (!gGlobal->gTableSizeVisitor) {
             gGlobal->gTableSizeVisitor = new TableSizeVisitor();
         }
+    
+        // Control is separated in the 'control()' function and iControl/fControl arrays
+        // are used to compute control related state to be used in 'run'
+        gGlobal->setVarType("iControl", Typed::kInt32_ptr);
+        gGlobal->setVarType("fControl", Typed::kFloatMacro_ptr);
     }
    
     CodeContainer* createScalarContainer(const string& name, int sub_container_type);

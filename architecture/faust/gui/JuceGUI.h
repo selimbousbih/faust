@@ -1,20 +1,20 @@
-/************************** BEGIN JuceGUI.h **************************/
-/************************************************************************
+/************************** BEGIN JuceGUI.h *****************************
  FAUST Architecture File
- Copyright (C) 2003-2017 GRAME, Centre National de Creation Musicale
+ Copyright (C) 2003-2022 GRAME, Centre National de Creation Musicale
  ---------------------------------------------------------------------
- This Architecture section is free software; you can redistribute it
- and/or modify it under the terms of the GNU General Public License
- as published by the Free Software Foundation; either version 3 of
- the License, or (at your option) any later version.
+ This program is free software; you can redistribute it and/or modify
+ it under the terms of the GNU Lesser General Public License as published by
+ the Free Software Foundation; either version 2.1 of the License, or
+ (at your option) any later version.
  
  This program is distributed in the hope that it will be useful,
  but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- GNU General Public License for more details.
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ GNU Lesser General Public License for more details.
  
- You should have received a copy of the GNU General Public License
- along with this program; If not, see <http://www.gnu.org/licenses/>.
+ You should have received a copy of the GNU Lesser General Public License
+ along with this program; if not, write to the Free Software
+ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  
  EXCEPTION : As a special exception, you may create a larger work
  that contains this FAUST architecture section and distribute
@@ -1831,17 +1831,11 @@ class JuceGUI : public GUI, public MetaDataUI, public juce::Component
     
     private:
     
-        bool fDefault = true;
         std::stack<uiBase*> fBoxStack;
         uiBase* fCurrentBox = nullptr;   // Current box used in buildUserInterface logic.
         
         int fRadioGroupID;               // In case of radio buttons.
         std::unique_ptr<juce::LookAndFeel> fLaf = std::make_unique<juce::LookAndFeel_V4>();
-    
-        FAUSTFLOAT defaultVal(FAUSTFLOAT* zone, FAUSTFLOAT def)
-        {
-            return (fDefault) ? def : *zone;
-        }
     
         /** Add generic box to the user interface. */
         void openBox(uiBase* box)
@@ -1857,13 +1851,13 @@ class JuceGUI : public GUI, public MetaDataUI, public juce::Component
         void addSlider(const char* label, FAUSTFLOAT* zone, FAUSTFLOAT init, FAUSTFLOAT min, FAUSTFLOAT max, FAUSTFLOAT step, int kWidth, int kHeight, SliderType type)
         {
             if (isKnob(zone)) {
-                addKnob(label, zone, defaultVal(zone, init), min, max, step);
+                addKnob(label, zone, *zone, min, max, step);
             } else if (isRadio(zone)) {
-                addRadioButtons(label, zone, defaultVal(zone, init), min, max, step, fRadioDescription[zone].c_str(), false);
+                addRadioButtons(label, zone, *zone, min, max, step, fRadioDescription[zone].c_str(), false);
             } else if (isMenu(zone)) {
-                addMenu(label, zone, defaultVal(zone, init), min, max, step, fMenuDescription[zone].c_str());
+                addMenu(label, zone, *zone, min, max, step, fMenuDescription[zone].c_str());
             } else {
-                fCurrentBox->add(new uiSlider(this, zone, kWidth, kHeight, defaultVal(zone, init), min, max, step, juce::String(label), juce::String(fUnit[zone]), juce::String(fTooltip[zone]), getScale(zone), type));
+                fCurrentBox->add(new uiSlider(this, zone, kWidth, kHeight, *zone, min, max, step, juce::String(label), juce::String(fUnit[zone]), juce::String(fTooltip[zone]), getScale(zone), type));
             }
         }
         
@@ -1883,21 +1877,21 @@ class JuceGUI : public GUI, public MetaDataUI, public juce::Component
             }
             
             if (vert) {
-                fCurrentBox->add(new uiRadioButton(this, zone, juce::String(label), kCheckButtonWidth, names.size() * (kRadioButtonHeight - 25) + 25, defaultVal(zone, init), min, max, true, names, values, juce::String(fTooltip[zone]), fRadioGroupID++));
+                fCurrentBox->add(new uiRadioButton(this, zone, juce::String(label), kCheckButtonWidth, names.size() * (kRadioButtonHeight - 25) + 25, *zone, min, max, true, names, values, juce::String(fTooltip[zone]), fRadioGroupID++));
             } else {
-                fCurrentBox->add(new uiRadioButton(this, zone, juce::String(label), kCheckButtonWidth, kRadioButtonHeight, defaultVal(zone, init), min, max, false, names, values, juce::String(fTooltip[zone]), fRadioGroupID++));
+                fCurrentBox->add(new uiRadioButton(this, zone, juce::String(label), kCheckButtonWidth, kRadioButtonHeight, *zone, min, max, false, names, values, juce::String(fTooltip[zone]), fRadioGroupID++));
             }
         }
         
         /** Add a menu to the user interface. */
         void addMenu(const char* label, FAUSTFLOAT* zone, FAUSTFLOAT init, FAUSTFLOAT min, FAUSTFLOAT max, FAUSTFLOAT step, const char* mdescr)
         {
-            fCurrentBox->add(new uiMenu(this, zone, juce::String(label), kMenuWidth, kMenuHeight, defaultVal(zone, init), min, max, juce::String(fTooltip[zone]), mdescr));
+            fCurrentBox->add(new uiMenu(this, zone, juce::String(label), kMenuWidth, kMenuHeight, *zone, min, max, juce::String(fTooltip[zone]), mdescr));
         }
         
         /** Add a ciruclar slider to the user interface. */
         void addKnob(const char* label, FAUSTFLOAT* zone, FAUSTFLOAT init, FAUSTFLOAT min, FAUSTFLOAT max, FAUSTFLOAT step) {
-            fCurrentBox->add(new uiSlider(this, zone, kKnobWidth, kKnobHeight, defaultVal(zone, init), min, max, step, juce::String(label), juce::String(fUnit[zone]), juce::String(fTooltip[zone]), getScale(zone), Knob));
+            fCurrentBox->add(new uiSlider(this, zone, kKnobWidth, kKnobHeight, *zone, min, max, step, juce::String(label), juce::String(fUnit[zone]), juce::String(fTooltip[zone]), getScale(zone), Knob));
         }
         
         /** Add a bargraph to the user interface. */
@@ -1914,10 +1908,10 @@ class JuceGUI : public GUI, public MetaDataUI, public juce::Component
         
     public:
         /**
-         * \brief   Constructor.
+         * \brief   Constructor, displaying the *current state* of all controller zones.
          * \details Initialize the JuceGUI specific variables. 
          */
-        JuceGUI(bool def = true):fDefault(def), fRadioGroupID(1) // fRadioGroupID must start at 1
+        JuceGUI():fRadioGroupID(1) // fRadioGroupID must start at 1
         {
             setLookAndFeel(fLaf.get());
         }
@@ -2012,7 +2006,7 @@ class JuceGUI : public GUI, public MetaDataUI, public juce::Component
         {
             // kMargin pixels between the slider and his name
             int newWidth = juce::Font().getStringWidth(juce::String(label)) + kNumEntryWidth + kMargin;
-            fCurrentBox->add(new uiSlider(this, zone, newWidth, kNumEntryHeight, defaultVal(zone, init), min, max, step, juce::String(label), juce::String(fUnit[zone]), juce::String(fTooltip[zone]), getScale(zone), NumEntry));
+            fCurrentBox->add(new uiSlider(this, zone, newWidth, kNumEntryHeight, *zone, min, max, step, juce::String(label), juce::String(fUnit[zone]), juce::String(fTooltip[zone]), getScale(zone), NumEntry));
         }
         
         /** Add a vertical bargraph to the user interface. */

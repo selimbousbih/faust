@@ -1,20 +1,20 @@
-/************************** BEGIN alsa-dsp.h **************************/
-/************************************************************************
+/************************** BEGIN alsa-dsp.h ***************************
  FAUST Architecture File
- Copyright (C) 2003-2017 GRAME, Centre National de Creation Musicale
+ Copyright (C) 2003-2022 GRAME, Centre National de Creation Musicale
  ---------------------------------------------------------------------
- This Architecture section is free software; you can redistribute it
- and/or modify it under the terms of the GNU General Public License
- as published by the Free Software Foundation; either version 3 of
- the License, or (at your option) any later version.
+ This program is free software; you can redistribute it and/or modify
+ it under the terms of the GNU Lesser General Public License as published by
+ the Free Software Foundation; either version 2.1 of the License, or
+ (at your option) any later version.
  
  This program is distributed in the hope that it will be useful,
  but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- GNU General Public License for more details.
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ GNU Lesser General Public License for more details.
  
- You should have received a copy of the GNU General Public License
- along with this program; If not, see <http://www.gnu.org/licenses/>.
+ You should have received a copy of the GNU Lesser General Public License
+ along with this program; if not, write to the Free Software
+ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  
  EXCEPTION : As a special exception, you may create a larger work
  that contains this FAUST architecture section and distribute
@@ -30,6 +30,7 @@
 #include <sys/types.h>
 #include <pwd.h>
 #include <limits.h>
+#include <algorithm>
 
 #include <alsa/asoundlib.h>
 #include "faust/audio/audio.h"
@@ -254,8 +255,8 @@ struct AudioInterface : public AudioParam
 
 		// allocation of floating point buffers needed by the dsp code
 
-		fChanInputs = max(fSoftInputs, fCardInputs);		assert (fChanInputs < 256);
-		fChanOutputs = max(fSoftOutputs, fCardOutputs);		assert (fChanOutputs < 256);
+		fChanInputs = std::max(fSoftInputs, fCardInputs);		assert (fChanInputs < 256);
+		fChanOutputs = std::max(fSoftOutputs, fCardOutputs);		assert (fChanOutputs < 256);
 
 		for (unsigned int i = 0; i < fChanInputs; i++) {
 			fInputSoftChannels[i] = (float*)calloc(fBuffering, sizeof(float));
@@ -409,7 +410,7 @@ struct AudioInterface : public AudioParam
 				for (unsigned int f = 0; f < fBuffering; f++) {
 					for (unsigned int c = 0; c < fCardOutputs; c++) {
 						float x = fOutputSoftChannels[c][f];
-						buffer16b[c + f*fCardOutputs] = short(max(min(x,1.0f),-1.0f) * float(SHRT_MAX)) ;
+						buffer16b[c + f*fCardOutputs] = short(std::max(std::min(x,1.0f),-1.0f) * float(SHRT_MAX)) ;
 					}
 				}
 
@@ -418,7 +419,7 @@ struct AudioInterface : public AudioParam
 				for (unsigned int f = 0; f < fBuffering; f++) {
 					for (unsigned int c = 0; c < fCardOutputs; c++) {
 						float x = fOutputSoftChannels[c][f];
-						buffer32b[c + f*fCardOutputs] = int(max(min(x,1.0f),-1.0f) * float(INT_MAX));
+						buffer32b[c + f*fCardOutputs] = int(std::max(std::min(x,1.0f),-1.0f) * float(INT_MAX));
 					}
 				}
 			} else {
@@ -443,7 +444,7 @@ struct AudioInterface : public AudioParam
 					short* chan16b = (short*)fOutputCardChannels[c];
 					for (unsigned int f = 0; f < fBuffering; f++) {
 						float x = fOutputSoftChannels[c][f];
-						chan16b[f] = short(max(min(x,1.0f),-1.0f) * float(SHRT_MAX));
+						chan16b[f] = short(std::max(std::min(x,1.0f),-1.0f) * float(SHRT_MAX));
 					}
 				}
 
@@ -453,7 +454,7 @@ struct AudioInterface : public AudioParam
 					int32* chan32b = (int32*)fOutputCardChannels[c];
 					for (unsigned int f = 0; f < fBuffering; f++) {
 						float x = fOutputSoftChannels[c][f];
-						chan32b[f] = int(max(min(x,1.0f),-1.0f) * float(INT_MAX));
+						chan32b[f] = int(std::max(std::min(x,1.0f),-1.0f) * float(INT_MAX));
 					}
 				}
 

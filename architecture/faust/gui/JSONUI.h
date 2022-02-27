@@ -1,27 +1,27 @@
-/************************** BEGIN JSONUI.h **************************/
-/************************************************************************
+/************************** BEGIN JSONUI.h *****************************
  FAUST Architecture File
- Copyright (C) 2003-2017 GRAME, Centre National de Creation Musicale
+ Copyright (C) 2003-2022 GRAME, Centre National de Creation Musicale
  ---------------------------------------------------------------------
- This Architecture section is free software; you can redistribute it
- and/or modify it under the terms of the GNU General Public License
- as published by the Free Software Foundation; either version 3 of
- the License, or (at your option) any later version.
+ This program is free software; you can redistribute it and/or modify
+ it under the terms of the GNU Lesser General Public License as published by
+ the Free Software Foundation; either version 2.1 of the License, or
+ (at your option) any later version.
  
  This program is distributed in the hope that it will be useful,
  but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- GNU General Public License for more details.
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ GNU Lesser General Public License for more details.
  
- You should have received a copy of the GNU General Public License
- along with this program; If not, see <http://www.gnu.org/licenses/>.
+ You should have received a copy of the GNU Lesser General Public License
+ along with this program; if not, write to the Free Software
+ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  
  EXCEPTION : As a special exception, you may create a larger work
  that contains this FAUST architecture section and distribute
  that work under terms of your choice, so long as this FAUST
  architecture section is not modified.
  ************************************************************************/
- 
+
 #ifndef FAUST_JSONUI_H
 #define FAUST_JSONUI_H
 
@@ -42,6 +42,9 @@
  * This class produce a complete JSON decription of the DSP instance.
  ******************************************************************************/
 
+typedef std::vector<std::tuple<std::string, int, int, int, int, int>> MemoryLayoutType;
+typedef std::map<std::string, int> PathTableType;
+
 template <typename REAL>
 class JSONUIReal : public PathBuilder, public Meta, public UIReal<REAL>
 {
@@ -60,7 +63,8 @@ class JSONUIReal : public PathBuilder, public Meta, public UIReal<REAL>
         std::string fExpandedCode;
         std::string fSHAKey;
         int fDSPSize;                   // In bytes
-        std::map<std::string, int> fPathTable;
+        PathTableType fPathTable;
+        MemoryLayoutType fMemoryLayout;
         bool fExtended;
     
         char fCloseUIPar;
@@ -127,24 +131,25 @@ class JSONUIReal : public PathBuilder, public Meta, public UIReal<REAL>
                   const std::vector<std::string>& library_list,
                   const std::vector<std::string>& include_pathnames,
                   int size,
-                  const std::map<std::string, int>& path_table)
+                  const PathTableType& path_table,
+                  MemoryLayoutType memory_layout)
         {
-            init(name, filename, inputs, outputs, sr_index, sha_key, dsp_code, version, compile_options, library_list, include_pathnames, size, path_table);
+            init(name, filename, inputs, outputs, sr_index, sha_key, dsp_code, version, compile_options, library_list, include_pathnames, size, path_table, memory_layout);
         }
 
         JSONUIReal(const std::string& name, const std::string& filename, int inputs, int outputs)
         {
-            init(name, filename, inputs, outputs, -1, "", "", "", "", std::vector<std::string>(), std::vector<std::string>(), -1, std::map<std::string, int>());
+            init(name, filename, inputs, outputs, -1, "", "", "", "", std::vector<std::string>(), std::vector<std::string>(), -1, PathTableType(), MemoryLayoutType());
         }
 
         JSONUIReal(int inputs, int outputs)
         {
-            init("", "", inputs, outputs, -1, "", "","", "", std::vector<std::string>(), std::vector<std::string>(), -1, std::map<std::string, int>());
+            init("", "", inputs, outputs, -1, "", "","", "", std::vector<std::string>(), std::vector<std::string>(), -1, PathTableType(), MemoryLayoutType());
         }
         
         JSONUIReal()
         {
-            init("", "", -1, -1, -1, "", "", "", "", std::vector<std::string>(), std::vector<std::string>(), -1, std::map<std::string, int>());
+            init("", "", -1, -1, -1, "", "", "", "", std::vector<std::string>(), std::vector<std::string>(), -1, PathTableType(), MemoryLayoutType());
         }
  
         virtual ~JSONUIReal() {}
@@ -167,7 +172,8 @@ class JSONUIReal : public PathBuilder, public Meta, public UIReal<REAL>
                   const std::vector<std::string>& library_list,
                   const std::vector<std::string>& include_pathnames,
                   int size,
-                  const std::map<std::string, int>& path_table,
+                  const PathTableType& path_table,
+                  MemoryLayoutType memory_layout,
                   bool extended = false)
         {
             fTab = 1;
@@ -201,6 +207,7 @@ class JSONUIReal : public PathBuilder, public Meta, public UIReal<REAL>
             fCompileOptions = compile_options;
             fLibraryList = library_list;
             fIncludePathnames = include_pathnames;
+            fMemoryLayout = memory_layout;
         }
    
         // -- widget's layouts
@@ -417,6 +424,21 @@ class JSONUIReal : public PathBuilder, public Meta, public UIReal<REAL>
                 }
                 JSON << "],";
             }
+            if (fMemoryLayout.size() > 0) {
+                tab(fTab, JSON);
+                JSON << "\"memory_layout\": [";
+                for (size_t i = 0; i < fMemoryLayout.size(); i++) {
+                    // DSP or field name, type, size, sizeBytes, reads, writes
+                    std::tuple<std::string, int, int, int, int, int> item = fMemoryLayout[i];
+                    tab(fTab + 1, JSON);
+                    JSON << "{\"size\": " << std::get<3>(item) << ", ";
+                    JSON << "\"reads\": " << std::get<4>(item) << ", ";
+                    JSON << "\"writes\": " << std::get<5>(item) << "}";
+                    if (i < (fMemoryLayout.size() - 1)) JSON << ",";
+                }
+                tab(fTab, JSON);
+                JSON << "],";
+            }
             if (fDSPSize != -1) { tab(fTab, JSON); JSON << "\"size\": " << fDSPSize << ","; }
             if (fSHAKey != "") { tab(fTab, JSON); JSON << "\"sha_key\": \"" << fSHAKey << "\","; }
             if (fExpandedCode != "") { tab(fTab, JSON); JSON << "\"code\": \"" << fExpandedCode << "\","; }
@@ -454,14 +476,15 @@ struct JSONUI : public JSONUIReal<FAUSTFLOAT>, public UI
            const std::vector<std::string>& library_list,
            const std::vector<std::string>& include_pathnames,
            int size,
-           const std::map<std::string, int>& path_table):
+           const PathTableType& path_table,
+           MemoryLayoutType memory_layout):
     JSONUIReal<FAUSTFLOAT>(name, filename,
                           inputs, outputs,
                           sr_index,
                           sha_key, dsp_code,
                           version, compile_options,
                           library_list, include_pathnames,
-                          size, path_table)
+                          size, path_table, memory_layout)
     {}
     
     JSONUI(const std::string& name, const std::string& filename, int inputs, int outputs):

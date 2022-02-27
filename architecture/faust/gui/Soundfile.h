@@ -1,26 +1,26 @@
-/************************** BEGIN Soundfile.h **************************/
-/************************************************************************
+/************************** BEGIN Soundfile.h **************************
  FAUST Architecture File
- Copyright (C) 2017 GRAME, Centre National de Creation Musicale
+ Copyright (C) 2003-2022 GRAME, Centre National de Creation Musicale
  ---------------------------------------------------------------------
- This Architecture section is free software; you can redistribute it
- and/or modify it under the terms of the GNU General Public License
- as published by the Free Software Foundation; either version 3 of
- the License, or (at your option) any later version.
-
+ This program is free software; you can redistribute it and/or modify
+ it under the terms of the GNU Lesser General Public License as published by
+ the Free Software Foundation; either version 2.1 of the License, or
+ (at your option) any later version.
+ 
  This program is distributed in the hope that it will be useful,
  but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- GNU General Public License for more details.
-
- You should have received a copy of the GNU General Public License
- along with this program; If not, see <http://www.gnu.org/licenses/>.
-
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ GNU Lesser General Public License for more details.
+ 
+ You should have received a copy of the GNU Lesser General Public License
+ along with this program; if not, write to the Free Software
+ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+ 
  EXCEPTION : As a special exception, you may create a larger work
  that contains this FAUST architecture section and distribute
  that work under terms of your choice, so long as this FAUST
  architecture section is not modified.
- ************************************************************************/
+ ********************************************************************/
 
 #ifndef __Soundfile__
 #define __Soundfile__
@@ -51,8 +51,8 @@
 /*
  The soundfile structure to be used by the DSP code. Soundfile has a MAX_SOUNDFILE_PARTS parts 
  (even a single soundfile or an empty soundfile). 
- fLength, fOffset and fSR fields are filled accordingly by repeating
- the actual parts if needed.
+ The fLength, fOffset and fSR fields are filled accordingly by repeating the actual parts if needed.
+ The fBuffers contains MAX_CHAN non-interleaved arrays of samples.
  
  It has to be 'packed' to that the LLVM backend can correctly access it.
 
@@ -64,20 +64,22 @@
 
 PRE_PACKED_STRUCTURE
 struct Soundfile {
-    void* fBuffers; // will be set with double** or float** chosen at runtime
+    void* fBuffers; // will correspond to a double** or float** pointer chosen at runtime
     int* fLength;   // length of each part (so fLength[P] contains the length in frames of part P)
     int* fSR;       // sample rate of each part (so fSR[P] contains the SR of part P)
     int* fOffset;   // offset of each part in the global buffer (so fOffset[P] contains the offset in frames of part P)
     int fChannels;  // max number of channels of all concatenated files
+    int fParts;     // the total number of loaded parts
     bool fIsDouble; // keep the sample format (float or double)
 
-    Soundfile(int cur_chan, int length, int max_chan, bool is_double)
+    Soundfile(int cur_chan, int length, int max_chan, int total_parts, bool is_double)
     {
         fLength   = new int[MAX_SOUNDFILE_PARTS];
         fSR       = new int[MAX_SOUNDFILE_PARTS];
         fOffset   = new int[MAX_SOUNDFILE_PARTS];
         fIsDouble = is_double;
         fChannels = cur_chan;
+        fParts    = total_parts;
         if (fIsDouble) {
             fBuffers = allocBufferReal<double>(cur_chan, length, max_chan);
         } else {
@@ -290,7 +292,7 @@ class SoundfileReader {
             total_length += (MAX_SOUNDFILE_PARTS - path_name_list.size()) * BUFFER_SIZE;
             
             // Create the soundfile
-            Soundfile* soundfile = new Soundfile(cur_chan, total_length, max_chan, is_double);
+            Soundfile* soundfile = new Soundfile(cur_chan, total_length, max_chan, path_name_list.size(), is_double);
             
             // Init offset
             int offset = 0;

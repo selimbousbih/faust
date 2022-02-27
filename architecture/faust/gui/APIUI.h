@@ -1,26 +1,26 @@
-/************************** BEGIN APIUI.h **************************/
-/************************************************************************
- FAUST Architecture File
- Copyright (C) 2003-2017 GRAME, Centre National de Creation Musicale
- ---------------------------------------------------------------------
- This Architecture section is free software; you can redistribute it
- and/or modify it under the terms of the GNU General Public License
- as published by the Free Software Foundation; either version 3 of
- the License, or (at your option) any later version.
+/************************** BEGIN APIUI.h *****************************
+FAUST Architecture File
+Copyright (C) 2003-2022 GRAME, Centre National de Creation Musicale
+---------------------------------------------------------------------
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
 
- This program is distributed in the hope that it will be useful,
- but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- GNU General Public License for more details.
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Lesser General Public License for more details.
 
- You should have received a copy of the GNU General Public License
- along with this program; If not, see <http://www.gnu.org/licenses/>.
+You should have received a copy of the GNU Lesser General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 
- EXCEPTION : As a special exception, you may create a larger work
- that contains this FAUST architecture section and distribute
- that work under terms of your choice, so long as this FAUST
- architecture section is not modified.
- ************************************************************************/
+EXCEPTION : As a special exception, you may create a larger work
+that contains this FAUST architecture section and distribute
+that work under terms of your choice, so long as this FAUST
+architecture section is not modified.
+************************************************************************/
 
 #ifndef API_UI_H
 #define API_UI_H
@@ -108,7 +108,7 @@ class APIUI : public PathBuilder, public Meta, public UI
             fCurrentScale = kLin;
 
             fItems.push_back({path, label, converter, zone, init, min, max, step, type });
-
+       
             if (fCurrentAcc.size() > 0 && fCurrentGyr.size() > 0) {
                 fprintf(stderr, "warning : 'acc' and 'gyr' metadata used for the same %s parameter !!\n", label);
             }
@@ -389,12 +389,11 @@ class APIUI : public PathBuilder, public Meta, public UI
         void setParamValue(const char* path, FAUSTFLOAT v)
         {
             int index = getParamIndex(path);
-            if (index >= 0) setParamValue(index, v);
-        #ifdef DEBUG
-            if (index < 0) {
-                fprintf(stderr, ">>## Unknown parameter at path = %s\n", (path == nullptr ? "NULL" : path));
+            if (index >= 0) {
+                setParamValue(index, v);
+            } else {
+                fprintf(stderr, "setParamValue : '%s' not found\n", (path == nullptr ? "NULL" : path));
             }
-        #endif
         }
 
         double getParamRatio(int p) { return fItems[uint(p)].fConversion->faust2ui(*fItems[uint(p)].fZone); }

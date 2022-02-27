@@ -48,6 +48,24 @@
 
 class TextInstVisitor;
 
+// Look for the name of a given subcontainer
+struct SearchSubcontainer : public DispatchVisitor {
+    
+    string fClassName;
+    bool fFound = false;
+    
+    SearchSubcontainer(const string& class_name):fClassName(class_name)
+    {}
+    
+    virtual void visit(NamedTyped* typed)
+    {
+        fFound |= (fClassName == typed->getName());
+    }
+};
+
+// DSP or field name, type, size, sizeBytes, reads, writes
+typedef vector<tuple<string, int, int, int, int, int>> MemoryLayoutType;
+
 class CodeContainer : public virtual Garbageable {
    protected:
     list<CodeContainer*> fSubContainers;
@@ -61,6 +79,8 @@ class CodeContainer : public virtual Garbageable {
 
     int  fSubContainerType;
     bool fGeneratedSR;
+
+    MemoryLayoutType fMemoryLayout;
 
     string fKlassName;
 
@@ -157,9 +177,7 @@ class CodeContainer : public virtual Garbageable {
 
         dst << "Code generated with Faust " << FAUSTVERSION << " (https://faust.grame.fr)" << endl;
         dst << "Compilation options: ";
-        stringstream options;
-        gGlobal->printCompilationOptions(options);
-        dst << options.str();
+        dst << gGlobal->printCompilationOptions1();
         dst << "\n------------------------------------------------------------ */" << endl;
     }
 
@@ -330,13 +348,13 @@ class CodeContainer : public virtual Garbageable {
     template <typename REAL>
     void generateJSON(JSONInstVisitor<REAL>* visitor)
     {
-        // Prepare compilation options
-        stringstream compile_options;
-        gGlobal->printCompilationOptions(compile_options);
-        
         // "name", "filename" found in medata
-        visitor->init("", "", fNumInputs, fNumOutputs, -1, "", "", FAUSTVERSION, compile_options.str(),
-                      gGlobal->gReader.listLibraryFiles(), gGlobal->gImportDirList, -1, std::map<std::string, int>());
+        visitor->init("", "", fNumInputs, fNumOutputs, -1, "", "",
+                      FAUSTVERSION, gGlobal->printCompilationOptions1(),
+                      gGlobal->gReader.listLibraryFiles(),
+                      gGlobal->gImportDirList,
+                      -1, std::map<std::string, int>(),
+                      fMemoryLayout);
         
         generateUserInterface(visitor);
         generateMetaData(visitor);
@@ -617,6 +635,8 @@ class CodeContainer : public virtual Garbageable {
         faustassert(false);
         return nullptr;
     }
+    
+    void generateJSONFile();
 
     int fInt32ControlNum;  // number of 'int32' intermediate control values
     int fRealControlNum;   // number of 'real' intermediate control values

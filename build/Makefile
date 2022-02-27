@@ -11,7 +11,7 @@ system := $(shell echo $(system) | grep MINGW > /dev/null && echo MINGW || echo 
 # output directories
 FAUSTDIR ?= faustdir
 IOSDIR   := iosdir
-VERSION := 2.38.15
+VERSION := 2.39.9
 
 #===============================================================
 # current generator and backends
@@ -151,7 +151,7 @@ help:
 	@echo
 	@echo "Packaging targets:"
 	@echo " 'package'    : build a Faust package for the current platform"
-	@echo " 'release'    : build a Faust release (MacOS only)"
+	@echo " 'release'    : build a Faust release (macOS only)"
 	@echo "                includes faust, faustgen and dist packages"
 
 	

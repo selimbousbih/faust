@@ -102,7 +102,7 @@ class MinPrim : public xtended {
             } else {
                 faustassert(n1 == kInt);  // second argument is not float, cast it to float
                 // prepare args values
-                list<ValueInst*>::const_iterator it2 = args.begin();
+                ListValuesIt it2 = args.begin();
                 casted_args.push_back((*it2));
                 it2++;
                 casted_args.push_back(InstBuilder::genCastFloatInst(*it2));
@@ -116,7 +116,7 @@ class MinPrim : public xtended {
             arg_types.push_back(itfloat());
 
             // prepare args values
-            list<ValueInst*>::const_iterator it2 = args.begin();
+            ListValuesIt it2 = args.begin();
             casted_args.push_back(InstBuilder::genCastFloatInst(*it2));
             it2++;
             casted_args.push_back((*it2));
@@ -138,7 +138,7 @@ class MinPrim : public xtended {
                 } else {
                     faustassert(b1 == kBool);  // second is boolean, cast to int
                     // prepare args values
-                    list<ValueInst*>::const_iterator it2 = args.begin();
+                    ListValuesIt it2 = args.begin();
                     casted_args.push_back((*it2));
                     it2++;
                     casted_args.push_back(InstBuilder::genCastInt32Inst(*it2));
@@ -147,7 +147,7 @@ class MinPrim : public xtended {
             } else if (b1 == kNum) {
                 faustassert(b0 == kBool);  // first is boolean, cast to int
                 // prepare args values
-                list<ValueInst*>::const_iterator it2 = args.begin();
+                ListValuesIt it2 = args.begin();
                 casted_args.push_back(InstBuilder::genCastInt32Inst(*it2));
                 it2++;
                 casted_args.push_back((*it2));
@@ -157,7 +157,7 @@ class MinPrim : public xtended {
                 // '1' and 'false' is actually '0' (which is not the case if compiled in SSE mode)
                 faustassert(b0 == kBool);
                 faustassert(b1 == kBool);  // both are booleans, cast both
-                list<ValueInst*>::const_iterator it2 = args.begin();
+                ListValuesIt it2 = args.begin();
                 casted_args.push_back(InstBuilder::genCastInt32Inst(*it2));
                 it2++;
                 casted_args.push_back(InstBuilder::genCastInt32Inst(*it2));
@@ -180,11 +180,11 @@ class MinPrim : public xtended {
                 return subst("min($0, $1)", args[0], args[1]);
             } else {
                 faustassert(n1 == kInt);  // second argument is not float, cast it to float
-                return subst("min($0, $2$1)", args[0], args[1], icast());
+                return subst("min($0, $2($1))", args[0], args[1], icast());
             }
         } else if (n1 == kReal) {
             faustassert(n0 == kInt);  // first not float but second is, cast first to float
-            return subst("min($2$0, $1)", args[0], args[1], icast());
+            return subst("min($2($0), $1)", args[0], args[1], icast());
         } else {
             faustassert(n0 == kInt);
             faustassert(n1 == kInt);  // both are integers, check for booleans
@@ -196,17 +196,17 @@ class MinPrim : public xtended {
                     return subst("min($0, $1)", args[0], args[1]);
                 } else {
                     faustassert(b1 == kBool);  // second is boolean, cast to int
-                    return subst("min($0, (int)$1)", args[0], args[1]);
+                    return subst("min($0, int($1))", args[0], args[1]);
                 }
             } else if (b1 == kNum) {
                 faustassert(b0 == kBool);  // first is boolean, cast to int
-                return subst("min((int)$0, $1)", args[0], args[1], icast());
+                return subst("min(int($0), $1)", args[0], args[1], icast());
             } else {
                 // both are booleans, theoretically no need to cast, but we still do it to be sure 'true' is actually
                 // '1' and 'false' is actually '0' (which is not the case if compiled in SSE mode)
                 faustassert(b0 == kBool);
                 faustassert(b1 == kBool);
-                return subst("min((int)$0, (int)$1)", args[0], args[1]);
+                return subst("min(int($0), int($1))", args[0], args[1]);
             }
         }
     }

@@ -1,7 +1,7 @@
 /************************************************************************
- ************************************************************************
- Copyright (C) 2021 GRAME, Centre National de Creation Musicale
- 
+ FAUST Architecture File
+ Copyright (C) 2003-2022 GRAME, Centre National de Creation Musicale
+ ---------------------------------------------------------------------
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU Lesser General Public License as published by
  the Free Software Foundation; either version 2.1 of the License, or
@@ -9,15 +9,18 @@
  
  This program is distributed in the hope that it will be useful,
  but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  GNU Lesser General Public License for more details.
  
  You should have received a copy of the GNU Lesser General Public License
  along with this program; if not, write to the Free Software
  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  
- ************************************************************************
- ************************************************************************/
+ EXCEPTION : As a special exception, you may create a larger work
+ that contains this FAUST architecture section and distribute
+ that work under terms of your choice, so long as this FAUST
+ architecture section is not modified.
+ **************************************************************************/
 
 #include <string>
 #include <vector>
@@ -356,8 +359,8 @@ Signal sigCheckbox(const std::string& label);
  *
  * @param label - the label definition (see [2])
  * @param init - the init signal, a constant numerical expression (see [1])
- * @param min - the max signal, a constant numerical expression (see [1])
- * @param max - the min signal, a constant numerical expression (see [1])
+ * @param min - the min signal, a constant numerical expression (see [1])
+ * @param max - the max signal, a constant numerical expression (see [1])
  * @param step - the step signal, a constant numerical expression (see [1])
  *
  * @return the vertical slider signal.
@@ -369,8 +372,8 @@ Signal sigVSlider(const std::string& label, Signal init, Signal min, Signal max,
  *
  * @param label - the label definition (see [2])
  * @param init - the init signal, a constant numerical expression (see [1])
- * @param min - the max signal, a constant numerical expression (see [1])
- * @param max - the min signal, a constant numerical expression (see [1])
+ * @param min - the min signal, a constant numerical expression (see [1])
+ * @param max - the max signal, a constant numerical expression (see [1])
  * @param step - the step signal, a constant numerical expression (see [1])
  *
  * @return the horizontal slider signal.
@@ -382,8 +385,8 @@ Signal sigHSlider(const std::string& label, Signal init, Signal min, Signal max,
  *
  * @param label - the label definition (see [2])
  * @param init - the init signal, a constant numerical expression (see [1])
- * @param min - the max signal, a constant numerical expression (see [1])
- * @param max - the min signal, a constant numerical expression (see [1])
+ * @param min - the min signal, a constant numerical expression (see [1])
+ * @param max - the max signal, a constant numerical expression (see [1])
  * @param step - the step signal, a constant numerical expression (see [1])
  *
  * @return the num entry signal.
@@ -394,8 +397,8 @@ Signal sigNumEntry(const std::string& label, Signal init, Signal min, Signal max
  * Create a vertical bargraph signal.
  *
  * @param label - the label definition (see [2])
- * @param min - the max signal, a constant numerical expression (see [1])
- * @param max - the min signal, a constant numerical expression (see [1])
+ * @param min - the min signal, a constant numerical expression (see [1])
+ * @param max - the max signal, a constant numerical expression (see [1])
  * @param s - the input signal
  *
  * @return the vertical bargraph signal.
@@ -406,8 +409,8 @@ Signal sigVBargraph(const std::string& label, Signal min, Signal max, Signal s);
  * Create an horizontal bargraph signal.
  *
  * @param label - the label definition (see [2])
- * @param min - the max signal, a constant numerical expression (see [1])
- * @param max - the min signal, a constant numerical expression (see [1])
+ * @param min - the min signal, a constant numerical expression (see [1])
+ * @param max - the max signal, a constant numerical expression (see [1])
  * @param s - the input signal
  *
  * @return the horizontal bargraph signal.
@@ -432,7 +435,7 @@ Signal sigAttach(Signal s1, Signal s2);
  * Create a C++ Faust DSP factory from a vector of output signals.
  *
  * @param name_app - the name of the Faust program
- * @param signals - the vector of output signals
+ * @param signals_vec - the vector of output signals
  * @param argc - the number of parameters in argv array
  * @param argv - the array of parameters
  * @param error_msg - the error string to be filled

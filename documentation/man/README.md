@@ -1,4 +1,4 @@
-% man(1) Version 2.38.15 (22-December-2021) | Faust man page
+% man(1) Version 2.39.9 (16-February-2022) | Faust man page
 
 NAME
 ====
@@ -82,6 +82,8 @@ Code generation options:
 
   **-os2**        **--one-sample2**               generate one sample computation (2 = separated control and DSP struct. Separation in short and long delay lines).
 
+  **-os3**        **--one-sample3**               generate one sample computation (3 = like 2 but with external memory pointers kept in the DSP struct).
+
   **-cm**         **--compute-mix**               mix in outputs buffers.
 
   **-cn** \<name>  **--class-name** \<name>         specify the name of the dsp class to be used instead of mydsp.
@@ -94,7 +96,7 @@ Code generation options:
 
   **-dlt** \<n>    **--delay-line-threshold** \<n>  threshold between 'mask' and 'select' ring buffer implementation (default INT_MAX samples).
 
-  **-mem**        **--memory**                    allocate static in global state using a custom memory manager.
+  **-mem**        **--memory-manager**            allocate static in global state using a custom memory manager.
 
   **-ftz** \<n>    **--flush-to-zero** \<n>         code added to recursive signals [0:no (default), 1:fabs based, 2:mask based (fastest)].
 

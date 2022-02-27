@@ -37,6 +37,7 @@
 #include <list>
 
 #include "faust/dsp/timed-dsp.h"
+#include "faust/dsp/one-sample-dsp.h"
 #include "faust/gui/FUI.h"
 #include "faust/gui/PrintUI.h"
 #include "faust/misc.h"
@@ -201,11 +202,13 @@ int main(int argc, char* argv[])
     
 #ifdef MIDICTRL
     jackaudio_midi audio;
-    audio.init(name, DSP);
 #else
     jackaudio audio;
-    audio.init(name, DSP);
 #endif
+    if (!audio.init(name, DSP)) {
+        cerr << "Unable to init audio" << endl;
+        exit(1);
+    }
     
 // After audio init to get SR
 #if SOUNDFILE
@@ -227,7 +230,10 @@ int main(int argc, char* argv[])
     cout << "MIDI is on" << endl;
 #endif
     
-    audio.start();
+    if (!audio.start()) {
+        cerr << "Unable to start audio" << endl;
+        exit(1);
+    }
     
     cout << "ins " << audio.getNumInputs() << endl;
     cout << "outs " << audio.getNumOutputs() << endl;

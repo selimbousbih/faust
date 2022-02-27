@@ -1,22 +1,25 @@
 /************************************************************************
- ************************************************************************
- Copyright (C) 2003-2017 GRAME, Centre National de Creation Musicale
-
+ FAUST Architecture File
+ Copyright (C) 2003-2022 GRAME, Centre National de Creation Musicale
+ ---------------------------------------------------------------------
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU Lesser General Public License as published by
  the Free Software Foundation; either version 2.1 of the License, or
  (at your option) any later version.
-
+ 
  This program is distributed in the hope that it will be useful,
  but WITHOUT ANY WARRANTY; without even the implied warranty of
  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  GNU Lesser General Public License for more details.
-
+ 
  You should have received a copy of the GNU Lesser General Public License
  along with this program; if not, write to the Free Software
  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
-
- ************************************************************************
+ 
+ EXCEPTION : As a special exception, you may create a larger work
+ that contains this FAUST architecture section and distribute
+ that work under terms of your choice, so long as this FAUST
+ architecture section is not modified.
  ************************************************************************/
 
 #ifndef LIBFAUST_C_H
@@ -38,7 +41,7 @@ extern "C" {
  * Compute a SHA1 key from a string.
  *
  * @param data - the string to be converted in SHA1 key
- * @param key - a 64 characters buffer to be filled with the computed key
+ * @param sha_key - a 64 characters buffer to be filled with the computed key
  *
  */
 LIBEXPORT void generateCSHA1(const char* data, char* sha_key);
@@ -62,7 +65,8 @@ LIBEXPORT const char* expandCDSPFromFile(const char* filename, int argc, const c
 /**
  * Expand a DSP source code into a self-contained DSP where all library import have been inlined starting from a string.
  *
- * @param filename - the DSP filename
+ * @param name_app - the name of the Faust program
+ * @param dsp_content - the Faust program as a string
  * @param argc - the number of parameters in argv array
  * @param argv - the array of parameters (Warning : aux files generation options will be filtered (-svg, ...) --> use
  * generateAuxFiles)
@@ -89,7 +93,8 @@ LIBEXPORT bool generateCAuxFilesFromFile(const char* filename, int argc, const c
 /**
  * Generate additional file (other backends, SVG, XML, JSON...) starting from a string.
  *
- * @param filename - the DSP filename
+ * @param name_app - the name of the Faust program
+ * @param dsp_content - the Faust program as a string
  * @param argc - the number of parameters in argv array
  * @param argv - the array of parameters
  * @param error_msg - the error string to be filled, has to be 4096 characters long

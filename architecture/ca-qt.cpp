@@ -351,8 +351,10 @@ int main(int argc, char* argv[])
 #endif
     
     coreaudio audio(srate, fpb);
-    audio.init(name, DSP);
-    audio.start();
+    if (!audio.init(name, DSP)) {
+        cerr << "Unable to init audio" << endl;
+        exit(1);
+    }
    
 // After audio init to get SR
 #ifdef SOUNDFILE
@@ -371,6 +373,11 @@ int main(int argc, char* argv[])
     cout << "OSC is on" << endl;
     audio.addControlCallback(osc_compute_callback, &oscinterface);
 #endif
+    
+    if (!audio.start()) {
+        cerr << "Unable to start audio" << endl;
+        exit(1);
+    }
     
     cout << "ins " << audio.getNumInputs() << endl;
     cout << "outs " << audio.getNumOutputs() << endl;

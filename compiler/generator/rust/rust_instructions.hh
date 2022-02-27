@@ -345,9 +345,9 @@ class RustInstVisitor : public TextInstVisitor {
             *fOut << "]";
         } else {
             // Array index expression casted to 'usize' type
-            *fOut << "[";
+            *fOut << "[(";
             indexed->fIndex->accept(this);
-            *fOut << " as usize]";
+            *fOut << ") as usize]";
         }
     }
 
@@ -430,9 +430,9 @@ class RustInstVisitor : public TextInstVisitor {
 
     virtual void visit(::CastInst* inst)
     {
-        *fOut << "(";
+        *fOut << "((";
         inst->fInst->accept(this);
-        *fOut << " as " << fTypeManager->generateType(inst->fType);
+        *fOut << ") as " << fTypeManager->generateType(inst->fType);
         *fOut << ")";
     }
 
@@ -450,7 +450,7 @@ class RustInstVisitor : public TextInstVisitor {
     virtual void generateFunCall(FunCallInst* inst, const std::string& fun_name)
     {
         if (inst->fMethod) {
-            list<ValueInst*>::const_iterator it = inst->fArgs.begin();
+            ListValuesIt it = inst->fArgs.begin();
             // Compile object arg
             (*it)->accept(this);
             // Compile parameters

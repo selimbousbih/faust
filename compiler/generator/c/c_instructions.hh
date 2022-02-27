@@ -345,8 +345,9 @@ class CInstVisitor : public TextInstVisitor {
 
     virtual void visit(::CastInst* inst)
     {
-        *fOut << "(" << fTypeManager->generateType(inst->fType) << ")";
+        *fOut << "(" << fTypeManager->generateType(inst->fType) << ")(";
         inst->fInst->accept(this);
+        *fOut << ")";
     }
 
     // TODO : does not work, put this code in a function
@@ -450,11 +451,12 @@ class CInstVisitor : public TextInstVisitor {
     static void cleanup() { gFunctionSymbolTable.clear(); }
 };
 
-// Used for -os mode (TODO : does not work with 'soundfile')
+// Used for -os1 mode (TODO : does not work with 'soundfile')
 class CInstVisitor1 : public CInstVisitor {
     
     private:
     
+        // Fields are moved in iZone/fZone model
         StructInstVisitor fStructVisitor;
     
     public:
@@ -466,7 +468,7 @@ class CInstVisitor1 : public CInstVisitor {
         virtual void visit(AddSoundfileInst* inst)
         {
             // Not supported for now
-            throw faustexception("ERROR : AddSoundfileInst not supported for -os mode\n");
+            throw faustexception("ERROR : AddSoundfileInst not supported for -osX mode\n");
         }
     
         virtual void visit(DeclareVarInst* inst)
@@ -522,10 +524,10 @@ class CInstVisitor1 : public CInstVisitor {
    
 };
 
-// Used for -os2 mode (TODO : does not work with 'soundfile')
+// Used for -os2 mode, accessing iZone/fZone as function args (TODO : does not work with 'soundfile')
 class CInstVisitor2 : public CInstVisitor {
     
-    private:
+    protected:
         
         // Fields are distributed between the DSP struct and iZone/fZone model
         StructInstVisitor1 fStructVisitor;
@@ -535,12 +537,6 @@ class CInstVisitor2 : public CInstVisitor {
         CInstVisitor2(std::ostream* out, const string& structname, int external_memory, int tab = 0)
         :CInstVisitor(out, structname, tab), fStructVisitor(external_memory, 4)
         {}
-        
-        virtual void visit(AddSoundfileInst* inst)
-        {
-            // Not supported for now
-            throw faustexception("ERROR : AddSoundfileInst not supported for -os mode\n");
-        }
         
         virtual void visit(DeclareVarInst* inst)
         {
@@ -579,6 +575,35 @@ class CInstVisitor2 : public CInstVisitor {
         int getIntZoneSize() { return fStructVisitor.getStructIntSize()/sizeof(int); }
         int getRealZoneSize() { return fStructVisitor.getStructRealSize()/ifloatsize(); }
     
+};
+
+// Used for -os3 mode, accessing iZone/fZone in DSP struct (TODO : does not work with 'soundfile')
+class CInstVisitor3 : public CInstVisitor2 {
+    
+    public:
+        
+        CInstVisitor3(std::ostream* out, const string& structname, int external_memory, int tab = 0)
+        :CInstVisitor2(out, structname, external_memory, tab)
+        {}
+         
+        virtual void visit(IndexedAddress* indexed)
+        {
+            Typed::VarType type;
+            string name = indexed->getName();
+            
+            if (fStructVisitor.hasField(name, type) && fStructVisitor.getFieldMemoryType(name) == MemoryDesc::kExternal) {
+                if (type == Typed::kInt32) {
+                    FIRIndex value = FIRIndex(indexed->fIndex) + fStructVisitor.getFieldIntOffset(name)/sizeof(int);
+                    InstBuilder::genLoadArrayStructVar("iZone", value)->accept(this);
+                } else {
+                    FIRIndex value = FIRIndex(indexed->fIndex) + fStructVisitor.getFieldRealOffset(name)/ifloatsize();
+                    InstBuilder::genLoadArrayStructVar("fZone", value)->accept(this);
+                }
+            } else {
+                TextInstVisitor::visit(indexed);
+            }
+        }
+     
 };
 
 #endif

@@ -1,24 +1,26 @@
-/************************** BEGIN interpreter-dsp.h **************************/
-/************************************************************************
- ************************************************************************
- Copyright (C) 2003-2017 GRAME, Centre National de Creation Musicale
- 
- This program is free software; you can redistribute it and/or modify
- it under the terms of the GNU Lesser General Public License as published by
- the Free Software Foundation; either version 2.1 of the License, or
- (at your option) any later version.
- 
- This program is distributed in the hope that it will be useful,
- but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- GNU Lesser General Public License for more details.
- 
- You should have received a copy of the GNU Lesser General Public License
- along with this program; if not, write to the Free Software
- Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
- 
- ************************************************************************
- ************************************************************************/
+/************************** BEGIN interpreter-dsp.h **********************
+FAUST Architecture File
+Copyright (C) 2003-2022 GRAME, Centre National de Creation Musicale
+---------------------------------------------------------------------
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+
+EXCEPTION : As a special exception, you may create a larger work
+that contains this FAUST architecture section and distribute
+that work under terms of your choice, so long as this FAUST
+architecture section is not modified.
+************************************************************************/
 
 #ifndef INTERPRETER_DSP_H
 #define INTERPRETER_DSP_H
@@ -216,7 +218,7 @@ interpreter_dsp_factory* createInterpreterDSPFactoryFromBoxes(const std::string&
 /**
  * Delete a Faust DSP factory, that is decrements it's reference counter, possibly really deleting the internal pointer.
  * Possibly also delete DSP pointers associated with this factory, if they were not explicitly deleted.
- * Beware : all kept factories and DSP pointers (in local variables...) thus become invalid.
+ * Beware: all kept factories and DSP pointers (in local variables...) thus become invalid.
  * 
  * @param factory - the DSP factory
  *
@@ -236,7 +238,7 @@ bool deleteInterpreterDSPFactory(interpreter_dsp_factory* factory);
 DEPRECATED(std::vector<std::string> getInterpreterDSPFactoryLibraryList(interpreter_dsp_factory* factory));
 
 /**
- * Delete all Faust DSP factories kept in the library cache. Beware : all kept factory and DSP pointers (in local variables...) thus become invalid.
+ * Delete all Faust DSP factories kept in the library cache. Beware: all kept factory and DSP pointers (in local variables...) thus become invalid.
  * 
  */                                 
 void deleteAllInterpreterDSPFactories();
@@ -267,7 +269,7 @@ extern "C" void stopMTDSPFactories();
  * the same (reference counted) factory pointer. You will have to explicitly use deleteInterpreterDSPFactory to properly
  * decrement reference counter when the factory is no more needed.
  *
- * @param bitcode_code - the bitcode string
+ * @param bitcode - the bitcode string
  * @param error_msg - the error string to be filled
  *
  * @return the DSP factory on success, otherwise a null pointer.
@@ -289,7 +291,7 @@ std::string writeInterpreterDSPFactoryToBitcode(interpreter_dsp_factory* factory
  * the same (reference counted) factory pointer. You will have to explicitly use deleteInterpreterDSPFactory to properly
  * decrement reference counter when the factory is no more needed.
  *
- * @param bitcode_path - the bitcode file pathname
+ * @param bit_code_path - the bitcode file pathname
  * @param error_msg - the error string to be filled
  *
  * @return the DSP factory on success, otherwise a null pointer.
@@ -300,7 +302,7 @@ interpreter_dsp_factory* readInterpreterDSPFactoryFromBitcodeFile(const std::str
  * Write a Faust DSP factory into a bitcode file.
  *
  * @param factory - the DSP factory
- * @param bitcode_path - the bitcode file pathname
+ * @param bit_code_path - the bitcode file pathname
  *
  * @return true if success, false otherwise.
  */

@@ -67,6 +67,8 @@ struct dsp_factory_base;
 
 typedef long double quad;
 
+typedef map<string, int> PathTableType;
+
 struct comp_str {
     bool operator()(Tree s1, Tree s2) const { return (strcmp(tree2str(s1), tree2str(s2)) < 0); }
 };
@@ -227,7 +229,7 @@ struct global {
     int gBoxSlotNumber;  ///< counter for unique slot number
 
     bool gMemoryManager;
-
+   
     bool gLocalCausalityCheck;  ///< when true trigs local causality errors (negative delay)
 
     bool gCausality;  ///< (FIXME: global used as a parameter of typeAnnotation) when true trigs causality errors
@@ -363,7 +365,6 @@ struct global {
     Sym SIGDELAY1;
     Sym SIGDELAY;
     Sym SIGPREFIX;
-    Sym SIGIOTA;
     Sym SIGRDTBL;
     Sym SIGWRTBL;
     Sym SIGTABLE;
@@ -487,6 +488,7 @@ struct global {
     map<Typed::VarType, BasicTyped*> gTypeTable;     // To share a unique BasicTyped* object for a given type
     map<string, Typed*>              gVarTypeTable;  // Types of variables or functions
     map<Typed::VarType, int>         gTypeSizeMap;   // Size of types in bytes
+    map<string, pair<string, int>>   gTablesSize;    // Global tables size in bytes: class name, <table name, size>
 
     // colorize
     map<Tree, int> gColorMap;
@@ -598,6 +600,7 @@ struct global {
     bool hasForeignFunction(const string& name, const string& inc_file);
    
     void printCompilationOptions(stringstream& dst, bool backend = true);
+    string printCompilationOptions1();
 
     void initTypeSizeMap();
 

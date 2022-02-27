@@ -52,9 +52,7 @@ CodeContainer* LLVMCodeContainer::createScalarContainer(const string& name, int 
 LLVMCodeContainer::LLVMCodeContainer(const string& name, int numInputs, int numOutputs)
 {
     LLVMContext* context = new LLVMContext();
-    stringstream compile_options;
-    gGlobal->printCompilationOptions(compile_options);
-    Module* module = new Module(compile_options.str() + ", v" + string(FAUSTVERSION), *context);
+    Module* module = new Module(gGlobal->printCompilationOptions1() + ", v" + string(FAUSTVERSION), *context);
     
     init(name, numInputs, numOutputs, module, context);
 }
@@ -77,8 +75,7 @@ void LLVMCodeContainer::init(const string& name, int numInputs, int numOutputs, 
     
     // Set "-fast-math"
     FastMathFlags FMF;
-#if defined(LLVM_80) || defined(LLVM_90) || defined(LLVM_100) || defined(LLVM_110) || defined(LLVM_120) || \
-    defined(LLVM_130) || defined(LLVM_140)
+#if LLVM_VERSION_MAJOR >= 8
     FMF.setFast();  // has replaced the following function
 #else
     FMF.setUnsafeAlgebra();

@@ -35,6 +35,12 @@
 
 using namespace std;
 
+// To do CPU native compilation
+#define JIT_TARGET ""
+
+// To do cross-compilation for a given target
+//#define JIT_TARGET "x86_64-apple-darwin20.6.0:westmere"
+
 static void printList(const vector<string>& list)
 {
     for (int i = 0; i < list.size(); i++) {
@@ -84,11 +90,13 @@ int main(int argc, const char** argv)
     string error_msg;
     cout << "Libfaust version : " << getCLibFaustVersion () << endl;
     string dspFile = argv[1];
+    
+    std::cout << "getDSPMachineTarget " << getDSPMachineTarget() << std::endl;
    
     cout << "=============================\n";
     cout << "Test createDSPFactoryFromFile\n";
     {
-        dsp_factory* factory = createDSPFactoryFromFile(dspFile, 0, NULL, "", error_msg, -1);
+        dsp_factory* factory = createDSPFactoryFromFile(dspFile, 0, NULL, JIT_TARGET, error_msg, -1);
         
         if (!factory) {
             cerr << "Cannot create factory : " << error_msg;
@@ -127,7 +135,7 @@ int main(int argc, const char** argv)
     cout << "=============================\n";
     cout << "Test createDSPFactoryFromString\n";
     {
-        dsp_factory* factory = createDSPFactoryFromString("FaustDSP", "process = +;", 0, NULL, "", error_msg, -1);
+        dsp_factory* factory = createDSPFactoryFromString("FaustDSP", "process = +;", 0, NULL, JIT_TARGET, error_msg, -1);
         if (!factory) {
             cerr << "Cannot create factory : " << error_msg;
             exit(EXIT_FAILURE);
@@ -161,7 +169,7 @@ int main(int argc, const char** argv)
     cout << "=============================\n";
     cout << "Test of UI element encoding\n";
     {
-        dsp_factory* factory = createDSPFactoryFromString("FaustDSP", "process = vslider(\"Volume\", 0.5, 0, 1, 0.025);", 0, NULL, "", error_msg, -1);
+        dsp_factory* factory = createDSPFactoryFromString("FaustDSP", "process = vslider(\"Volume\", 0.5, 0, 1, 0.025);", 0, NULL, JIT_TARGET, error_msg, -1);
         if (!factory) {
             cerr << "Cannot create factory : " << error_msg;
             exit(EXIT_FAILURE);

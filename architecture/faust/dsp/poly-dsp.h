@@ -1,26 +1,26 @@
-/************************** BEGIN poly-dsp.h **************************/
-/************************************************************************
- FAUST Architecture File
- Copyright (C) 2003-2017 GRAME, Centre National de Creation Musicale
- ---------------------------------------------------------------------
- This Architecture section is free software; you can redistribute it
- and/or modify it under the terms of the GNU General Public License
- as published by the Free Software Foundation; either version 3 of
- the License, or (at your option) any later version.
- 
- This program is distributed in the hope that it will be useful,
- but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- GNU General Public License for more details.
- 
- You should have received a copy of the GNU General Public License
- along with this program; If not, see <http://www.gnu.org/licenses/>.
- 
- EXCEPTION : As a special exception, you may create a larger work
- that contains this FAUST architecture section and distribute
- that work under terms of your choice, so long as this FAUST
- architecture section is not modified.
- ************************************************************************/
+/************************** BEGIN poly-dsp.h *************************
+FAUST Architecture File
+Copyright (C) 2003-2022 GRAME, Centre National de Creation Musicale
+---------------------------------------------------------------------
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation; either version 2.1 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+
+EXCEPTION : As a special exception, you may create a larger work
+that contains this FAUST architecture section and distribute
+that work under terms of your choice, so long as this FAUST
+architecture section is not modified.
+*********************************************************************/
 
 #ifndef __poly_dsp__
 #define __poly_dsp__
@@ -167,6 +167,7 @@ struct dsp_voice : public MapUI, public decorator_dsp {
     int fDate;                          // KeyOn date
     int fRelease;                       // Current number of samples used in release mode to detect end of note
     FAUSTFLOAT fLevel;                  // Last audio block level
+    double fReleaseLengthSec;           // Maximum release length in seconds (estimated time to silence after note release)
     std::vector<std::string> fGatePath; // Paths of 'gate' control
     std::vector<std::string> fGainPath; // Paths of 'gain/vel|velocity' control
     std::vector<std::string> fFreqPath; // Paths of 'freq/key' control
@@ -186,6 +187,7 @@ struct dsp_voice : public MapUI, public decorator_dsp {
         fNextNote = fNextVel = -1;
         fLevel = FAUSTFLOAT(0);
         fDate = fRelease = 0;
+        fReleaseLengthSec = 0.5;  // A half second is a reasonable default maximum release length.
         extractPaths(fGatePath, fFreqPath, fGainPath);
     }
     virtual ~dsp_voice()
@@ -245,6 +247,11 @@ struct dsp_voice : public MapUI, public decorator_dsp {
             }
         }
     }
+    
+    void reset()
+    {
+        init(getSampleRate());
+    }
  
     void instanceClear()
     {
@@ -294,9 +301,15 @@ struct dsp_voice : public MapUI, public decorator_dsp {
             fCurNote = kFreeVoice;
         } else {
             // Release voice
-            fRelease = fDSP->getSampleRate()/2; // Half sec used in release mode to detect end of note
+            fRelease = fReleaseLengthSec * fDSP->getSampleRate();
             fCurNote = kReleaseVoice;
         }
+    }
+ 
+    // Change the voice release
+    void setReleaseLength(double sec)
+    {
+        fReleaseLengthSec = sec;
     }
 
 };
@@ -495,6 +508,10 @@ class dsp_poly : public decorator_dsp, public midi, public JSONControl {
         {
             midi::progChange(channel, pgm);
         }
+    
+        // Change the voice release
+        virtual void setReleaseLength(double seconds)
+        {}
     
 };
 
@@ -834,7 +851,7 @@ class mydsp_poly : public dsp_voice_group, public dsp_poly {
                 fVoiceTable[i]->keyOff(hard);
             }
         }
-
+ 
         // Additional polyphonic API
         MapUI* newVoice()
         {
@@ -845,7 +862,9 @@ class mydsp_poly : public dsp_voice_group, public dsp_poly {
         {
             auto it = find(fVoiceTable.begin(), fVoiceTable.end(), reinterpret_cast<dsp_voice*>(voice));
             if (it != fVoiceTable.end()) {
-                (*it)->keyOff();
+                dsp_voice* voice = *it;
+                voice->keyOff();
+                voice->reset();
             } else {
                 fprintf(stderr, "Voice not found\n");
             }
@@ -882,6 +901,14 @@ class mydsp_poly : public dsp_voice_group, public dsp_poly {
             }
         }
 
+        // Change the voice release
+        void setReleaseLength(double seconds)
+        {
+            for (size_t i = 0; i < fVoiceTable.size(); i++) {
+                fVoiceTable[i]->setReleaseLength(seconds);
+            }
+        }
+
 };
 
 /**
@@ -904,7 +931,7 @@ class dsp_poly_effect : public dsp_poly {
         {
             // dsp_poly_effect is also a decorator_dsp, which will free fPolyDSP
         }
-        
+    
         // MIDI API
         MapUI* keyOn(int channel, int pitch, int velocity)
         {
@@ -937,6 +964,12 @@ class dsp_poly_effect : public dsp_poly {
         void progChange(int channel, int pgm)
         {
             fPolyDSP->progChange(channel, pgm);
+        }
+    
+        // Change the voice release
+        void setReleaseLength(double sec)
+        {
+            fPolyDSP->setReleaseLength(sec);
         }
     
 };

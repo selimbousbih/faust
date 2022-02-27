@@ -44,7 +44,6 @@
  3 : collect FP_SUBNORMAL, FP_INFINITE, FP_NAN, INTEGER_OVERFLOW and DIV_BY_ZERO
  4 : collect FP_SUBNORMAL, FP_INFINITE, FP_NAN, INTEGER_OVERFLOW, DIV_BY_ZERO, fails at first FP_INFINITE or FP_NAN
  5 : collect FP_SUBNORMAL, FP_INFINITE, FP_NAN, INTEGER_OVERFLOW, DIV_BY_ZERO, continue after FP_INFINITE or FP_NAN
-
 */
 
 #define INTEGER_OVERFLOW -1
@@ -513,7 +512,7 @@ class FBCInterpreter : public FBCExecutor<REAL> {
     void ExecuteBuildUserInterface(FIRUserInterfaceBlockInstruction<REAL>* block, UITemplate* glue)
     {
         // UI may have to be adapted if REAL and FAUSTFLOAT size do not match
-        bool need_proxy = (sizeof(REAL) == 8 && reinterpret_cast<UI*>(glue->fCPPInterface)->sizeOfFAUSTFLOAT() == 4);
+        bool need_proxy = sizeof(REAL) != reinterpret_cast<UI*>(glue->fCPPInterface)->sizeOfFAUSTFLOAT();
         ZoneParam* cur_param = nullptr;
         
         for (const auto& it : block->fInstructions) {

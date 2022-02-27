@@ -16,7 +16,7 @@ EFFECT=""
 # Check Darwin specifics
 #
 if [[ $(uname) == Darwin ]]; then
-    ARCHLIB="-L/usr/local/lib -ljacknet -ljack -lpthread -framework CoreAudio -framework CoreMIDI -framework CoreFoundation"
+    ARCHLIB="-L/usr/local/lib -ljacknet -ljack -lpthread -framework CoreMIDI -framework CoreFoundation -framework CoreAudio -framework AudioUnit -framework CoreServices"
 else
     ARCHLIB+="-L/usr/local/lib -ljacknet -ljack -lpthread"
 fi
@@ -56,19 +56,20 @@ do
         POLY="POLY2"
         shift
         EFFECT=$1
-   	elif [ $p = "-osc" ]; then
-	 	OSCDEFS="-DOSCCTRL -lOSCFaust"
+       elif [ $p = "-osc" ]; then
+         OSCDEFS="-DOSCCTRL -lOSCFaust"
     elif [ $p = "-httpd" ]; then
-	 	HTTPDEFS="-DHTTPCTRL -lHTTPDFaust -lmicrohttpd"
+         HTTPDEFS="-DHTTPCTRL -lHTTPDFaust -lmicrohttpd"
+         HTTPLIBS=`pkg-config --cflags --libs libmicrohttpd`
     elif [ $p = "-midi" ]; then
         MIDIDEFS="-DMIDICTRL"
     elif [ ${p:0:1} = "-" ]; then
-	    OPTIONS="$OPTIONS $p"
-	elif [[ -f "$p" ]] && [ ${p: -4} == ".dsp" ]; then
-	    FILES="$FILES $p"
-	else
-	    OPTIONS="$OPTIONS $p"
-	fi
+        OPTIONS="$OPTIONS $p"
+    elif [[ -f "$p" ]] && [ ${p: -4} == ".dsp" ]; then
+        FILES="$FILES $p"
+    else
+        OPTIONS="$OPTIONS $p"
+    fi
 
 shift
 
@@ -111,7 +112,7 @@ EndOfCode
     fi
 
     # compile c++ to binary
-    $CXX $CXXFLAGS "$TMP/${f%.dsp}.cpp" $FAUSTTOOLSFLAGS $ARCHLIB $OSCDEFS $HTTPDEFS $MIDIDEFS $POLYDEFS -o "${f%.dsp}" || exit   
+    $CXX $CXXFLAGS "$TMP/${f%.dsp}.cpp" $FAUSTTOOLSFLAGS $ARCHLIB $OSCDEFS $HTTPDEFS $HTTPLIBS $MIDIDEFS $POLYDEFS -o "${f%.dsp}" || exit   
     if [[ $(uname) == Darwin ]]; then
         codesign --sign - --deep --force "${f%.dsp}"
     fi   

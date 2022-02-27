@@ -116,7 +116,7 @@ void llvm_dsp_factory_aux::startLLVMLibrary()
 {
     if (llvm_dsp_factory_aux::gInstance++ == 0) {
         // Install the LLVM error handler
-    #if defined(__APPLE__) && defined(LLVM_130)
+    #if defined(__APPLE__) && LLVM_VERSION_MAJOR == 13
         #warning Crash on OSX so deactivated in this case
     #else
         LLVMInstallFatalErrorHandler(llvm_dsp_factory_aux::LLVMFatalErrorHandler);
@@ -128,7 +128,7 @@ void llvm_dsp_factory_aux::stopLLVMLibrary()
 {
     if (--llvm_dsp_factory_aux::gInstance == 0) {
         // Remove the LLVM error handler
-    #if defined(__APPLE__) && (defined(LLVM_110) || defined(LLVM_120) || defined(LLVM_130))
+    #if defined(__APPLE__) && (LLVM_VERSION_MAJOR >= 11 && LLVM_VERSION_MAJOR <= 13)
         #warning Crash on OSX so deactivated in this case
     #else
         LLVMResetFatalErrorHandler();
@@ -140,10 +140,10 @@ llvm_dsp_factory_aux::llvm_dsp_factory_aux(const string& sha_key, const string& 
     : dsp_factory_imp("MachineDSP", sha_key, "")
 {
     startLLVMLibrary();
-
+    
     init("MachineDSP", "");
     fSHAKey = sha_key;
-    fTarget = (target == "") ? fTarget = (sys::getDefaultTargetTriple() + ":" + GET_CPU_NAME) : target;
+    fTarget = (target == "") ? getDSPMachineTarget() : target;
 
     // Restoring the cache
     fObjectCache = new FaustObjectCache(machine_code);
@@ -159,10 +159,10 @@ llvm_dsp_factory_aux::llvm_dsp_factory_aux(const string& sha_key, Module* module
     : dsp_factory_imp("BitcodeDSP", sha_key, "")
 {
     startLLVMLibrary();
-
+ 
     init("BitcodeDSP", "");
     fSHAKey = sha_key;
-    fTarget = (target == "") ? fTarget = (sys::getDefaultTargetTriple() + ":" + GET_CPU_NAME) : target;
+    fTarget = (target == "") ? getDSPMachineTarget() : target;
     setOptlevel(opt_level);
     
     fObjectCache = nullptr;
@@ -419,7 +419,8 @@ int llvm_dsp::getSampleRate()
 
 void llvm_dsp::buildUserInterface(UI* ui_interface)
 {
-    if (fDecoder->hasCompileOption("-double") && ui_interface->sizeOfFAUSTFLOAT() == 4) {
+    if ((fDecoder->hasCompileOption("-double") && ui_interface->sizeOfFAUSTFLOAT() == 4)
+        || (fDecoder->hasCompileOption("-single") && ui_interface->sizeOfFAUSTFLOAT() == 8)) {
         // Setup a DSP proxy
         fDecoder->setupDSPProxy(ui_interface, fDSP);
         fDecoder->buildUserInterface(ui_interface);

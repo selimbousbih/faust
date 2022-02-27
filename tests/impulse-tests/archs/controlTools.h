@@ -130,11 +130,18 @@ struct CheckControlUI : public GenericUI {
 
 struct malloc_memory_manager : public dsp_memory_manager {
     
+    virtual void begin(size_t count) {}
+    
+    virtual void info(size_t size, size_t reads, size_t writes)
+    {
+        // TODO: use 'size', 'reads' and 'writes' to prepare memory layout for allocation
+    }
+    
+    virtual void end() {}
+    
     virtual void* allocate(size_t size)
     {
-        void* res = malloc(size);
-        memset(res, 0, size);
-        return res;
+        return calloc(1, size);
     }
  
     virtual void destroy(void* ptr)
