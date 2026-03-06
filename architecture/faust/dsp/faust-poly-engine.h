@@ -38,19 +38,144 @@ architecture section is not modified.
 #include "faust/gui/MidiUI.h"
 #include "faust/dsp/poly-dsp.h"
 #include "faust/dsp/faust-engine.h"
+#include "faust/dsp/dsp-combiner.h"
+
+#include "faust/dsp/EffectsFactory.h"
+
+#if SOUNDFILE
+#include "faust/gui/SoundUI.h"
+#endif
 
 //**************************************************************
 // Mono or polyphonic audio DSP engine
 //**************************************************************
 
+/**
+ * @class dsp_summer
+ * @brief Runs two independent DSP chains in parallel and sums their outputs.
+ *
+ * Both chains must produce the same number of output channels.
+ * Inputs are routed only to dsp1 (dsp2 is a generator with 0 inputs).
+ */
+class dsp_summer : public dsp {
+
+    dsp* fDSP1;
+    dsp* fDSP2;
+    int  fBufferSize;
+    FAUSTFLOAT** fDSP1Outputs;
+    FAUSTFLOAT** fDSP2Outputs;
+
+public:
+
+    dsp_summer(dsp* dsp1, dsp* dsp2, int buffer_size = 4096)
+        : fDSP1(dsp1), fDSP2(dsp2), fBufferSize(buffer_size)
+    {
+        int nout = fDSP1->getNumOutputs();
+        fDSP1Outputs = new FAUSTFLOAT*[nout];
+        fDSP2Outputs = new FAUSTFLOAT*[nout];
+        for (int c = 0; c < nout; c++) {
+            fDSP1Outputs[c] = new FAUSTFLOAT[fBufferSize];
+            fDSP2Outputs[c] = new FAUSTFLOAT[fBufferSize];
+        }
+    }
+
+    virtual ~dsp_summer()
+    {
+        int nout = fDSP1->getNumOutputs();
+        for (int c = 0; c < nout; c++) {
+            delete[] fDSP1Outputs[c];
+            delete[] fDSP2Outputs[c];
+        }
+        delete[] fDSP1Outputs;
+        delete[] fDSP2Outputs;
+        delete fDSP1;
+        delete fDSP2;
+    }
+
+    virtual int getNumInputs()  { return fDSP1->getNumInputs(); }
+    virtual int getNumOutputs() { return fDSP1->getNumOutputs(); }
+    virtual int getSampleRate() { return fDSP1->getSampleRate(); }
+
+    virtual void init(int sample_rate)
+    {
+        fDSP1->init(sample_rate);
+        fDSP2->init(sample_rate);
+    }
+    virtual void instanceInit(int sample_rate)
+    {
+        fDSP1->instanceInit(sample_rate);
+        fDSP2->instanceInit(sample_rate);
+    }
+    virtual void instanceConstants(int sample_rate)
+    {
+        fDSP1->instanceConstants(sample_rate);
+        fDSP2->instanceConstants(sample_rate);
+    }
+    virtual void instanceResetUserInterface()
+    {
+        fDSP1->instanceResetUserInterface();
+        fDSP2->instanceResetUserInterface();
+    }
+    virtual void instanceClear()
+    {
+        fDSP1->instanceClear();
+        fDSP2->instanceClear();
+    }
+    virtual dsp* clone() { return nullptr; } // not needed here
+
+    virtual void metadata(Meta* m)
+    {
+        fDSP1->metadata(m);
+        fDSP2->metadata(m);
+    }
+
+    virtual void buildUserInterface(UI* ui_interface)
+    {
+        fDSP1->buildUserInterface(ui_interface);
+        fDSP2->buildUserInterface(ui_interface);
+    }
+
+    virtual void compute(int count, FAUSTFLOAT** inputs, FAUSTFLOAT** outputs)
+    {
+        // Re-allocate temp buffers if count exceeds current buffer size
+        if (count > fBufferSize) {
+            int nout = fDSP1->getNumOutputs();
+            for (int c = 0; c < nout; c++) {
+                delete[] fDSP1Outputs[c];
+                delete[] fDSP2Outputs[c];
+                fDSP1Outputs[c] = new FAUSTFLOAT[count];
+                fDSP2Outputs[c] = new FAUSTFLOAT[count];
+            }
+            fBufferSize = count;
+        }
+        fDSP1->compute(count, inputs, fDSP1Outputs);
+        fDSP2->compute(count, nullptr, fDSP2Outputs);
+        int nout = fDSP1->getNumOutputs();
+        for (int c = 0; c < nout; c++) {
+            for (int f = 0; f < count; f++) {
+                outputs[c][f] = fDSP1Outputs[c][f] + fDSP2Outputs[c][f];
+            }
+        }
+    }
+    virtual void compute(double /*date_usec*/, int count, FAUSTFLOAT** inputs, FAUSTFLOAT** outputs)
+    {
+        compute(count, inputs, outputs);
+    }
+};
+
 class FaustPolyEngine {
         
     protected:
 
-        mydsp_poly* fPolyDSP;     // the polyphonic Faust object
-        dsp* fFinalDSP;           // the "final" dsp object submitted to the audio driver
+        mydsp_poly* fPolyDSP;               // the polyphonic Faust object (main preset)
+        dsp* fFinalDSP;                     // the "final" dsp object submitted to the audio driver
     
-        APIUI fAPIUI;             // the UI description
+        APIUI fAPIUI;                       // UI descriptor for main preset
+
+        // Sequencer preset — 1-voice instrument + its own effects chain
+        mydsp_poly* fPolyDSPSequencer;      // sequencer preset poly object (1 voice)
+        APIUI fAPIUISequencer;             // UI descriptor for sequencer preset
+        bool fHasSequencerPreset;           // true when a sequencer preset is active
 
         std::string fJSONUI;
         std::string fJSONMeta;
@@ -60,52 +185,90 @@ class FaustPolyEngine {
         midi_handler fMidiHandler;
         MidiUI fMidiUI;
     
-        void init(dsp* mono_dsp, audio* driver, midi_handler* handler)
+        // Build the main preset chain up to (but not including) fFinalDSP submission.
+        // Returns the chain dsp* (poly + fx). Also sets fPolyDSP and updates JSON/MIDI/API.
+        // Does NOT call driver->init() — caller is responsible.
+        dsp* buildMainPresetChain(std::vector<int> dsps, int polyCount)
         {
             bool midi_sync = false;
             bool midi = false;
             int nvoices = 0;
-            fRunning = false;
-            
+
+            dsp *mono_dsp = EffectsFactory::create(dsps[0]);
+            for (int i = 1; i < polyCount; i++) {
+                mono_dsp = new dsp_sequencer(mono_dsp, EffectsFactory::create(dsps[i]));
+            }
+
             MidiMeta::analyse(mono_dsp, midi, midi_sync, nvoices);
-            
+
             // Getting the UI JSON
             JSONUI jsonui1(mono_dsp->getNumInputs(), mono_dsp->getNumOutputs());
             mono_dsp->buildUserInterface(&jsonui1);
             fJSONUI = jsonui1.JSON();
-            
+
             // Getting the metadata JSON
             JSONUI jsonui1M(mono_dsp->getNumInputs(), mono_dsp->getNumOutputs());
             mono_dsp->metadata(&jsonui1M);
             fJSONMeta = jsonui1M.JSON();
-            
-            if (nvoices > 0) {
-                
-                fPolyDSP = new mydsp_poly(mono_dsp, nvoices, true);
-                
-            #if POLY2
-                fFinalDSP = new dsp_sequencer(fPolyDSP, new effect());
-            #else
-                fFinalDSP = fPolyDSP;
-            #endif
-                
-                // Update JSONs with Poly version
-                JSONUI jsonui2(mono_dsp->getNumInputs(), mono_dsp->getNumOutputs());
-                fFinalDSP->buildUserInterface(&jsonui2);
-                fJSONUI = jsonui2.JSON();
-                
-                JSONUI jsonui2M(mono_dsp->getNumInputs(), mono_dsp->getNumOutputs());
-                fFinalDSP->metadata(&jsonui2M);
-                fJSONMeta = jsonui2M.JSON();
-                
-            } else {
-                fPolyDSP = nullptr;
-                fFinalDSP = mono_dsp;
+
+            fPolyDSP = new mydsp_poly(mono_dsp, nvoices, true);
+
+            dsp *fxChain = EffectsFactory::create(polyCount);
+            for (int i = polyCount; i < (int)dsps.size(); i++) {
+                fxChain = new dsp_sequencer(fxChain, EffectsFactory::create(dsps[i]));
             }
-            
+
+            return new dsp_sequencer(fPolyDSP, fxChain);
+        }
+
+        // Build the sequencer preset chain (always 1 voice). Returns the chain dsp*.
+        // Also sets fPolyDSPSequencer.
+        dsp* buildSequencerPresetChain(std::vector<int> dsps, int polyCount)
+        {
+            dsp *mono_dsp = EffectsFactory::create(dsps[0]);
+            for (int i = 1; i < polyCount; i++) {
+                mono_dsp = new dsp_sequencer(mono_dsp, EffectsFactory::create(dsps[i]));
+            }
+
+            // Fixed 8 voices for the sequencer preset
+            fPolyDSPSequencer = new mydsp_poly(mono_dsp, 8, true);
+
+            dsp *fxChain = EffectsFactory::create(polyCount);
+            for (int i = polyCount; i < (int)dsps.size(); i++) {
+                fxChain = new dsp_sequencer(fxChain, EffectsFactory::create(dsps[i]));
+            }
+
+            return new dsp_sequencer(fPolyDSPSequencer, fxChain);
+        }
+
+        void finaliseDSP(dsp* chain, audio* driver, midi_handler* handler)
+        {
+            dsp* outputChain = chain;
+            if (dsp* recorder = EffectsFactory::create(EffectsFactory::EFFECT_ID_RECORDER)) {
+                outputChain = new dsp_sequencer(outputChain, recorder);
+            }
+            if (dsp* stereoDepth = EffectsFactory::create(EffectsFactory::EFFECT_ID_STEREO_DEPTH)) {
+                outputChain = new dsp_sequencer(outputChain, stereoDepth);
+            }
+
+            fFinalDSP = outputChain;
+
+            // Update JSONs with the full graph
+            JSONUI jsonui2(0, fFinalDSP->getNumOutputs());
+            fFinalDSP->buildUserInterface(&jsonui2);
+            fJSONUI = jsonui2.JSON();
+
+            JSONUI jsonui2M(0, fFinalDSP->getNumOutputs());
+            fFinalDSP->metadata(&jsonui2M);
+            fJSONMeta = jsonui2M.JSON();
+
             fFinalDSP->buildUserInterface(&fMidiUI);
             fFinalDSP->buildUserInterface(&fAPIUI);
-            
+
+#if SOUNDFILE
+            buildUserInterface(new SoundUI(SoundUI::getBinaryPath()));
+#endif
+
             // Retrieving DSP object name
             struct MyMeta : public Meta
             {
@@ -114,29 +277,99 @@ class FaustPolyEngine {
                 {
                     if (strcmp(key, "name") == 0) fName = value;
                 }
-                MyMeta():fName("Dummy"){}
+                MyMeta() : fName("Dummy") {}
             };
-      
+
             MyMeta meta;
             fFinalDSP->metadata(&meta);
             if (handler) handler->setName(meta.fName);
-            
-            // If driver cannot be initialized, start will fail later on...
+
             if (!driver->init(meta.fName.c_str(), fFinalDSP)) {
                 delete fFinalDSP;
+                fFinalDSP  = nullptr;
+                fPolyDSP   = nullptr;
+                fPolyDSPSequencer = nullptr;
                 throw std::bad_alloc();
             } else {
                 fDriver = driver;
             }
         }
+
+        // Single-preset init (backward-compatible).
+        void init(std::vector<int> dsps, audio* driver, midi_handler* handler, int polyCount)
+        {
+            fRunning = false;
+            fHasSequencerPreset = false;
+            fPolyDSPSequencer   = nullptr;
+
+            dsp* chain = buildMainPresetChain(dsps, polyCount);
+            finaliseDSP(chain, driver, handler);
+        }
+    
     
     public:
-    
-        FaustPolyEngine(dsp* mono_dsp, audio* driver = nullptr, midi_handler* midi = nullptr):fMidiUI(&fMidiHandler)
+
+        /**
+         * Legacy constructor used by DspFaust::init(dsp*, audio*).
+         * Wraps the mono_dsp in a single-voice poly engine and initialises the
+         * driver immediately, preserving the original behaviour.
+         */
+        FaustPolyEngine(dsp* mono_dsp, audio* driver, midi_handler* midi = nullptr)
+            : fMidiUI(&fMidiHandler),
+              fPolyDSP(nullptr), fFinalDSP(nullptr),
+              fPolyDSPSequencer(nullptr), fHasSequencerPreset(false),
+              fRunning(false), fDriver(driver)
         {
             assert(mono_dsp);
-            init(mono_dsp, driver, midi);
+            bool midi_sync = false;
+            bool midi_flag = false;
+            int nvoices = 0;
+            MidiMeta::analyse(mono_dsp, midi_flag, midi_sync, nvoices);
+
+            JSONUI jsonui1(mono_dsp->getNumInputs(), mono_dsp->getNumOutputs());
+            mono_dsp->buildUserInterface(&jsonui1);
+            fJSONUI = jsonui1.JSON();
+
+            JSONUI jsonui1M(mono_dsp->getNumInputs(), mono_dsp->getNumOutputs());
+            mono_dsp->metadata(&jsonui1M);
+            fJSONMeta = jsonui1M.JSON();
+
+            fPolyDSP = new mydsp_poly(mono_dsp, nvoices, true);
+
+            fFinalDSP = fPolyDSP;
+
+            JSONUI jsonui2(mono_dsp->getNumInputs(), mono_dsp->getNumOutputs());
+            fFinalDSP->buildUserInterface(&jsonui2);
+            fJSONUI = jsonui2.JSON();
+
+            JSONUI jsonui2M(mono_dsp->getNumInputs(), mono_dsp->getNumOutputs());
+            fFinalDSP->metadata(&jsonui2M);
+            fJSONMeta = jsonui2M.JSON();
+
+            fFinalDSP->buildUserInterface(&fMidiUI);
+            fFinalDSP->buildUserInterface(&fAPIUI);
+
+            if (midi) {
+                midi->setName("Faust");
+            }
+
+            if (!driver->init("Faust", fFinalDSP)) {
+                fFinalDSP = nullptr;
+                fPolyDSP  = nullptr;
+                throw std::bad_alloc();
+            }
         }
+
+        /**
+         * Default constructor — use refresh() to load a preset after construction.
+         * Used when the engine is created before DSP content is known.
+         */
+        FaustPolyEngine(audio* driver = nullptr, midi_handler* midi = nullptr)
+            : fMidiUI(&fMidiHandler),
+              fPolyDSP(nullptr), fFinalDSP(nullptr),
+              fPolyDSPSequencer(nullptr), fHasSequencerPreset(false),
+              fRunning(false), fDriver(driver)
+        {}
     
         virtual ~FaustPolyEngine()
         {
@@ -562,7 +795,199 @@ class FaustPolyEngine {
             return fAPIUI.getScreenColor();
         }
 
+        // -----------------------------------------------------------------------
+        // Refresh helpers
+        // -----------------------------------------------------------------------
+
+        void resetEngine()
+        {
+            fDriver->stop();
+            fRunning = false;
+
+            delete fFinalDSP;   // deletes the whole graph (owns all sub-DSPs)
+            fFinalDSP         = nullptr;
+            fPolyDSP          = nullptr;
+            fPolyDSPSequencer = nullptr;
+
+            fMidiUI.~MidiUI();
+            new (&fMidiUI) MidiUI(&fMidiHandler);
+
+            fAPIUI.~APIUI();
+            new (&fAPIUI) APIUI();
+
+            fAPIUISequencer.~APIUI();
+            new (&fAPIUISequencer) APIUI();
+        }
+
+        /*
+         * refresh(dsps, polyCount)
+         * Hot-swap the DSP graph with a single preset (backward-compatible).
+         */
+        void refresh(std::vector<int> dsps, int polyCount)
+        {
+            resetEngine();
+            init(dsps, fDriver, &fMidiHandler, polyCount);
+        }
+
+        /*
+         * refresh(dsps, polyCount, seqDsps, seqPolyCount)
+         * Hot-swap the DSP graph with two presets running in parallel:
+         *   - Main preset : dsps[0..polyCount-1] instrument, rest = effects.
+         *   - Sequencer preset: seqDsps[0..seqPolyCount-1] instrument (8 voices), rest = effects.
+         * Both chains are summed into the audio output.
+         */
+        void refresh(std::vector<int> dsps,    int polyCount,
+                     std::vector<int> seqDsps, int seqPolyCount)
+        {
+            if (seqDsps.size() == 0) {
+                refresh(dsps, polyCount);
+                return;
+            }
+
+            resetEngine();
+            fRunning = false;
+            fHasSequencerPreset = true;
+
+            dsp* mainChain = buildMainPresetChain(dsps, polyCount);
+            dsp* seqChain  = buildSequencerPresetChain(seqDsps, seqPolyCount);
+
+            // Wire sequencer preset's APIUI before the chains are owned by dsp_summer
+            seqChain->buildUserInterface(&fAPIUISequencer);
+
+            dsp* combined = new dsp_summer(mainChain, seqChain);
+            finaliseDSP(combined, fDriver, &fMidiHandler);
+        }
+
+        // -----------------------------------------------------------------------
+        // Sequencer preset — voice management
+        // -----------------------------------------------------------------------
+
+        /*
+         * newVoiceSequencer()
+         * Allocate a new voice on the sequencer preset.
+         */
+        MapUI* newVoiceSequencer()
+        {
+            if (fHasSequencerPreset && fPolyDSPSequencer) {
+                return fPolyDSPSequencer->newVoice();
+            }
+            return nullptr;
+        }
+
+        /*
+         * deleteVoiceSequencer(voice)
+         * Delete a voice from the sequencer preset.
+         */
+        int deleteVoiceSequencer(MapUI* voice)
+        {
+            if (fHasSequencerPreset && fPolyDSPSequencer) {
+                fPolyDSPSequencer->deleteVoice(voice);
+                return 1;
+            }
+            return 0;
+        }
+
+        int deleteVoiceSequencer(uintptr_t voice)
+        {
+            return deleteVoiceSequencer(reinterpret_cast<MapUI*>(voice));
+        }
+
+        /*
+         * allNotesOffSequencer()
+         * Stop all voices on the sequencer preset.
+         */
+        void allNotesOffSequencer(bool hard = false)
+        {
+            if (fHasSequencerPreset && fPolyDSPSequencer) {
+                fPolyDSPSequencer->allNotesOff(hard);
+            }
+        }
+
+        // -----------------------------------------------------------------------
+        // Sequencer preset — per-voice parameter access
+        // -----------------------------------------------------------------------
+
+        /*
+         * setVoiceParamValueSequencer(address, voice, value)
+         * Sets the value of the parameter associated with address for
+         * the given sequencer voice.
+         */
+        void setVoiceParamValueSequencer(const char* address, uintptr_t voice, float value)
+        {
+            reinterpret_cast<MapUI*>(voice)->setParamValue(address, value);
+        }
+
+        /*
+         * getVoiceParamValueSequencer(address, voice)
+         * Gets the parameter value associated with address for the given sequencer voice.
+         */
+        float getVoiceParamValueSequencer(const char* address, uintptr_t voice)
+        {
+            return reinterpret_cast<MapUI*>(voice)->getParamValue(address);
+        }
+
+        // -----------------------------------------------------------------------
+        // Sequencer preset — parameter access (global / grouped)
+        // -----------------------------------------------------------------------
+
+        int getSequencerParamsCount()
+        {
+            return fAPIUISequencer.getParamsCount();
+        }
+
+        void setSequencerParamValue(const char* address, float value)
+        {
+            fAPIUISequencer.setParamValue(address, value);
+            GUI::updateAllGuis();
+        }
+
+        float getSequencerParamValue(const char* address)
+        {
+            return fAPIUISequencer.getParamValue(address);
+        }
+
+        void setSequencerParamValue(int id, float value)
+        {
+            fAPIUISequencer.setParamValue(id, value);
+            GUI::updateAllGuis();
+        }
+
+        float getSequencerParamValue(int id)
+        {
+            return fAPIUISequencer.getParamValue(id);
+        }
+
+        const char* getSequencerParamLabel(int id)
+        {
+            return fAPIUISequencer.getParamLabel(id);
+        }
+
+        const char* getSequencerParamAddress(int id)
+        {
+            return fAPIUISequencer.getParamAddress(id);
+        }
+
+        float getSequencerParamMin(const char* address)
+        {
+            int id = (address) ? fAPIUISequencer.getParamIndex(address) : -1;
+            return (id >= 0) ? fAPIUISequencer.getParamMin(id) : 0.f;
+        }
+
+        float getSequencerParamMax(const char* address)
+        {
+            int id = (address) ? fAPIUISequencer.getParamIndex(address) : -1;
+            return (id >= 0) ? fAPIUISequencer.getParamMax(id) : 0.f;
+        }
+
+        float getSequencerParamInit(const char* address)
+        {
+            int id = (address) ? fAPIUISequencer.getParamIndex(address) : -1;
+            return (id >= 0) ? fAPIUISequencer.getParamInit(id) : 0.f;
+        }
+
+        bool hasSequencerPreset() const { return fHasSequencerPreset; }
 };
+
 
 // Public C API
 
@@ -573,58 +998,89 @@ extern "C" {
     void destroy(void* dsp) { delete reinterpret_cast<FaustPolyEngine*>(dsp); }
 
     bool start(void* dsp) { return reinterpret_cast<FaustPolyEngine*>(dsp)->start(); }
-    void stop(void* dsp) { reinterpret_cast<FaustPolyEngine*>(dsp)->stop(); }
+    void stop(void* dsp)  { reinterpret_cast<FaustPolyEngine*>(dsp)->stop(); }
     
     bool isRunning(void* dsp) { return reinterpret_cast<FaustPolyEngine*>(dsp)->isRunning(); }
 
-    uintptr_t keyOn(void* dsp, int pitch, int velocity) { return (uintptr_t)reinterpret_cast<FaustPolyEngine*>(dsp)->keyOn(pitch, velocity); }
-    int keyOff(void* dsp, int pitch) { return reinterpret_cast<FaustPolyEngine*>(dsp)->keyOff(pitch); }
+    // --- Main preset ---
+    uintptr_t keyOn(void* dsp, int pitch, int velocity)
+        { return (uintptr_t)reinterpret_cast<FaustPolyEngine*>(dsp)->keyOn(pitch, velocity); }
+    int keyOff(void* dsp, int pitch)
+        { return reinterpret_cast<FaustPolyEngine*>(dsp)->keyOff(pitch); }
     
     void propagateMidi(void* dsp, int count, double time, int type, int channel, int data1, int data2)
     {
         reinterpret_cast<FaustPolyEngine*>(dsp)->propagateMidi(count, time, type, channel, data1, data2);
     }
 
-    const char* getJSONUI(void* dsp) { return reinterpret_cast<FaustPolyEngine*>(dsp)->getJSONUI(); }
+    const char* getJSONUI(void* dsp)   { return reinterpret_cast<FaustPolyEngine*>(dsp)->getJSONUI(); }
     const char* getJSONMeta(void* dsp) { return reinterpret_cast<FaustPolyEngine*>(dsp)->getJSONMeta(); }
 
     int getParamsCount(void* dsp) { return reinterpret_cast<FaustPolyEngine*>(dsp)->getParamsCount(); }
     
     void setParamValue(void* dsp, const char* address, float value)
-    {
-        reinterpret_cast<FaustPolyEngine*>(dsp)->setParamValue(address, value);
-    }
-    float getParamValue(void* dsp, const char* address) { return reinterpret_cast<FaustPolyEngine*>(dsp)->getParamValue(address); }
+        { reinterpret_cast<FaustPolyEngine*>(dsp)->setParamValue(address, value); }
+    float getParamValue(void* dsp, const char* address)
+        { return reinterpret_cast<FaustPolyEngine*>(dsp)->getParamValue(address); }
    
-    void setParamIdValue(void* dsp, int id, float value) { reinterpret_cast<FaustPolyEngine*>(dsp)->setParamValue(id, value); }
-    float getParamIdValue(void* dsp, int id) { return reinterpret_cast<FaustPolyEngine*>(dsp)->getParamValue(id); }
+    void setParamIdValue(void* dsp, int id, float value)
+        { reinterpret_cast<FaustPolyEngine*>(dsp)->setParamValue(id, value); }
+    float getParamIdValue(void* dsp, int id)
+        { return reinterpret_cast<FaustPolyEngine*>(dsp)->getParamValue(id); }
     
     void setVoiceParamValue(void* dsp, const char* address, uintptr_t voice, float value)
-    {
-        reinterpret_cast<FaustPolyEngine*>(dsp)->setVoiceParamValue(address, voice, value);
-    }
+        { reinterpret_cast<FaustPolyEngine*>(dsp)->setVoiceParamValue(address, voice, value); }
     float getVoiceParamValue(void* dsp, const char* address, uintptr_t voice)
-    {
-        return reinterpret_cast<FaustPolyEngine*>(dsp)->getVoiceParamValue(address, voice);
-    }
+        { return reinterpret_cast<FaustPolyEngine*>(dsp)->getVoiceParamValue(address, voice); }
     
-    const char* getParamLabel(void* dsp, int id) { return reinterpret_cast<FaustPolyEngine*>(dsp)->getParamLabel(id); }
+    const char* getParamLabel(void* dsp, int id)     { return reinterpret_cast<FaustPolyEngine*>(dsp)->getParamLabel(id); }
     const char* getParamShortname(void* dsp, int id) { return reinterpret_cast<FaustPolyEngine*>(dsp)->getParamShortname(id); }
-    const char* getParamAddress(void* dsp, int id) { return reinterpret_cast<FaustPolyEngine*>(dsp)->getParamAddress(id); }
+    const char* getParamAddress(void* dsp, int id)   { return reinterpret_cast<FaustPolyEngine*>(dsp)->getParamAddress(id); }
 
     void propagateAcc(void* dsp, int acc, float v) { reinterpret_cast<FaustPolyEngine*>(dsp)->propagateAcc(acc, v); }
     void setAccConverter(void* dsp, int p, int acc, int curve, float amin, float amid, float amax)
-    {
-        reinterpret_cast<FaustPolyEngine*>(dsp)->setAccConverter(p, acc, curve, amin, amid, amax);
-    }
+        { reinterpret_cast<FaustPolyEngine*>(dsp)->setAccConverter(p, acc, curve, amin, amid, amax); }
     void propagateGyr(void* dsp, int acc, float v) { reinterpret_cast<FaustPolyEngine*>(dsp)->propagateGyr(acc, v); }
     void setGyrConverter(void* dsp, int p, int gyr, int curve, float amin, float amid, float amax)
-    {
-        reinterpret_cast<FaustPolyEngine*>(dsp)->setGyrConverter(p, gyr, curve, amin, amid, amax);
-    }
+        { reinterpret_cast<FaustPolyEngine*>(dsp)->setGyrConverter(p, gyr, curve, amin, amid, amax); }
 
-    float getCPULoad(void* dsp) { return reinterpret_cast<FaustPolyEngine*>(dsp)->getCPULoad(); }
-    int getScreenColor(void* dsp) { return reinterpret_cast<FaustPolyEngine*>(dsp)->getScreenColor(); }
+    float getCPULoad(void* dsp)    { return reinterpret_cast<FaustPolyEngine*>(dsp)->getCPULoad(); }
+    int   getScreenColor(void* dsp) { return reinterpret_cast<FaustPolyEngine*>(dsp)->getScreenColor(); }
+
+    // --- Sequencer preset ---
+
+    bool hasSequencerPreset(void* dsp)
+        { return reinterpret_cast<FaustPolyEngine*>(dsp)->hasSequencerPreset(); }
+
+    uintptr_t newVoiceSequencer(void* dsp)
+        { return (uintptr_t)reinterpret_cast<FaustPolyEngine*>(dsp)->newVoiceSequencer(); }
+    int deleteVoiceSequencer(void* dsp, uintptr_t voice)
+        { return reinterpret_cast<FaustPolyEngine*>(dsp)->deleteVoiceSequencer(voice); }
+    void allNotesOffSequencer(void* dsp, bool hard)
+        { reinterpret_cast<FaustPolyEngine*>(dsp)->allNotesOffSequencer(hard); }
+
+    void setVoiceParamValueSequencer(void* dsp, const char* address, uintptr_t voice, float value)
+        { reinterpret_cast<FaustPolyEngine*>(dsp)->setVoiceParamValueSequencer(address, voice, value); }
+    float getVoiceParamValueSequencer(void* dsp, const char* address, uintptr_t voice)
+        { return reinterpret_cast<FaustPolyEngine*>(dsp)->getVoiceParamValueSequencer(address, voice); }
+
+    int getSequencerParamsCount(void* dsp)
+        { return reinterpret_cast<FaustPolyEngine*>(dsp)->getSequencerParamsCount(); }
+
+    void setSequencerParamValue(void* dsp, const char* address, float value)
+        { reinterpret_cast<FaustPolyEngine*>(dsp)->setSequencerParamValue(address, value); }
+    float getSequencerParamValue(void* dsp, const char* address)
+        { return reinterpret_cast<FaustPolyEngine*>(dsp)->getSequencerParamValue(address); }
+
+    void setSequencerParamIdValue(void* dsp, int id, float value)
+        { reinterpret_cast<FaustPolyEngine*>(dsp)->setSequencerParamValue(id, value); }
+    float getSequencerParamIdValue(void* dsp, int id)
+        { return reinterpret_cast<FaustPolyEngine*>(dsp)->getSequencerParamValue(id); }
+
+    const char* getSequencerParamLabel(void* dsp, int id)
+        { return reinterpret_cast<FaustPolyEngine*>(dsp)->getSequencerParamLabel(id); }
+    const char* getSequencerParamAddress(void* dsp, int id)
+        { return reinterpret_cast<FaustPolyEngine*>(dsp)->getSequencerParamAddress(id); }
     
 #ifdef __cplusplus
 }
