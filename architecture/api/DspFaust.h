@@ -29,6 +29,8 @@
 #define __faust_api__
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 //===============API Reference==============
 //==========================================
@@ -42,6 +44,8 @@ class audio;
 class dsp;
 class UI;
 class dsp_factory;
+class llvm_dsp_factory;
+class midi_handler;
 
 class DspFaust
 {
@@ -179,6 +183,11 @@ class DspFaust
         //--------------------------------------------------------
         uintptr_t newVoice();
 
+        //-------------------`uintptr_t newVoiceSequencer()`--------------------
+        // Instantiate a new voice in the sequencer preset.
+        //--------------------------------------------------------
+        uintptr_t newVoiceSequencer();
+
         //---------`int deleteVoice(uintptr_t voice)`------------------
         // De-instantiate a polyphonic voice. This method can
         // only be used if `-nvoices` flag has been
@@ -192,6 +201,11 @@ class DspFaust
         // * `voice`: the address of the voice given by `newVoice` or `keyOn`
         //--------------------------------------------------------
         int deleteVoice(uintptr_t voice);
+
+        //---------`int deleteVoiceSequencer(uintptr_t voice)`------------------
+        // De-instantiate a voice in the sequencer preset.
+        //--------------------------------------------------------
+        int deleteVoiceSequencer(uintptr_t voice);
     
         //-----------------`void allNotesOff(bool hard = false)`----------------
         // Terminates all the active voices, gently (with release when hard = false or immediately when hard = true).
@@ -293,6 +307,26 @@ class DspFaust
         // * `value`: value of the parameter
         //--------------------------------------------------------
         void setVoiceParamValue(const char* address, uintptr_t voice, float value);
+
+        //----`void setSequencerParamValue(const char* address, float value)`------
+        // Set a global sequencer-preset parameter by address.
+        //--------------------------------------------------------
+        void setSequencerParamValue(const char* address, float value);
+
+        //----`void setVoiceParamValueSequencer(const char* address, uintptr_t voice, float value)`-----
+        // Set a sequencer-preset voice parameter by address.
+        //--------------------------------------------------------
+        void setVoiceParamValueSequencer(const char* address, uintptr_t voice, float value);
+
+        //----`float getSequencerParamValue(const char* address)`----------
+        // Returns a global sequencer-preset parameter value by address.
+        //--------------------------------------------------------
+        float getSequencerParamValue(const char* address);
+
+        //----`float getVoiceParamValueSequencer(const char* address, uintptr_t voice)`----
+        // Returns a sequencer-preset voice parameter value by address.
+        //--------------------------------------------------------
+        float getVoiceParamValueSequencer(const char* address, uintptr_t voice);
 
         //----`void setVoiceParamValue(int id, uintptr_t voice, float value)`-----
         // Set the value of one of the parameters of the Faust
@@ -508,6 +542,11 @@ class DspFaust
         // otherwise return 0x00RRGGBB a ready to use color
         //-----------------------------------------
         int getScreenColor();
+
+        //----`void refresh(std::vector<int> mainDsps, int polyCount, std::vector<int> sequencerDsps, int sequencerPolyCount)`---------------
+        // Hot-swap the current DSP graph using main and optional sequencer presets.
+        //-----------------------------------------
+        void refresh(std::vector<int> mainDsps, int polyCount, std::vector<int> sequencerDsps, int sequencerPolyCount);
 };
 
 #endif

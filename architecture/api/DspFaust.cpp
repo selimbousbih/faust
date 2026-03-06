@@ -446,9 +446,19 @@ uintptr_t DspFaust::newVoice()
     return (uintptr_t)fPolyEngine->newVoice();
 }
 
+uintptr_t DspFaust::newVoiceSequencer()
+{
+    return (uintptr_t)fPolyEngine->newVoiceSequencer();
+}
+
 int DspFaust::deleteVoice(uintptr_t voice)
 {
     return fPolyEngine->deleteVoice(voice);
+}
+
+int DspFaust::deleteVoiceSequencer(uintptr_t voice)
+{
+    return fPolyEngine->deleteVoiceSequencer(voice);
 }
 
 void DspFaust::allNotesOff(bool hard)
@@ -504,6 +514,26 @@ float DspFaust::getParamValue(int id)
 void DspFaust::setVoiceParamValue(const char* address, uintptr_t voice, float value)
 {
     fPolyEngine->setVoiceParamValue(address, voice, value);
+}
+
+void DspFaust::setSequencerParamValue(const char* address, float value)
+{
+    fPolyEngine->setSequencerParamValue(address, value);
+}
+
+void DspFaust::setVoiceParamValueSequencer(const char* address, uintptr_t voice, float value)
+{
+    fPolyEngine->setVoiceParamValueSequencer(address, voice, value);
+}
+
+float DspFaust::getSequencerParamValue(const char* address)
+{
+    return fPolyEngine->getSequencerParamValue(address);
+}
+
+float DspFaust::getVoiceParamValueSequencer(const char* address, uintptr_t voice)
+{
+    return fPolyEngine->getVoiceParamValueSequencer(address, voice);
 }
 
 void DspFaust::setVoiceParamValue(int id, uintptr_t voice, float value)
@@ -599,6 +629,11 @@ float DspFaust::getCPULoad()
 int DspFaust::getScreenColor()
 {
     return fPolyEngine->getScreenColor();
+}
+
+void DspFaust::refresh(std::vector<int> mainDsps, int polyCount, std::vector<int> sequencerDsps, int sequencerPolyCount)
+{
+    fPolyEngine->refresh(mainDsps, polyCount, sequencerDsps, sequencerPolyCount);
 }
 
 #ifdef BUILD
