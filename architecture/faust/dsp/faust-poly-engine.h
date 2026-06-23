@@ -537,6 +537,23 @@ class FaustPolyEngine {
             fFinalDSP->compute(count, inputs, outputs);
         }
 
+        void setSampleRate(int sample_rate)
+        {
+            if (fFinalDSP && fFinalDSP->getSampleRate() != sample_rate) {
+                fFinalDSP->init(sample_rate);
+            }
+        }
+
+        int getNumInputs()
+        {
+            return fFinalDSP ? fFinalDSP->getNumInputs() : 0;
+        }
+
+        int getNumOutputs()
+        {
+            return fFinalDSP ? fFinalDSP->getNumOutputs() : 0;
+        }
+
         /*
          * getParamsCount()
          * Returns the number of control parameters of the Faust object.

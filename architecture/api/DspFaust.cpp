@@ -29,6 +29,7 @@
 #include <cstring>
 #include <string.h>
 #include <stdio.h>
+#include <mutex>
 
 #include "faust/misc.h"
 #include "faust/gui/DecoratorUI.h"
@@ -163,6 +164,13 @@ using namespace std;
 std::list<GUI*> GUI::fGuiList;
 ztimedmap GUI::gTimedZoneMap;
 
+static std::mutex gDspFaustLifecycleMutex;
+
+static bool isValidVoiceHandle(uintptr_t voice)
+{
+    return voice != 0 && voice != static_cast<uintptr_t>(-1);
+}
+
 static bool hasCompileOption(const string& options, const char* option)
 {
     const char* sep = " ";
@@ -172,6 +180,56 @@ static bool hasCompileOption(const string& options, const char* option)
     }
     return false;
 }
+
+// Headless driver used when DspFaust is created with auto_connect = false.
+// It owns no audio hardware: the host (e.g. MuseAudioEngine) drives audio and
+// calls DspFaust::render() directly, so the engine can share a single output
+// stream with other synths.
+class offlineaudio : public audio {
+    private:
+        ::dsp* fDSP;
+        int fSampleRate;
+        int fBufferSize;
+
+    public:
+        offlineaudio(int sample_rate, int buffer_size)
+            : fDSP(nullptr),
+              fSampleRate(sample_rate > 0 ? sample_rate : 44100),
+              fBufferSize(buffer_size > 0 ? buffer_size : 512)
+        {}
+
+        bool init(const char* /*name*/, ::dsp* dsp) override
+        {
+            fDSP = dsp;
+            if (fDSP) {
+                fDSP->init(fSampleRate);
+            }
+            return true;
+        }
+
+        bool start() override { return true; }
+
+        void stop() override {}
+
+        int getBufferSize() override { return fBufferSize; }
+
+        int getSampleRate() override { return fSampleRate; }
+
+        int getNumInputs() override { return fDSP ? fDSP->getNumInputs() : 0; }
+
+        int getNumOutputs() override { return fDSP ? fDSP->getNumOutputs() : 0; }
+
+        float getCPULoad() override { return 0.f; }
+
+        void setSampleRate(int sample_rate)
+        {
+            if (sample_rate <= 0 || sample_rate == fSampleRate) return;
+            fSampleRate = sample_rate;
+            if (fDSP) {
+                fDSP->init(fSampleRate);
+            }
+        }
+};
 
 DspFaust::DspFaust(bool auto_connect)
 {
@@ -186,17 +244,22 @@ DspFaust::DspFaust(bool auto_connect)
     // JUCE audio device has its own sample rate and buffer size
     fDriver = new juceaudio();
 #elif ANDROID_DRIVER
-    fDriver = new oboeaudio(-1);
+    fDriver = auto_connect ? static_cast<audio*>(new oboeaudio(-1))
+                           : static_cast<audio*>(new offlineaudio(44100, 512));
 #else
-    printf("You are not setting 'sample_rate' and 'buffer_size', but the audio driver needs it !\n");
-    throw std::bad_alloc();
+    if (auto_connect) {
+        printf("You are not setting 'sample_rate' and 'buffer_size', but the audio driver needs it !\n");
+        throw std::bad_alloc();
+    }
+    fDriver = new offlineaudio(44100, 512);
 #endif
     init(new mydsp(), fDriver);
 }
 
 DspFaust::DspFaust(int sample_rate, int buffer_size, bool auto_connect)
 {
-    fDriver = createDriver(sample_rate, buffer_size, auto_connect);
+    fDriver = auto_connect ? createDriver(sample_rate, buffer_size, auto_connect)
+                           : static_cast<audio*>(new offlineaudio(sample_rate, buffer_size));
     init(new mydsp(), fDriver);
 }
 
@@ -348,6 +411,7 @@ void DspFaust::init(dsp* mono_dsp, audio* driver)
 
 DspFaust::~DspFaust()
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
 #if OSCCTRL
     delete fOSCInterface;
 #endif
@@ -372,6 +436,7 @@ DspFaust::~DspFaust()
 
 bool DspFaust::start()
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
 #if OSCCTRL
     fOSCInterface->run();
 #endif
@@ -385,6 +450,7 @@ bool DspFaust::start()
 
 void DspFaust::stop()
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
 #if OSCCTRL
     fOSCInterface->stop();
 #endif
@@ -428,212 +494,307 @@ bool DspFaust::isOSCOn()
 
 bool DspFaust::isRunning()
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->isRunning();
+}
+
+void DspFaust::setSampleRate(int sample_rate)
+{
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
+    if (offlineaudio* offline = dynamic_cast<offlineaudio*>(fDriver)) {
+        offline->setSampleRate(sample_rate);
+    }
+    if (fPolyEngine) {
+        fPolyEngine->setSampleRate(sample_rate);
+    }
+}
+
+int DspFaust::getNumInputs()
+{
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
+    return fPolyEngine ? fPolyEngine->getNumInputs() : 0;
+}
+
+int DspFaust::getNumOutputs()
+{
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
+    return fPolyEngine ? fPolyEngine->getNumOutputs() : 0;
+}
+
+void DspFaust::render(int count, float** inputs, float** outputs)
+{
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
+    if (fPolyEngine && outputs && count > 0) {
+        fPolyEngine->compute(count, inputs, outputs);
+        if (fDriver) {
+            fDriver->runControlCallbacks();
+        }
+    }
 }
 
 uintptr_t DspFaust::keyOn(int pitch, int velocity)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return (uintptr_t)fPolyEngine->keyOn(pitch, velocity);
 }
 
 int DspFaust::keyOff(int pitch)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->keyOff(pitch);
 }
 
 uintptr_t DspFaust::newVoice()
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return (uintptr_t)fPolyEngine->newVoice();
 }
 
 uintptr_t DspFaust::newVoiceSequencer()
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return (uintptr_t)fPolyEngine->newVoiceSequencer();
 }
 
 int DspFaust::deleteVoice(uintptr_t voice)
 {
+    if (!isValidVoiceHandle(voice)) return 0;
+
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->deleteVoice(voice);
 }
 
 int DspFaust::deleteVoiceSequencer(uintptr_t voice)
 {
+    if (!isValidVoiceHandle(voice)) return 0;
+
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->deleteVoiceSequencer(voice);
 }
 
 void DspFaust::allNotesOff(bool hard)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     fPolyEngine->allNotesOff(hard);
 }
 
 void DspFaust::propagateMidi(int count, double time, int type, int channel, int data1, int data2)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     fPolyEngine->propagateMidi(count, time, type, channel, data1, data2);
 }
 
 const char* DspFaust::getJSONUI()
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->getJSONUI();
 }
 
 const char* DspFaust::getJSONMeta()
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->getJSONMeta();
 }
 
 void DspFaust::buildUserInterface(UI* ui_interface)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     fPolyEngine->buildUserInterface(ui_interface);
 }
 
 int DspFaust::getParamsCount()
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->getParamsCount();
 }
 
 void DspFaust::setParamValue(const char* address, float value)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     fPolyEngine->setParamValue(address, value);
 }
 
 void DspFaust::setParamValue(int id, float value)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     fPolyEngine->setParamValue(id, value);
 }
 
 float DspFaust::getParamValue(const char* address)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->getParamValue(address);
 }
 
 float DspFaust::getParamValue(int id)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->getParamValue(id);
 }
 
 void DspFaust::setVoiceParamValue(const char* address, uintptr_t voice, float value)
 {
+    if (!isValidVoiceHandle(voice)) return;
+
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     fPolyEngine->setVoiceParamValue(address, voice, value);
 }
 
 void DspFaust::setSequencerParamValue(const char* address, float value)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     fPolyEngine->setSequencerParamValue(address, value);
 }
 
 void DspFaust::setVoiceParamValueSequencer(const char* address, uintptr_t voice, float value)
 {
+    if (!isValidVoiceHandle(voice)) return;
+
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     fPolyEngine->setVoiceParamValueSequencer(address, voice, value);
 }
 
 float DspFaust::getSequencerParamValue(const char* address)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->getSequencerParamValue(address);
 }
 
 float DspFaust::getVoiceParamValueSequencer(const char* address, uintptr_t voice)
 {
+    if (!isValidVoiceHandle(voice)) return 0.f;
+
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->getVoiceParamValueSequencer(address, voice);
 }
 
 void DspFaust::setVoiceParamValue(int id, uintptr_t voice, float value)
 {
+    if (!isValidVoiceHandle(voice)) return;
+
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     fPolyEngine->setVoiceParamValue(id, voice, value);
 }
 
 float DspFaust::getVoiceParamValue(const char* address, uintptr_t voice)
 {
+    if (!isValidVoiceHandle(voice)) return 0.f;
+
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->getVoiceParamValue(address, voice);
 }
 
 float DspFaust::getVoiceParamValue(int id, uintptr_t voice)
 {
+    if (!isValidVoiceHandle(voice)) return 0.f;
+
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->getVoiceParamValue(id, voice);
 }
 
 const char* DspFaust::getParamAddress(int id)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->getParamAddress(id);
 }
 
 const char* DspFaust::getVoiceParamAddress(int id, uintptr_t voice)
 {
+    if (!isValidVoiceHandle(voice)) return "";
+
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->getVoiceParamAddress(id, voice);
 }
 
 float DspFaust::getParamMin(const char* address)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->getParamMin(address);
 }
 
 float DspFaust::getParamMin(int id)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->getParamMin(id);
 }
 
 float DspFaust::getParamMax(const char* address)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->getParamMax(address);
 }
 
 float DspFaust::getParamMax(int id)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->getParamMax(id);
 }
 
 float DspFaust::getParamInit(const char* address)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->getParamInit(address);
 }
 
 float DspFaust::getParamInit(int id)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->getParamInit(id);
 }
 
 const char* DspFaust::getMetadata(const char* address, const char* key)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->getMetadata(address, key);
 }
 
 const char* DspFaust::getMetadata(int id, const char* key)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->getMetadata(id, key);
 }
 
 void DspFaust::propagateAcc(int acc, float v)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     fPolyEngine->propagateAcc(acc, v);
 }
 
 void DspFaust::setAccConverter(int p, int acc, int curve, float amin, float amid, float amax)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     fPolyEngine->setAccConverter(p, acc, curve, amin, amid, amax);
 }
 
 void DspFaust::propagateGyr(int acc, float v)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     fPolyEngine->propagateGyr(acc, v);
 }
 
 void DspFaust::setGyrConverter(int p, int gyr, int curve, float amin, float amid, float amax)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     fPolyEngine->setGyrConverter(p, gyr, curve, amin, amid, amax);
 }
 
 float DspFaust::getCPULoad()
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->getCPULoad();
 }
 
 int DspFaust::getScreenColor()
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     return fPolyEngine->getScreenColor();
 }
 
 void DspFaust::refresh(std::vector<int> mainDsps, int polyCount, std::vector<int> sequencerDsps, int sequencerPolyCount)
 {
+    std::lock_guard<std::mutex> lock(gDspFaustLifecycleMutex);
     fPolyEngine->refresh(mainDsps, polyCount, sequencerDsps, sequencerPolyCount);
+    //fPolyEngine->refresh(mainDsps, polyCount);
 }
 
 #ifdef BUILD
